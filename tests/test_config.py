@@ -22,6 +22,9 @@ class ConfigDefaultsTest(unittest.TestCase):
         self.assertEqual(config.TICKER_BATCH_INTERVAL_MS, 500)
         self.assertEqual(config.MARKET_SCAN_INTERVAL_SEC, 3)
 
+    def test_bybit_proxy_default_empty(self) -> None:
+        self.assertEqual(config.BYBIT_PROXY, "")
+
     def test_bybit_topics(self) -> None:
         symbol = "BEAMUSDT"
         self.assertEqual(config.WS_TOPIC_TRADE.format(symbol=symbol), "publicTrade.BEAMUSDT")

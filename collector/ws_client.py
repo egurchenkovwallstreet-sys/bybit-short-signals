@@ -79,13 +79,14 @@ class BybitWsClient:
                 "Не установлен пакет websockets. Выполните: pip install -r requirements.txt"
             ) from exc
         # Свой ping Bybit (op=ping). Протокольный ping библиотеки выключен.
+        ws_proxy = config.BYBIT_PROXY or None
         return websockets.connect(
             self.url,
             ping_interval=None,
             open_timeout=20,
             max_queue=config.REDIS_CHANNEL_BUFFER,
-            # Адрес биржи задан явно, системный прокси не подхватываем.
-            proxy=None,
+            # Системный HTTP_PROXY не используем — только BYBIT_PROXY из .env.
+            proxy=ws_proxy,
         )
 
     async def _session(self, ws: Any) -> None:

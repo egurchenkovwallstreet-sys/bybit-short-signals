@@ -74,6 +74,11 @@ BYBIT_WS_PUBLIC_LINEAR = _env(
 BYBIT_API_KEY = _env("BYBIT_API_KEY", "")
 BYBIT_API_SECRET = _env("BYBIT_API_SECRET", "")
 
+# Прокси для REST и WebSocket Bybit (HTTP, HTTPS или SOCKS5).
+# Пусто — прямое подключение. Нужен, если CDN Bybit блокирует IP сервера (403 country).
+# Пример: http://user:pass@host:port или socks5://host:1080
+BYBIT_PROXY = _env("BYBIT_PROXY", "")
+
 # Рынок: бессрочные контракты с котировкой USDT.
 BYBIT_CATEGORY = "linear"
 BYBIT_QUOTE = "USDT"

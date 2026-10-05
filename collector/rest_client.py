@@ -69,6 +69,11 @@ class BybitRest:
         if config.BYBIT_API_KEY and config.BYBIT_API_SECRET:
             options["apiKey"] = config.BYBIT_API_KEY
             options["secret"] = config.BYBIT_API_SECRET
+        if config.BYBIT_PROXY:
+            options["proxies"] = {
+                "http": config.BYBIT_PROXY,
+                "https": config.BYBIT_PROXY,
+            }
         self._exchange = ccxt_async.bybit(options)
         # Шаблон ccxt — https://api.{hostname}, hostname по умолчанию bybit.com.
         # Подмена hostname на api.bybit.com дала бы хост api.api.bybit.com.
