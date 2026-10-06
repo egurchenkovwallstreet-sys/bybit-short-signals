@@ -77,18 +77,14 @@ def _match_from_window(
 ) -> PumpMatch | None:
     if len(window) < 3:
         return None
+    # Глобальный минимум и максимум в окне (пик мог быть до текущего отката).
     valley_bar = min(window, key=lambda b: b.low)
+    peak_bar = max(window, key=lambda b: b.high)
     valley_price = float(valley_bar.low)
-    if valley_price <= 0:
-        return None
-    after = [b for b in window if b.timestamp >= valley_bar.timestamp]
-    if not after:
-        return None
-    peak_bar = max(after, key=lambda b: b.high)
     peak_price = float(peak_bar.high)
-    if peak_price <= 0:
+    if valley_price <= 0 or peak_price <= 0:
         return None
-    duration = int(peak_bar.timestamp) - int(valley_bar.timestamp)
+    duration = abs(int(peak_bar.timestamp) - int(valley_bar.timestamp))
     if duration < min_duration_ms or duration > max_duration_ms:
         return None
     mult = peak_price / valley_price
@@ -169,10 +165,10 @@ def detect_best_pump(state: SymbolState, now_ms: int) -> PumpMatch | None:
 
 
 def format_period_ru(valley_ts: int, peak_ts: int) -> str:
-    """Человекочитаемая длительность от дна до пика."""
-    if peak_ts < valley_ts:
+    """Человекочитаемая длительность между дном и пиком в окне."""
+    if valley_ts == peak_ts:
         return "—"
-    hours = max(1, int(round((peak_ts - valley_ts) / _MS_HOUR)))
+    hours = max(1, int(round(abs(peak_ts - valley_ts) / _MS_HOUR)))
     if hours < 48:
         return f"{hours} ч"
     days = max(1, int(round(hours / 24)))

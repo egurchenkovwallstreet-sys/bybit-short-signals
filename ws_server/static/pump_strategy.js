@@ -46,7 +46,7 @@ function renderPumpStrategyBoard() {
   const rows = pumpStrategyState.signals;
   if (!rows.length) {
     root.innerHTML =
-      '<p class="quiet pump-strategy-empty">Пока нет монет. Быстрый памп: ≥40% за 1–12 ч. Длинный: ×2 от дна за 10 д. Оборот ≥300 тыс USDT за сутки.</p>';
+      '<p class="quiet pump-strategy-empty">Пока нет монет в списке. Условия: быстрый ≥40% за 1–12 ч; длинный ×2 за 10 д; оборот ≥300 тыс $. Если рынок активный, а список пуст — подождите 2–5 мин: движку нужны свечи с биржи по каждой паре.</p>';
     return;
   }
   const shortRows = rows.filter((r) => r.kind === "short");

@@ -37,6 +37,27 @@ class PumpStrategyTests(unittest.TestCase):
         self.assertGreaterEqual(match.peak_price / match.valley_price, config.PUMP_STRATEGY_LONG_MIN_MULTIPLIER)
         self.assertEqual(match.kind, "long")
 
+    def test_long_pump_peak_before_pullback(self) -> None:
+        """Пик был раньше, сейчас откат — всё равно считаем min/max в окне."""
+        state = SymbolState("PULLUSDT")
+        state.turnover_24h_usdt = config.PUMP_STRATEGY_MIN_TURNOVER_24H_USDT + 1
+        state.last_price = 8.0
+        now = 2_100_000_000_000
+        bars = []
+        for i in range(10):
+            ts = now - (10 - i) * 86_400_000
+            if i < 5:
+                low, high = 10.0, 22.0
+            else:
+                low, high = 8.0, 9.0
+            bars.append(_bar(ts, low, high))
+        state.bars_htf["D"] = bars
+        match = detect_long_pump(state, now)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertGreaterEqual(match.peak_price, 20.0)
+        self.assertLessEqual(match.valley_price, 10.0)
+
     def test_turnover_blocks(self) -> None:
         state = SymbolState("LOWUSDT")
         state.turnover_24h_usdt = 100_000
