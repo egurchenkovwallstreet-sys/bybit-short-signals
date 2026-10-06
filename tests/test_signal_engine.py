@@ -30,7 +30,13 @@ from signal_engine.levels import (
 )
 from signal_engine.liquidations import is_short_liquidation, liquidations_faded, window_notionals
 from signal_engine.outcomes import classify_outcome, short_pnl_pct
-from signal_engine.pump import detect_pump, period_volume_ratio, price_change_pct, volume_spike_ok
+from signal_engine.pump import (
+    detect_pump,
+    period_volume_ratio,
+    price_change_pct,
+    qualified_volume_spikes,
+    volume_spike_ok,
+)
 from signal_engine.rating import column_for, expert_probability, probability_pct, signal_rating, sort_by_rating
 from signal_engine.state import SymbolState
 from signal_engine.store import SignalStore
@@ -133,7 +139,7 @@ class PumpTest(unittest.TestCase):
         volumes = self._spike_volumes_1m(len(closes))
         reading = detect_pump(closes, volumes)
         self.assertGreaterEqual(reading.price_change_1h or 0, 30)
-        self.assertTrue(volume_spike_ok(reading.volume_spikes))
+        self.assertTrue(volume_spike_ok(reading.volume_spikes, change_1h=reading.price_change_1h))
         self.assertTrue(reading.matched)
 
     def test_daily_pump_from_htf(self) -> None:
@@ -167,6 +173,13 @@ class PumpTest(unittest.TestCase):
     def test_period_volume_ratio(self) -> None:
         vols = [1.0] * 5 + [5.0] * 5
         self.assertAlmostEqual(period_volume_ratio(vols, 5) or 0, 5.0)
+
+    def test_1h_volume_needs_price_and_x8(self) -> None:
+        spikes = {"60m": 7.0, "5m": 4.0}
+        self.assertFalse(qualified_volume_spikes(spikes, change_1h=35.0))
+        spikes["60m"] = 8.0
+        self.assertTrue(qualified_volume_spikes(spikes, change_1h=35.0))
+        self.assertFalse(qualified_volume_spikes(spikes, change_1h=20.0))
 
     def test_price_change_windows(self) -> None:
         closes = [100.0] * 16

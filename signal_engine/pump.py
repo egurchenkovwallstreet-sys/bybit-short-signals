@@ -72,8 +72,42 @@ def volume_spike_map(
     return spikes
 
 
-def volume_spike_ok(spikes: dict[str, float], min_ratio: float | None = None) -> bool:
-    floor = config.PUMP_VOLUME_SPIKE_MIN if min_ratio is None else min_ratio
+def volume_spike_floor(label: str) -> float:
+    floors = {
+        "5m": config.PUMP_VOLUME_SPIKE_MIN_5M,
+        "30m": config.PUMP_VOLUME_SPIKE_MIN_30M,
+        "60m": config.PUMP_VOLUME_SPIKE_MIN_1H,
+        "4h": config.PUMP_VOLUME_SPIKE_MIN_4H,
+        "1D": config.PUMP_VOLUME_SPIKE_MIN_1D,
+    }
+    return float(floors.get(label, config.PUMP_VOLUME_SPIKE_MIN))
+
+
+def qualified_volume_spikes(
+    spikes: dict[str, float],
+    *,
+    change_1h: float | None,
+) -> dict[str, float]:
+    """Окно засчитывается, если ratio ≥ порога TF; для 60m ещё нужен рост цены ≥ порога 1h."""
+    qualified: dict[str, float] = {}
+    for label, ratio in spikes.items():
+        if ratio < volume_spike_floor(label):
+            continue
+        if label == "60m":
+            if change_1h is None or change_1h < config.PUMP_PRICE_CHANGE_1H:
+                continue
+        qualified[label] = ratio
+    return qualified
+
+
+def volume_spike_ok(
+    spikes: dict[str, float],
+    *,
+    change_1h: float | None = None,
+) -> bool:
+    if change_1h is not None:
+        return bool(qualified_volume_spikes(spikes, change_1h=change_1h))
+    floor = config.PUMP_VOLUME_SPIKE_MIN
     return any(value >= floor for value in spikes.values())
 
 
@@ -105,7 +139,8 @@ def detect_pump(
             change_24h = daily_change
 
     spikes = volume_spike_map(volumes, volumes_4h, volumes_1d)
-    max_spike = max(spikes.values()) if spikes else None
+    qualified = qualified_volume_spikes(spikes, change_1h=change_1h)
+    max_spike = max(qualified.values()) if qualified else None
     ratio = max_spike if max_spike is not None else volume_ratio(volumes, config.PUMP_VOLUME_MA_PERIOD)
     rsi_value = rsi(closes, config.PUMP_RSI_PERIOD)
 
@@ -113,7 +148,7 @@ def detect_pump(
         (change_1h is not None and change_1h >= config.PUMP_PRICE_CHANGE_1H)
         or (change_24h is not None and change_24h >= config.PUMP_PRICE_CHANGE_24H)
     )
-    spike_ok = volume_spike_ok(spikes)
+    spike_ok = bool(qualified)
     matched = bool(strong and spike_ok)
 
     return PumpReading(
@@ -124,5 +159,5 @@ def detect_pump(
         ratio,
         rsi_value,
         matched,
-        spikes,
+        qualified,
     )

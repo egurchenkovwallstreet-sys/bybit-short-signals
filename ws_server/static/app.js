@@ -448,7 +448,7 @@ function infoHtml(signal) {
   const ch15 = signal.price_change_15m != null ? `${Number(signal.price_change_15m).toFixed(1)}%` : "—";
   return `    <div class="ticker">${signal.symbol} · ${signal.status}</div>
     <div class="scale" style="color: var(--${signal.color || "gray"})">${scale}</div>
-    <p>Рост: 5m ${ch5} · 15m ${ch15} · памп ≥30%/1ч или ≥50%/сутки · объём ×5+ (5m/30m/1h/4h/1D)</p>
+    <p>Рост: 5m ${ch5} · 15m ${ch15} · цена ≥30%/1ч или ≥50%/сут · объём ×5/×6/×8/×10/×12 (5m→1D); 1h: только при ≥30% и ×8</p>
     <p>Вероятность ${Number(signal.probability || 0).toFixed(0)}% ${pnl}</p>
     <ul class="checks">${rows}</ul>`;
 }
