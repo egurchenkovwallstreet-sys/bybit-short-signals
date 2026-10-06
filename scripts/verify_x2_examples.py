@@ -17,7 +17,7 @@ from signal_engine.pump_history import history_pump_metrics
 from signal_engine.state import SymbolState
 from signal_engine.swing_highs import find_two_peak_htf
 from signal_engine.watch_store import WatchStore
-from signal_engine.x2_retrace import _eligible, build_x2_retrace_board
+from signal_engine.x2_retrace import _eligible, _resolve_last_price, build_x2_retrace_board
 
 SYMS = ["NILUSDT", "HUMAUSDT", "MINAUSDT", "SANDUSDT", "GRASSUSDT"]
 
@@ -33,12 +33,15 @@ async def hydrate_symbol(rest: BybitRest, sym: str, turnover_map: dict[str, floa
     turnover = turnover_map.get(sym)
     if turnover is not None:
         state.turnover_24h_usdt = turnover
+    lp = _resolve_last_price(state)
+    if lp is not None:
+        state.last_price = lp
         state.ingest(
             {
                 "type": "ticker",
                 "symbol": sym,
                 "timestamp": now,
-                "data": {"turnover_24h": turnover, "last_price": state.last_price},
+                "data": {"turnover_24h": turnover or 0, "last_price": lp},
             }
         )
     return state

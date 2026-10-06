@@ -47,9 +47,31 @@ def pivot_highs_indexed(bars: list[Bar], wing: int = 3) -> list[dict]:
     return out
 
 
+def loose_pivot_highs_indexed(bars: list[Bar]) -> list[dict]:
+    """Мягче: high не ниже соседей слева/справа (wing=1, допуск равенства)."""
+    rows = _bars_as_dicts(bars)
+    if len(rows) < 5:
+        return []
+    out: list[dict] = []
+    for i in range(1, len(rows) - 1):
+        high = float(rows[i]["h"])
+        if high >= float(rows[i - 1]["h"]) and high >= float(rows[i + 1]["h"]):
+            if out and out[-1]["bar_index"] == i - 1 and out[-1]["price"] == high:
+                continue
+            out.append({"time": int(rows[i]["t"]), "price": high, "bar_index": i})
+    merged: list[dict] = []
+    for p in out:
+        if merged and p["bar_index"] - merged[-1]["bar_index"] <= 1:
+            if p["price"] >= merged[-1]["price"]:
+                merged[-1] = p
+            continue
+        merged.append(p)
+    return merged
+
+
 @dataclass(frozen=True)
 class TwoPeakMatch:
-    kind: str  # lower_high | double_top
+    kind: str  # lower_high | double_top | marginal_hh
     interval: str
     first_price: float
     second_price: float
@@ -59,35 +81,45 @@ class TwoPeakMatch:
 
 
 def _peak_pair_kind(first_price: float, second_price: float) -> str | None:
-    """Первая ≥ вторая или double top; вторая заметно выше — не подходит."""
     if first_price <= 0:
         return None
     tol = config.X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT / 100.0
+    max_above = config.X2_RETRACE_MAX_SECOND_PEAK_ABOVE_PCT / 100.0
     diff = (second_price - first_price) / first_price
-    if diff > tol:
+    if diff > max_above:
         return None
     if abs(diff) <= tol:
         return "double_top"
     if second_price < first_price:
         return "lower_high"
+    if diff <= max_above:
+        return "marginal_hh"
     return None
 
 
-def find_two_peak_match(
-    bars: list[Bar],
-    pump_start_ts: int,
+def _peaks_for_segment(segment: list[Bar], wing: int) -> list[dict]:
+    peaks = pivot_highs_indexed(segment, wing)
+    if len(peaks) >= 2:
+        return peaks
+    loose = loose_pivot_highs_indexed(segment)
+    return loose if len(loose) >= 2 else peaks
+
+
+def _segment_for_peaks(bars: list[Bar], pump_start_ts: int, interval: str, now_ms: int) -> list[Bar]:
+    closed = closed_bars(bars, interval, now_ms)
+    lookback_ms = config.X2_RETRACE_LOOKBACK_DAYS * 24 * 3600 * 1000
+    window_start = now_ms - lookback_ms
+    start = min(pump_start_ts, window_start)
+    return [b for b in closed if b.timestamp >= start]
+
+
+def _match_from_peaks(
+    peaks: list[dict],
     interval: str,
-    now_ms: int,
-    wing: int | None = None,
+    min_between: int,
 ) -> TwoPeakMatch | None:
-    """Две pivot-вершины: между ними ≥ N свечей; high₁ ≥ high₂ или double top."""
-    w = wing if wing is not None else config.X2_RETRACE_PIVOT_WING
-    segment = [b for b in closed_bars(bars, interval, now_ms) if b.timestamp >= pump_start_ts]
-    peaks = pivot_highs_indexed(segment, w)
-    if len(peaks) < 2:
-        return None
-    min_between = config.X2_RETRACE_MIN_BARS_BETWEEN_PEAKS
     best: TwoPeakMatch | None = None
+    best_score = -1.0
     for a in range(len(peaks) - 1):
         for b in range(a + 1, len(peaks)):
             p1, p2 = peaks[a], peaks[b]
@@ -97,16 +129,41 @@ def find_two_peak_match(
             kind = _peak_pair_kind(float(p1["price"]), float(p2["price"]))
             if kind is None:
                 continue
-            best = TwoPeakMatch(
-                kind=kind,
-                interval=interval,
-                first_price=float(p1["price"]),
-                second_price=float(p2["price"]),
-                bars_between=between,
-                first_time=int(p1["time"]),
-                second_time=int(p2["time"]),
-            )
+            score = float(p1["price"]) + float(p2["price"]) + between * 0.001
+            if score >= best_score:
+                best_score = score
+                best = TwoPeakMatch(
+                    kind=kind,
+                    interval=interval,
+                    first_price=float(p1["price"]),
+                    second_price=float(p2["price"]),
+                    bars_between=between,
+                    first_time=int(p1["time"]),
+                    second_time=int(p2["time"]),
+                )
     return best
+
+
+def find_two_peak_match(
+    bars: list[Bar],
+    pump_start_ts: int,
+    interval: str,
+    now_ms: int,
+    wing: int | None = None,
+) -> TwoPeakMatch | None:
+    segment = _segment_for_peaks(bars, pump_start_ts, interval, now_ms)
+    if len(segment) < config.X2_RETRACE_MIN_BARS:
+        return None
+    min_between = config.X2_RETRACE_MIN_BARS_BETWEEN_PEAKS
+    wings = [wing if wing is not None else config.X2_RETRACE_PIVOT_WING]
+    if wings[0] > 1:
+        wings.append(1)
+    for w in wings:
+        peaks = _peaks_for_segment(segment, w)
+        found = _match_from_peaks(peaks, interval, min_between)
+        if found is not None:
+            return found
+    return None
 
 
 def find_two_peak_htf(
@@ -115,7 +172,7 @@ def find_two_peak_htf(
     pump_start_ts: int,
     now_ms: int,
 ) -> TwoPeakMatch | None:
-    for interval, bars in (("60", bars_1h), ("240", bars_4h)):
+    for interval, bars in (("240", bars_4h), ("60", bars_1h)):
         match = find_two_peak_match(bars, pump_start_ts, interval, now_ms)
         if match is not None:
             return match

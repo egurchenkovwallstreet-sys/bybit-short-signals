@@ -252,16 +252,16 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
     items: list[X2RetraceItem] = []
     for symbol, watch in list(active.items()):
         state = states.get(symbol)
-        if state is None or not state.last_price:
-            continue
-        if growth_pct_negative(state):
-            watches.remove(BOARD_ID, symbol)
+        if state is None:
             continue
         price = _resolve_last_price(state)
         if price is None:
             continue
         if state.last_price is None or state.last_price <= 0:
             state.last_price = price
+        if growth_pct_negative(state):
+            watches.remove(BOARD_ID, symbol)
+            continue
         measured = _metrics_for_state(state, now_ms, watch.meta)
         if measured is None:
             continue
