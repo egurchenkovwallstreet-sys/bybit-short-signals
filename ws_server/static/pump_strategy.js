@@ -546,7 +546,9 @@ function drawPumpStrategyBookOverlay() {
   const inRange = rows.filter((r) => r.price >= pMin - span * 0.02 && r.price <= pMax + span * 0.02);
   const list = inRange.length ? inRange : rows;
   const maxSize = Math.max(...list.map((r) => r.size), 1);
-  const bandW = Math.min(120, width * 0.22);
+  const vis = window.boardChart.BOOK_VIS;
+  const bandW = Math.min(vis.bandMax, width * vis.bandFrac);
+  const halfH = vis.barHeight / 2;
 
   list.forEach((row) => {
     let y;
@@ -556,9 +558,9 @@ function drawPumpStrategyBookOverlay() {
     if (y == null || Number.isNaN(y)) {
       y = height - 12 - ((row.price - pMin) / span) * (height - 24);
     }
-    const barLen = 8 + (row.size / maxSize) * (bandW - 8);
-    ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.35)" : "rgba(255, 93, 115, 0.35)";
-    ctx.fillRect(width - barLen - 4, y - 5, barLen, 10);
+    const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
+    ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.42)" : "rgba(255, 93, 115, 0.42)";
+    ctx.fillRect(width - barLen - vis.padRight, y - halfH, barLen, vis.barHeight);
     ctx.fillStyle = row.bid ? "rgba(200, 255, 220, 0.85)" : "rgba(255, 200, 210, 0.85)";
     ctx.font = "10px Segoe UI, sans-serif";
     ctx.textAlign = "right";
