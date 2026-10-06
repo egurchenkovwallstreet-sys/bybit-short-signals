@@ -134,8 +134,8 @@ async def dismiss_board_watch(body: dict[str, Any] = Body(...)) -> dict[str, Any
     """Снять монету с доски памп-скан или 2× откат (липкий список)."""
     board = str(body.get("board") or "").strip()
     symbol = str(body.get("symbol") or "").strip().upper()
-    if board not in {"pump_scan", "x2_retrace"}:
-        raise HTTPException(status_code=400, detail="board: pump_scan или x2_retrace")
+    if board not in {"pump_scan", "x2_retrace", "pump_strategy"}:
+        raise HTTPException(status_code=400, detail="board: pump_scan, x2_retrace или pump_strategy")
     if not _SYMBOL.fullmatch(symbol):
         raise HTTPException(status_code=400, detail="Некорректный тикер")
     from signal_engine.watch_store import WatchStore

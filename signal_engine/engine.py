@@ -17,6 +17,7 @@ from signal_engine.rating import column_for, probability_pct, signal_rating
 from signal_engine.state import SymbolState
 from signal_engine.pump_scan import build_pump_scan_board
 from signal_engine.x2_retrace import build_x2_retrace_board
+from signal_engine.pump_strategy import build_pump_strategy_board
 from signal_engine.store import SignalStore
 from signal_engine.watch_store import WatchStore
 
@@ -82,6 +83,7 @@ class Engine:
             self._board(now_ms),
             build_pump_scan_board(self.symbols, now_ms, self.watches),
             build_x2_retrace_board(self.symbols, now_ms, self.watches),
+            build_pump_strategy_board(self.symbols, now_ms, self.watches),
         ]
 
     def _try_open(self, state: SymbolState, now_ms: int, wins: int, total: int) -> Signal | None:

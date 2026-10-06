@@ -46,6 +46,7 @@ class Hub:
         self.board_dirty = False
         self.pump_scan_dirty = False
         self.x2_retrace_dirty = False
+        self.pump_strategy_dirty = False
         self.market_dirty = False
         self._stopped = False
         self._stats_cache: dict[str, Any] | None = None
@@ -102,6 +103,7 @@ class Hub:
                 if client.x2_retrace_symbol
                 else None
             ),
+            "pump_strategy_board": self.cache.view_pump_strategy_board(),
             "btc_test": self.btc.view(),
         }
 
@@ -206,6 +208,9 @@ class Hub:
                 elif kind == "x2_retrace":
                     self.demo = False
                     self.x2_retrace_dirty = True
+                elif kind == "pump_strategy":
+                    self.demo = False
+                    self.pump_strategy_dirty = True
                 elif kind == "market":
                     self.market_dirty = True
         finally:
@@ -229,11 +234,15 @@ class Hub:
             board = self.cache.view_board() if self.board_dirty else None
             pump_board = self.cache.view_pump_scan_board() if self.pump_scan_dirty else None
             x2_board = self.cache.view_x2_retrace_board() if self.x2_retrace_dirty else None
+            pump_strategy = (
+                self.cache.view_pump_strategy_board() if self.pump_strategy_dirty else None
+            )
             send_detail = self.market_dirty
             btc = self.btc.view() if self.btc_dirty else None
             self.board_dirty = False
             self.pump_scan_dirty = False
             self.x2_retrace_dirty = False
+            self.pump_strategy_dirty = False
             self.market_dirty = False
             self.btc_dirty = False
             pnl = None
@@ -261,6 +270,14 @@ class Hub:
                         if not client.x2_retrace_symbol:
                             client.x2_retrace_symbol = _first_symbol(x2_board)
                             client.force_x2_retrace_detail = bool(client.x2_retrace_symbol)
+                    if pump_strategy is not None:
+                        await client.websocket.send_json(
+                            {
+                                "type": "pump_strategy_board",
+                                "data": pump_strategy,
+                                "demo": self.demo,
+                            }
+                        )
                     if client.symbol and (send_detail or client.force_detail):
                         await client.websocket.send_json(
                             {

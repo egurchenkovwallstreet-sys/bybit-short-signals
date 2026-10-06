@@ -62,6 +62,7 @@ class MarketCache:
         self.pump_scan_signals: dict[str, dict[str, Any]] = {}
         self.x2_retrace_columns: list[dict[str, Any]] = []
         self.x2_retrace_signals: dict[str, dict[str, Any]] = {}
+        self.pump_strategy_signals: list[dict[str, Any]] = []
 
     def apply(self, message: dict[str, Any]) -> str | None:
         kind = message.get("type")
@@ -77,6 +78,9 @@ class MarketCache:
             self.x2_retrace_columns = list((message.get("data") or {}).get("columns") or [])
             self._reindex_x2_retrace()
             return "x2_retrace"
+        if kind == "pump_strategy_board":
+            self.pump_strategy_signals = list((message.get("data") or {}).get("signals") or [])
+            return "pump_strategy"
         if kind == "signal":
             self._upsert_signal(message.get("data") or {})
             return "board"
@@ -98,6 +102,17 @@ class MarketCache:
                 signals.append(item)
             view.append({**column, "signals": signals})
         return view
+
+    def view_pump_strategy_board(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for signal in self.pump_strategy_signals:
+            symbol = signal.get("symbol") or ""
+            if not self._pump_strategy_turnover_ok(symbol, signal):
+                continue
+            item = dict(signal)
+            item["mini"] = self.mini_closes(symbol)
+            out.append(item)
+        return out
 
     def view_x2_retrace_board(self) -> list[dict[str, Any]]:
         view = []
@@ -233,6 +248,17 @@ class MarketCache:
         if turnover is None:
             return False
         return turnover >= config.UNIVERSE_MIN_TURNOVER_24H_USDT
+
+    def _pump_strategy_turnover_ok(self, symbol: str, signal: dict[str, Any]) -> bool:
+        if not symbol:
+            return False
+        floor = config.PUMP_STRATEGY_MIN_TURNOVER_24H_USDT
+        from_cache = self.turnover_24h.get(symbol)
+        from_signal = _num(signal.get("turnover_24h_usdt"))
+        values = [v for v in (from_cache, from_signal) if v is not None and v > 0]
+        if not values:
+            return False
+        return min(values) >= floor
 
     def _x2_turnover_ok(self, symbol: str, signal: dict[str, Any]) -> bool:
         """Доска 2×: свой порог 300k; не показываем без turnover или ниже минимума."""

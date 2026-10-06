@@ -178,6 +178,9 @@ function connectSocket() {
     if (window.x2Retrace) {
       window.x2Retrace.onX2Snapshot(message.x2_retrace_board, message.x2_retrace_detail);
     }
+    if (window.pumpStrategy) {
+      window.pumpStrategy.onPumpStrategySnapshot(message.pump_strategy_board);
+    }
   } else if (message.type === "btc_test" && window.btcTest) {
     window.btcTest.onBtcMessage(message.data);
   } else if (message.type === "board") {
@@ -194,6 +197,9 @@ function connectSocket() {
     window.x2Retrace.onX2Board(message.data);
   } else if (message.type === "x2_retrace_detail" && window.x2Retrace) {
     window.x2Retrace.onX2Detail(message.symbol, message.data);
+  } else if (message.type === "pump_strategy_board" && window.pumpStrategy) {
+    setDemo(message.demo);
+    window.pumpStrategy.onPumpStrategyBoard(message.data);
   } else if (message.type === "detail" && (!state.selected || message.symbol === state.selected)) {
     const changed = state.selected !== message.symbol;
     state.selected = message.symbol;
@@ -227,6 +233,8 @@ function showTab(name) {
   if (pumpView) pumpView.hidden = name !== "pump_scan";
   const x2View = document.getElementById("view-x2-retrace");
   if (x2View) x2View.hidden = name !== "x2_retrace";
+  const pumpStrategyView = document.getElementById("view-pump-strategy");
+  if (pumpStrategyView) pumpStrategyView.hidden = name !== "pump_strategy";
   document.getElementById("view-pending").hidden = name !== "pending";
   document.getElementById("view-stats").hidden = name !== "stats";
   const btcView = document.getElementById("view-btc");
@@ -242,6 +250,9 @@ function showTab(name) {
   }
   if (name === "x2_retrace" && window.x2Retrace) {
     window.x2Retrace.initX2RetraceTab();
+  }
+  if (name === "pump_strategy" && window.pumpStrategy) {
+    window.pumpStrategy.initPumpStrategyTab();
   }
   if (name === "pending") {
     renderPending();

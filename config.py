@@ -331,6 +331,20 @@ X2_RETRACE_COLUMNS = {
 }
 
 
+# --- Вкладка «Поиск пампов» (стратегия с чистого листа) ----------------------
+
+PUMP_STRATEGY_MIN_TURNOVER_24H_USDT = _env_float(
+    "PUMP_STRATEGY_MIN_TURNOVER_24H_USDT", 300_000.0
+)
+# Длинный памп: рост от минимума до максимума за окно (дней).
+PUMP_STRATEGY_LONG_DAYS = _env_int("PUMP_STRATEGY_LONG_DAYS", 20)
+PUMP_STRATEGY_LONG_MIN_PCT = _env_float("PUMP_STRATEGY_LONG_MIN_PCT", 80.0)
+# Быстрый памп — позже (1–12 ч, от 40%).
+PUMP_STRATEGY_SHORT_HOURS_MIN = _env_int("PUMP_STRATEGY_SHORT_HOURS_MIN", 1)
+PUMP_STRATEGY_SHORT_HOURS_MAX = _env_int("PUMP_STRATEGY_SHORT_HOURS_MAX", 12)
+PUMP_STRATEGY_SHORT_MIN_PCT = _env_float("PUMP_STRATEGY_SHORT_MIN_PCT", 40.0)
+
+
 # --- Исход сигнала -----------------------------------------------------------
 
 # Для шорта: цена упала на 3% — цель, выросла на 10% — ликвидация, иначе 24 часа.

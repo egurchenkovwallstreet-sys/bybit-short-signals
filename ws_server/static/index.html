@@ -13,6 +13,7 @@
       <button type="button" class="tab active" data-tab="signals">Сигналы</button>
       <button type="button" class="tab" data-tab="pump_scan">Памп-скан</button>
       <button type="button" class="tab" data-tab="x2_retrace">2× откат</button>
+      <button type="button" class="tab" data-tab="pump_strategy">Поиск пампов</button>
       <button type="button" class="tab" data-tab="pending">Не отработанные</button>
       <button type="button" class="tab" data-tab="stats">Статистика</button>
       <button type="button" class="tab" data-tab="btc">Тест стратегии</button>
@@ -38,6 +39,14 @@
         <p class="empty">Выберите монету слева.</p>
       </aside>
     </div>
+  </section>
+
+  <section id="view-pump-strategy" class="pump-strategy-view" hidden>
+    <p class="quiet pump-scan-intro">
+      Длинный памп: рост от минимума до максимума ≥80% за 20 дней. Оборот фьючерса ≥300&nbsp;000&nbsp;USDT за сутки.
+      Монета остаётся в списке, пока не нажмёте «Снять» или не упадёт оборот.
+    </p>
+    <div id="pump-strategy-grid" class="pump-strategy-grid"></div>
   </section>
 
   <section id="view-pump-scan" class="pump-scan-view" hidden>
@@ -157,5 +166,6 @@
   <script src="/static/app.js?v=20251006o"></script>
   <script src="/static/pump_scan.js?v=20251007b"></script>
   <script src="/static/x2_retrace.js?v=20251007d"></script>
+  <script src="/static/pump_strategy.js?v=20251007a"></script>
 </body>
 </html>
