@@ -66,7 +66,7 @@
 
 ### Этап 6: Deploy 🔄
 
-- [x] Настройка PM2 для всех сервисов (`scripts/pm2.ecosystem.cjs`, collector + engine + ws + btc-test).
+- [x] Настройка PM2 для всех сервисов (`scripts/ecosystem.config.cjs`, collector + engine + ws + btc-test).
 - [ ] Настройка Nginx (опционально).
 - [x] Запуск на сервере (Timeweb AMS, `129.101.127.78`, `/opt/signals`, GitHub clone).
 - [x] Проверка работы в браузере (`http://129.101.127.78:8787`, «живой поток» без демо-баннера).
