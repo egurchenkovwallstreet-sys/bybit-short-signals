@@ -24,7 +24,6 @@ const PUMP_CHART = {
   chart: "pump-scan-candle-chart",
   info: "pump-scan-info-pane",
   book: "pump-scan-book-pane",
-  walls: "pump-scan-walls",
 };
 
 function initPumpScanTab() {
@@ -186,7 +185,6 @@ function updatePumpScanLive() {
   const priceEl = document.querySelector(`#${PUMP_CHART.info} [data-live='price']`);
   if (priceEl) priceEl.textContent = fmtPrice(row.last_price);
   window.boardChart.renderBookPane(PUMP_CHART.book, pumpState.detail?.book, row?.last_price);
-  window.boardChart.renderWalls(PUMP_CHART.walls, pumpState.detail?.book);
 }
 
 function renderPumpScanInfo(full) {
@@ -244,12 +242,9 @@ function renderPumpScanInfo(full) {
     <div class="psc-ema-block">${renderEmaBlock(row.ema_by_tf)}</div>
     <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
     <div class="psc-book-pane" id="pump-scan-book-pane"></div>
-    <h3 class="psc-info-subhead">Крупные стены</h3>
-    <div class="psc-walls" id="pump-scan-walls"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="pump_scan" data-symbol="${row.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(pumpState.interval)}</p>`;
   window.boardChart.renderBookPane(PUMP_CHART.book, detail?.book, row.last_price);
-  window.boardChart.renderWalls(PUMP_CHART.walls, detail?.book);
 }
 
 function renderPumpBoard() {

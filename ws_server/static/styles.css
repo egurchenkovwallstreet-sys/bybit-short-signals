@@ -246,6 +246,39 @@ body {
 .psc-book-size {
   color: var(--muted);
   font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.psc-book-wall {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.psc-book-wall--holding {
+  background: rgba(61, 214, 140, 0.2);
+  color: #6ee7b7;
+}
+
+.psc-book-wall--building {
+  background: rgba(255, 184, 77, 0.2);
+  color: #ffc857;
+}
+
+.psc-book-wall--spoof {
+  background: rgba(255, 93, 115, 0.15);
+  color: #ff8a9a;
+}
+
+.psc-book-legend {
+  margin: 8px 4px 0;
+  font-size: 10px;
+  line-height: 1.35;
 }
 
 .psc-chart-hint {

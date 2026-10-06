@@ -15,7 +15,6 @@ const X2_CHART = {
   chart: "x2-candle-chart",
   info: "x2-info-pane",
   book: "x2-book-pane",
-  walls: "x2-walls",
 };
 
 function initX2RetraceTab() {
@@ -172,7 +171,6 @@ function updateX2Live() {
   const priceEl = document.querySelector(`#${X2_CHART.info} [data-live='price']`);
   if (priceEl) priceEl.textContent = fmtPrice(s.last_price);
   window.boardChart.renderBookPane(X2_CHART.book, x2State.detail?.book, s.last_price);
-  window.boardChart.renderWalls(X2_CHART.walls, x2State.detail?.book);
 }
 
 function renderX2Info(full) {
@@ -219,12 +217,9 @@ function renderX2Info(full) {
     <div class="psc-ema-block">${renderX2EmaBlock(s.ema_by_tf)}</div>
     <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
     <div class="psc-book-pane" id="x2-book-pane"></div>
-    <h3 class="psc-info-subhead">Крупные стены</h3>
-    <div class="psc-walls" id="x2-walls"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="x2_retrace" data-symbol="${s.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(x2State.interval)}</p>`;
   window.boardChart.renderBookPane(X2_CHART.book, detail?.book, s.last_price);
-  window.boardChart.renderWalls(X2_CHART.walls, detail?.book);
 }
 
 function renderX2Board() {

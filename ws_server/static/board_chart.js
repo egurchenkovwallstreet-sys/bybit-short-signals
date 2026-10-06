@@ -22,24 +22,62 @@ window.boardChart = {
   },
 
   normalizeBookSide(side) {
-    if (!side) return [];
-    if (Array.isArray(side) && side.length && Array.isArray(side[0])) return side;
-    if (typeof side === "object" && !Array.isArray(side)) {
-      return Object.entries(side).map(([p, s]) => [Number(p), Number(s)]);
+    const out = [];
+    if (!side) return out;
+    if (Array.isArray(side)) {
+      for (const row of side) {
+        if (Array.isArray(row) && row.length >= 2) {
+          out.push([Number(row[0]), Number(row[1])]);
+        } else if (row && typeof row === "object") {
+          const p = Number(row.price ?? row[0]);
+          const s = Number(row.size ?? row[1] ?? row.qty);
+          if (p > 0 && s > 0) out.push([p, s]);
+        }
+      }
+      return out;
     }
-    return [];
+    if (typeof side === "object") {
+      for (const [p, s] of Object.entries(side)) {
+        const price = Number(p);
+        const size = Number(s);
+        if (price > 0 && size > 0) out.push([price, size]);
+      }
+    }
+    return out;
   },
 
   inferPriceTick(price) {
     const p = Math.abs(Number(price));
     if (!p || Number.isNaN(p)) return 0.0001;
     const exp = Math.floor(Math.log10(p));
-    const mag = 10 ** exp;
-    const norm = p / mag;
-    if (norm >= 5) return mag;
-    if (norm >= 2) return mag / 2;
-    if (norm >= 1) return mag / 5;
-    return mag / 10;
+    return 10 ** (exp - 4);
+  },
+
+  bookMidPrice(book, refPrice) {
+    const bids = window.boardChart.normalizeBookSide(book?.bids);
+    const asks = window.boardChart.normalizeBookSide(book?.asks);
+    const bestBid = bids.length ? Math.max(...bids.map(([p]) => p)) : 0;
+    const bestAsk = asks.length ? Math.min(...asks.map(([p]) => p)) : 0;
+    const mid = Number(refPrice);
+    if (bestBid > 0 && bestAsk > 0) return (bestBid + bestAsk) / 2;
+    if (mid > 0 && !Number.isNaN(mid)) return mid;
+    if (bestBid > 0) return bestBid;
+    if (bestAsk > 0) return bestAsk;
+    return 0;
+  },
+
+  wallTag(wall) {
+    if (!wall) return "";
+    const kind =
+      wall.kind === "holding"
+        ? "стена"
+        : wall.kind === "building"
+          ? "нарастает"
+          : wall.kind === "spoof"
+            ? "сняли"
+            : "";
+    if (!kind) return "";
+    return `<span class="psc-book-wall psc-book-wall--${wall.kind}">${kind}</span>`;
   },
 
   bookBinSize(refPrice, vis) {
@@ -75,43 +113,63 @@ window.boardChart = {
 
   prepareBookDepth(book, refPrice, depthPct) {
     const BC = window.boardChart;
-    const mid = Number(refPrice);
     const band = depthPct ?? BC.BOOK_DEPTH_PCT;
-    if (!mid || mid <= 0 || Number.isNaN(mid)) {
-      return { mid: 0, lo: 0, hi: 0, asks: [], bids: [], depthPct: band };
+    const mid = BC.bookMidPrice(book, refPrice);
+    if (!mid || mid <= 0) {
+      return { mid: 0, lo: 0, hi: 0, asks: [], bids: [], depthPct: band, walls: new Map() };
     }
     const lo = mid * (1 - band);
     const hi = mid * (1 + band);
-    const binSize = BC.bookBinSize(mid, { binTicks: BC.BOOK_PANEL.binTicks });
-    const inBand = (p) => {
-      const n = Number(p);
-      return n >= lo && n <= hi;
-    };
-    const bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
-    const asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
+    const binSize = Math.max(BC.bookBinSize(mid, { binTicks: BC.BOOK_PANEL.binTicks }), mid * 0.00005);
+    const inBand = (p) => p >= lo - 1e-12 && p <= hi + 1e-12;
+    let bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
+    let asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
+    for (const w of book?.walls || []) {
+      const p = Number(w.price);
+      const s = Number(w.size);
+      if (!(p > 0) || !(s > 0) || !inBand(p)) continue;
+      const row = [p, s];
+      if (w.side === "ask") asksRaw.push(row);
+      else bidsRaw.push(row);
+    }
     let bids = BC.aggregateBookLevels(bidsRaw, binSize, true);
     let asks = BC.aggregateBookLevels(asksRaw, binSize, false);
     const cap = BC.BOOK_PANEL.maxRowsPerSide;
-    bids = bids.slice(0, cap);
-    asks = asks.slice(0, cap);
-    return { mid, lo, hi, asks, bids, depthPct: band };
+    const nearMid = (r) => Math.abs(r.price - mid);
+    bids = [...bids].sort((a, b) => nearMid(a) - nearMid(b)).slice(0, cap);
+    asks = [...asks].sort((a, b) => nearMid(a) - nearMid(b)).slice(0, cap);
+    bids.sort((a, b) => b.price - a.price);
+    asks.sort((a, b) => a.price - b.price);
+    const walls = new Map();
+    for (const w of book?.walls || []) {
+      const p = Number(w.price);
+      if (p > 0) walls.set(p, w);
+    }
+    return { mid, lo, hi, asks, bids, depthPct: band, walls };
   },
 
   bookPaneHtml(data) {
     const BC = window.boardChart;
-    const { mid, lo, hi, asks, bids, depthPct } = data;
+    const { mid, lo, hi, asks, bids, depthPct, walls } = data;
     const pct = Math.round((depthPct ?? BC.BOOK_DEPTH_PCT) * 100);
     if (!asks.length && !bids.length) {
-      return `<p class="quiet">Нет уровней в диапазоне ±${pct}% от цены.</p>`;
+      return `<p class="quiet">Стакан пуст в диапазоне ±${pct}% от ${BC.formatBookPrice(mid) || "цены"}. Подождите поток данных с биржи.</p>`;
     }
     const maxAsk = Math.max(...asks.map((r) => r.size), 1);
     const maxBid = Math.max(...bids.map((r) => r.size), 1);
+    const wallAt = (price) => {
+      for (const [p, w] of walls.entries()) {
+        if (Math.abs(p - price) <= Math.max(price, p) * 0.00005) return w;
+      }
+      return null;
+    };
     const rowHtml = (r, side, max) => {
-      const w = Math.max(4, Math.round((r.size / max) * 100));
+      const w = Math.max(6, Math.round((r.size / max) * 100));
+      const tag = BC.wallTag(wallAt(r.price));
       return `<div class="psc-book-row ${side}">
         <div class="psc-book-bar" style="width:${w}%"></div>
         <span class="psc-book-price">${BC.formatBookPrice(r.price)}</span>
-        <span class="psc-book-size">${BC.formatBookSize(r.size)}</span>
+        <span class="psc-book-size">${BC.formatBookSize(r.size)}${tag}</span>
       </div>`;
     };
     const askBlock = [...asks].reverse().map((r) => rowHtml(r, "ask", maxAsk)).join("");
@@ -121,17 +179,21 @@ window.boardChart = {
         <strong>${BC.formatBookPrice(mid)}</strong>
         <span class="quiet"> ±${pct}% · ${BC.formatBookPrice(lo)} – ${BC.formatBookPrice(hi)}</span>
       </div>
-      ${bidBlock}`;
+      ${bidBlock}
+      <p class="quiet psc-book-legend">Крупная заявка в стакане помечена: «стена», «нарастает», «сняли».</p>`;
   },
 
   renderBookPane(containerId, book, refPrice) {
     const el = document.getElementById(containerId);
     if (!el) return;
-    if (!book?.bids && !book?.asks) {
+    if (!book) {
       el.innerHTML = '<p class="quiet">Стакан загружается…</p>';
       return;
     }
     const data = window.boardChart.prepareBookDepth(book, refPrice);
+    const sig = `${Math.round(data.mid * 1e6)}|${data.asks.length}|${data.bids.length}|${data.asks[0]?.size ?? 0}|${data.bids[0]?.size ?? 0}`;
+    if (el.dataset.bookSig === sig) return;
+    el.dataset.bookSig = sig;
     el.innerHTML = window.boardChart.bookPaneHtml(data);
   },
 

@@ -344,28 +344,9 @@ function renderPumpStrategyInfo() {
     </dl>
     <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
     <div class="psc-book-pane" id="psc-book-pane"></div>
-    <h3 class="psc-info-subhead">Крупные стены</h3>
-    <div class="psc-walls" id="psc-walls"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="pump_strategy" data-symbol="${row.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${PSC_TF.find(([c]) => c === pumpStrategyState.interval)?.[1] || pumpStrategyState.interval}. Данные по списку подгружаются в фоне.</p>`;
   window.boardChart.renderBookPane("psc-book-pane", detail?.book, row.last_price);
-  updatePumpStrategyWalls(detail?.book);
-}
-
-function updatePumpStrategyWalls(book) {
-  const walls = document.getElementById("psc-walls");
-  if (!walls) return;
-  const items = book?.walls || [];
-  if (!items.length) {
-    walls.innerHTML = '<p class="quiet">Крупные стены в стакане появятся при потоке данных.</p>';
-    return;
-  }
-  walls.innerHTML = items
-    .map((w) => {
-      const kind = w.kind === "holding" ? "Holding" : w.kind === "spoof" ? "Spoof" : "Building";
-      return `<span class="wall ${w.kind}">${kind} ${formatBookPrice(w.price)} · ${formatBookSize(w.size)}</span>`;
-    })
-    .join("");
 }
 
 function mountPumpStrategyChart() {
@@ -421,7 +402,6 @@ function updatePumpStrategyLiveFields() {
   const priceEl = document.querySelector("#psc-info-pane [data-psc-live='price']");
   if (priceEl) priceEl.textContent = fmtPrice(row.last_price);
   window.boardChart.renderBookPane("psc-book-pane", detail?.book, row.last_price);
-  updatePumpStrategyWalls(detail?.book);
 }
 
 function candleTimeForPsc(raw, interval) {
