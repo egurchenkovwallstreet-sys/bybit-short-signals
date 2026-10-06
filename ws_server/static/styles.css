@@ -188,10 +188,8 @@ body {
   padding: 4px 8px;
   border-radius: 8px;
 }
+.chart-legend .lg-price { color: #c5d0de; }
 .chart-legend .lg-vol { color: #8e9aab; }
-.chart-legend .lg-oi { color: #58a6ff; }
-.chart-legend .lg-cvd { color: #ffb86c; }
-.chart-legend .lg-obv { color: #bd93f9; }
 #candle-chart { position: relative; }
 #candle-chart[data-empty="1"]::after {
   content: "Загрузка свечей…";
