@@ -31,6 +31,9 @@ class Client:
         self.pump_scan_symbol: str | None = None
         self.pump_scan_interval = "15"
         self.force_pump_scan_detail = False
+        self.x2_retrace_symbol: str | None = None
+        self.x2_retrace_interval = "60"
+        self.force_x2_retrace_detail = False
 
 
 class Hub:
@@ -42,6 +45,7 @@ class Hub:
         self.demo = False
         self.board_dirty = False
         self.pump_scan_dirty = False
+        self.x2_retrace_dirty = False
         self.market_dirty = False
         self._stopped = False
         self._stats_cache: dict[str, Any] | None = None
@@ -92,6 +96,12 @@ class Hub:
             "pump_scan_detail": (
                 self.cache.pump_scan_detail(pump_symbol, client.pump_scan_interval) if pump_symbol else None
             ),
+            "x2_retrace_board": self.cache.view_x2_retrace_board(),
+            "x2_retrace_detail": (
+                self.cache.x2_retrace_detail(client.x2_retrace_symbol, client.x2_retrace_interval)
+                if client.x2_retrace_symbol
+                else None
+            ),
             "btc_test": self.btc.view(),
         }
 
@@ -119,6 +129,16 @@ class Hub:
             if interval in {"1", "5", "15", "30", "60", "240", "D"}:
                 client.pump_scan_interval = interval
                 client.force_pump_scan_detail = True
+        elif kind == "select_x2_retrace":
+            symbol = str(message.get("symbol") or "")
+            if symbol in self.cache.x2_retrace_signals:
+                client.x2_retrace_symbol = symbol
+                client.force_x2_retrace_detail = True
+        elif kind == "x2_retrace_interval":
+            interval = str(message.get("interval") or "60")
+            if interval in {"1", "5", "15", "30", "60", "240", "D"}:
+                client.x2_retrace_interval = interval
+                client.force_x2_retrace_detail = True
 
     async def run(self) -> None:
         flush = asyncio.create_task(self._flush_loop())
@@ -183,6 +203,9 @@ class Hub:
                 elif kind == "pump_scan":
                     self.demo = False
                     self.pump_scan_dirty = True
+                elif kind == "x2_retrace":
+                    self.demo = False
+                    self.x2_retrace_dirty = True
                 elif kind == "market":
                     self.market_dirty = True
         finally:
@@ -205,10 +228,12 @@ class Hub:
             now = time.monotonic()
             board = self.cache.view_board() if self.board_dirty else None
             pump_board = self.cache.view_pump_scan_board() if self.pump_scan_dirty else None
+            x2_board = self.cache.view_x2_retrace_board() if self.x2_retrace_dirty else None
             send_detail = self.market_dirty
             btc = self.btc.view() if self.btc_dirty else None
             self.board_dirty = False
             self.pump_scan_dirty = False
+            self.x2_retrace_dirty = False
             self.market_dirty = False
             self.btc_dirty = False
             pnl = None
@@ -229,6 +254,13 @@ class Hub:
                         if not client.pump_scan_symbol:
                             client.pump_scan_symbol = _first_symbol(pump_board)
                             client.force_pump_scan_detail = bool(client.pump_scan_symbol)
+                    if x2_board is not None:
+                        await client.websocket.send_json(
+                            {"type": "x2_retrace_board", "data": x2_board, "demo": self.demo}
+                        )
+                        if not client.x2_retrace_symbol:
+                            client.x2_retrace_symbol = _first_symbol(x2_board)
+                            client.force_x2_retrace_detail = bool(client.x2_retrace_symbol)
                     if client.symbol and (send_detail or client.force_detail):
                         await client.websocket.send_json(
                             {
@@ -249,6 +281,17 @@ class Hub:
                             }
                         )
                         client.force_pump_scan_detail = False
+                    if client.x2_retrace_symbol and (send_detail or client.force_x2_retrace_detail):
+                        await client.websocket.send_json(
+                            {
+                                "type": "x2_retrace_detail",
+                                "symbol": client.x2_retrace_symbol,
+                                "data": self.cache.x2_retrace_detail(
+                                    client.x2_retrace_symbol, client.x2_retrace_interval
+                                ),
+                            }
+                        )
+                        client.force_x2_retrace_detail = False
                     if pnl is not None:
                         await client.websocket.send_json({"type": "pnl", "items": pnl})
                     if btc is not None:

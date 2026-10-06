@@ -16,6 +16,7 @@ from signal_engine.outcomes import classify_outcome, short_pnl_pct
 from signal_engine.rating import column_for, probability_pct, signal_rating
 from signal_engine.state import SymbolState
 from signal_engine.pump_scan import build_pump_scan_board
+from signal_engine.x2_retrace import build_x2_retrace_board
 from signal_engine.store import SignalStore
 
 
@@ -72,7 +73,12 @@ class Engine:
             if self._refresh(signal, evaluate(state, now_ms), now_ms, wins, total):
                 changed.append(signal.to_message("update", now_ms))
         # Доска каждые 3 секунды — снимок колонок, даже если галочки не менялись.
-        return [*changed, self._board(now_ms), build_pump_scan_board(self.symbols, now_ms)]
+        return [
+            *changed,
+            self._board(now_ms),
+            build_pump_scan_board(self.symbols, now_ms),
+            build_x2_retrace_board(self.symbols, now_ms),
+        ]
 
     def _try_open(self, state: SymbolState, now_ms: int, wins: int, total: int) -> Signal | None:
         if state.last_price is None or state.last_price <= 0:

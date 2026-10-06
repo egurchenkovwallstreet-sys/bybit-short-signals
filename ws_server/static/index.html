@@ -12,6 +12,7 @@
     <nav class="tabs">
       <button type="button" class="tab active" data-tab="signals">Сигналы</button>
       <button type="button" class="tab" data-tab="pump_scan">Памп-скан</button>
+      <button type="button" class="tab" data-tab="x2_retrace">2× откат</button>
       <button type="button" class="tab" data-tab="pending">Не отработанные</button>
       <button type="button" class="tab" data-tab="stats">Статистика</button>
       <button type="button" class="tab" data-tab="btc">Тест стратегии</button>
@@ -27,6 +28,16 @@
     <aside id="detail" class="detail">
       <p class="empty">Выберите сигнал слева.</p>
     </aside>
+  </section>
+
+  <section id="view-x2-retrace" class="pump-scan-view" hidden>
+    <p class="quiet pump-scan-intro">Рост ≥2× от минимума за 5 дней (оборот ≥1M USDT). Колонки — откат, понижающиеся max на 1H/4H, OI↓ и пробой EMA.</p>
+    <div class="pump-scan-body workspace">
+      <div id="x2-columns" class="columns pump-columns"></div>
+      <aside id="x2-detail" class="detail">
+        <p class="empty">Выберите монету слева.</p>
+      </aside>
+    </div>
   </section>
 
   <section id="view-pump-scan" class="pump-scan-view" hidden>
@@ -145,5 +156,6 @@
   <script src="/static/btc_test.js?v=20251006e"></script>
   <script src="/static/app.js?v=20251006o"></script>
   <script src="/static/pump_scan.js?v=20251006f"></script>
+  <script src="/static/x2_retrace.js?v=20251007a"></script>
 </body>
 </html>

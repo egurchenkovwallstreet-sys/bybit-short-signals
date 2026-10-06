@@ -60,6 +60,8 @@ class MarketCache:
         self.price_24h_pct: dict[str, float] = {}
         self.pump_scan_columns: list[dict[str, Any]] = []
         self.pump_scan_signals: dict[str, dict[str, Any]] = {}
+        self.x2_retrace_columns: list[dict[str, Any]] = []
+        self.x2_retrace_signals: dict[str, dict[str, Any]] = {}
 
     def apply(self, message: dict[str, Any]) -> str | None:
         kind = message.get("type")
@@ -71,6 +73,10 @@ class MarketCache:
             self.pump_scan_columns = list((message.get("data") or {}).get("columns") or [])
             self._reindex_pump_scan()
             return "pump_scan"
+        if kind == "x2_retrace_board":
+            self.x2_retrace_columns = list((message.get("data") or {}).get("columns") or [])
+            self._reindex_x2_retrace()
+            return "x2_retrace"
         if kind == "signal":
             self._upsert_signal(message.get("data") or {})
             return "board"
@@ -92,6 +98,35 @@ class MarketCache:
                 signals.append(item)
             view.append({**column, "signals": signals})
         return view
+
+    def view_x2_retrace_board(self) -> list[dict[str, Any]]:
+        view = []
+        for column in self.x2_retrace_columns:
+            signals = []
+            for signal in column.get("signals") or []:
+                symbol = signal.get("symbol") or ""
+                if not self._signal_turnover_ok(symbol):
+                    continue
+                item = dict(signal)
+                item["mini"] = self.mini_closes(symbol)
+                signals.append(item)
+            view.append({**column, "signals": signals})
+        return view
+
+    def x2_retrace_detail(self, symbol: str, interval: str = "60") -> dict[str, Any] | None:
+        signal = self.x2_retrace_signals.get(symbol)
+        if not signal:
+            return None
+        candles = self.klines.get((symbol, interval), [])
+        return {
+            "signal": signal,
+            "interval": interval,
+            "candles": candles,
+            "book": self.book_view(symbol),
+            "oi": _trim_time_window(self.oi.get(symbol, []), "timestamp"),
+            "funding_rate": self.funding.get(symbol),
+            "mini": self.mini_closes(symbol),
+        }
 
     def pump_scan_detail(self, symbol: str, interval: str = "15") -> dict[str, Any] | None:
         signal = self.pump_scan_signals.get(symbol)
@@ -220,6 +255,14 @@ class MarketCache:
                 symbol = signal.get("symbol")
                 if symbol:
                     self.pump_scan_signals[symbol] = signal
+
+    def _reindex_x2_retrace(self) -> None:
+        self.x2_retrace_signals = {}
+        for column in self.x2_retrace_columns:
+            for signal in column.get("signals") or []:
+                symbol = signal.get("symbol")
+                if symbol:
+                    self.x2_retrace_signals[symbol] = signal
 
     def _upsert_signal(self, data: dict[str, Any]) -> None:
         symbol = data.get("symbol")
