@@ -19,8 +19,7 @@ class HistoryPump:
 
 
 def _pick_bars(state: SymbolState) -> tuple[str, list[Bar]]:
-    # 4H даёт ~33d при лимите 200 — лучше для пампа длиннее недели.
-    for key in ("240", "60", "D"):
+    for key in ("60", "240", "D"):
         bars = state.bars_htf.get(key) or []
         if len(bars) >= config.X2_RETRACE_MIN_BARS:
             return key, bars

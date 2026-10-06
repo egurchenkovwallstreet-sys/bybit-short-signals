@@ -153,11 +153,9 @@ function x2CardHtml(row, color, active) {
   const peakHint =
     row.two_peak_kind === "double_top"
       ? `двойная вершина ${row.two_peak_tf || ""}`
-      : row.two_peak_kind === "marginal_hh"
-        ? `2 верш. ${row.two_peak_tf || ""} (чуть выше)`
-        : row.two_peak_kind === "lower_high"
-          ? `LH ${row.two_peak_tf || ""} (между ${row.two_peak_bars_between ?? "?"} св.)`
-          : "вершины —";
+      : row.two_peak_kind === "lower_high"
+        ? `LH ${row.two_peak_tf || ""} (между ${row.two_peak_bars_between ?? "?"} св.)`
+        : "вершины —";
   const lh = `LH 1H:${row.lh_1h ?? 0} · 4H:${row.lh_4h ?? 0} · ${peakHint}`;
   const pb = row.pullback_pct != null ? `откат ${row.pullback_pct}%` : "—";
   return `<article class="card x2-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
@@ -423,12 +421,7 @@ function fmt(n) {
 
 function formatTwoPeak(s) {
   if (!s.two_peak_kind) return "—";
-  const label =
-    s.two_peak_kind === "double_top"
-      ? "double top"
-      : s.two_peak_kind === "marginal_hh"
-        ? "2 вершины (2-я чуть выше)"
-        : "LH";
+  const label = s.two_peak_kind === "double_top" ? "double top" : "LH";
   return `${label} · ${s.two_peak_tf || "?"} · между ${s.two_peak_bars_between ?? "?"} св.`;
 }
 
