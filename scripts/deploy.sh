@@ -17,12 +17,12 @@ _stop_orphans() {
 }
 
 if command -v pm2 >/dev/null 2>&1; then
-  _stop_orphans
-  sleep 1
   ECOSYSTEM="$ROOT/scripts/ecosystem.config.cjs"
   if pm2 describe collector >/dev/null 2>&1; then
     pm2 restart "$ECOSYSTEM" --update-env
   else
+    _stop_orphans
+    sleep 1
     pm2 start "$ECOSYSTEM"
   fi
   pm2 save
