@@ -193,32 +193,38 @@ function renderX2Info(full) {
   const funding = BC.fundingFrom(s, detail);
   const mult = s.peak_mult != null ? Number(s.peak_mult).toFixed(2) : fmt(s.multiplier);
   pane.innerHTML = `
-    <header class="psc-info-head">
-      <h2>${s.symbol}</h2>
-      <span class="tag">${s.status} ${s.label}</span>
-      <button type="button" class="psc-close-chart">Закрыть график</button>
-      <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${s.symbol}" target="_blank" rel="noopener">Bybit</a>
-    </header>
-    <div class="psc-growth psc-growth-side">×${mult}</div>
-    <p class="quiet psc-sub">рост от минимума за 21 д</p>
-    <dl class="psc-info-fields">
-      <div class="psc-row"><dt>Min low</dt><dd>${s.min_low_5d ?? "—"}</dd></div>
-      <div class="psc-row"><dt>Откат от max 1H</dt><dd>${s.pullback_pct != null ? s.pullback_pct + "%" : "—"}</dd></div>
-      <div class="psc-row"><dt>LH · 1H / 4H</dt><dd>${s.lh_1h ?? 0} / ${s.lh_4h ?? 0}</dd></div>
-      <div class="psc-row"><dt>Две вершины</dt><dd>${formatTwoPeak(s)}</dd></div>
-      <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
-      <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
-      <div class="psc-row"><dt>Рост 24 ч</dt><dd>${s.price_24h_pct != null ? "+" + fmt(s.price_24h_pct) + "%" : "—"}</dd></div>
-      <div class="psc-row"><dt>EMA (глубина)</dt><dd>${s.ema_depth ?? 0} / 3</dd></div>
-      <div class="psc-row"><dt>Цена</dt><dd data-live="price">${fmtPrice(s.last_price)}</dd></div>
-      <div class="psc-row"><dt>Финансирование</dt><dd>${funding}</dd></div>
-    </dl>
-    <h3 class="psc-info-subhead">EMA 50 / 100 / 200</h3>
-    <div class="psc-ema-block">${renderX2EmaBlock(s.ema_by_tf)}</div>
-    <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
-    <div class="psc-book-pane" id="x2-book-pane"></div>
-    <button type="button" class="dismiss-watch" data-dismiss-board="x2_retrace" data-symbol="${s.symbol}">Снять с отслеживания</button>
-    <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(x2State.interval)}</p>`;
+    <div class="psc-info-meta">
+      <header class="psc-info-head">
+        <h2>${s.symbol}</h2>
+        <span class="tag">${s.status} ${s.label}</span>
+        <button type="button" class="psc-close-chart">Закрыть график</button>
+        <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${s.symbol}" target="_blank" rel="noopener">Bybit</a>
+      </header>
+      <div class="psc-growth psc-growth-side">×${mult}</div>
+      <p class="quiet psc-sub">рост от минимума за 21 д</p>
+      <dl class="psc-info-fields">
+        <div class="psc-row"><dt>Min low</dt><dd>${s.min_low_5d ?? "—"}</dd></div>
+        <div class="psc-row"><dt>Откат от max 1H</dt><dd>${s.pullback_pct != null ? s.pullback_pct + "%" : "—"}</dd></div>
+        <div class="psc-row"><dt>LH · 1H / 4H</dt><dd>${s.lh_1h ?? 0} / ${s.lh_4h ?? 0}</dd></div>
+        <div class="psc-row"><dt>Две вершины</dt><dd>${formatTwoPeak(s)}</dd></div>
+        <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
+        <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
+        <div class="psc-row"><dt>Рост 24 ч</dt><dd>${s.price_24h_pct != null ? "+" + fmt(s.price_24h_pct) + "%" : "—"}</dd></div>
+        <div class="psc-row"><dt>EMA (глубина)</dt><dd>${s.ema_depth ?? 0} / 3</dd></div>
+        <div class="psc-row"><dt>Цена</dt><dd data-live="price">${fmtPrice(s.last_price)}</dd></div>
+        <div class="psc-row"><dt>Финансирование</dt><dd>${funding}</dd></div>
+      </dl>
+      <h3 class="psc-info-subhead">EMA 50 / 100 / 200</h3>
+      <div class="psc-ema-block">${renderX2EmaBlock(s.ema_by_tf)}</div>
+    </div>
+    <div class="psc-book-section">
+      <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
+      <div class="psc-book-pane" id="x2-book-pane"></div>
+    </div>
+    <footer class="psc-info-foot">
+      <button type="button" class="dismiss-watch" data-dismiss-board="x2_retrace" data-symbol="${s.symbol}">Снять с отслеживания</button>
+      <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(x2State.interval)}</p>
+    </footer>`;
   window.boardChart.renderBookPane(X2_CHART.book, detail?.book, s.last_price, s.symbol);
 }
 

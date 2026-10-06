@@ -219,31 +219,37 @@ function renderPumpScanInfo(full) {
   }).join("");
 
   pane.innerHTML = `
-    <header class="psc-info-head">
-      <h2>${row.symbol}</h2>
-      <span class="tag">${row.status} ${row.label}</span>
-      <button type="button" class="psc-close-chart">Закрыть график</button>
-      <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${row.symbol}" target="_blank" rel="noopener">Bybit</a>
-    </header>
-    <div class="psc-growth psc-growth-side">+${fmt(row.price_24h_pct)}%</div>
-    <p class="quiet psc-sub">рост за 24 часа · ослабление ${row.weaken_score ?? 0}/7</p>
-    <dl class="psc-info-fields">
-      <div class="psc-row"><dt>EMA (глубина)</dt><dd>${row.ema_depth ?? 0} / 3</dd></div>
-      <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
-      <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
-      <div class="psc-row"><dt>Объём × к MA</dt><dd>${row.volume_ratio != null ? Number(row.volume_ratio).toFixed(1) : "—"}</dd></div>
-      <div class="psc-row"><dt>Цена</dt><dd data-live="price">${fmtPrice(row.last_price)}</dd></div>
-      <div class="psc-row"><dt>Финансирование</dt><dd>${funding}</dd></div>
-      <div class="psc-row"><dt>Тейкеры buy/sell</dt><dd>${taker}</dd></div>
-    </dl>
-    <h3 class="psc-info-subhead">Признаки ослабления</h3>
-    <ul class="checklist psc-checklist">${checks}</ul>
-    <h3 class="psc-info-subhead">EMA 50 / 100 / 200</h3>
-    <div class="psc-ema-block">${renderEmaBlock(row.ema_by_tf)}</div>
-    <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
-    <div class="psc-book-pane" id="pump-scan-book-pane"></div>
-    <button type="button" class="dismiss-watch" data-dismiss-board="pump_scan" data-symbol="${row.symbol}">Снять с отслеживания</button>
-    <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(pumpState.interval)}</p>`;
+    <div class="psc-info-meta">
+      <header class="psc-info-head">
+        <h2>${row.symbol}</h2>
+        <span class="tag">${row.status} ${row.label}</span>
+        <button type="button" class="psc-close-chart">Закрыть график</button>
+        <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${row.symbol}" target="_blank" rel="noopener">Bybit</a>
+      </header>
+      <div class="psc-growth psc-growth-side">+${fmt(row.price_24h_pct)}%</div>
+      <p class="quiet psc-sub">рост за 24 часа · ослабление ${row.weaken_score ?? 0}/7</p>
+      <dl class="psc-info-fields">
+        <div class="psc-row"><dt>EMA (глубина)</dt><dd>${row.ema_depth ?? 0} / 3</dd></div>
+        <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
+        <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
+        <div class="psc-row"><dt>Объём × к MA</dt><dd>${row.volume_ratio != null ? Number(row.volume_ratio).toFixed(1) : "—"}</dd></div>
+        <div class="psc-row"><dt>Цена</dt><dd data-live="price">${fmtPrice(row.last_price)}</dd></div>
+        <div class="psc-row"><dt>Финансирование</dt><dd>${funding}</dd></div>
+        <div class="psc-row"><dt>Тейкеры buy/sell</dt><dd>${taker}</dd></div>
+      </dl>
+      <h3 class="psc-info-subhead">Признаки ослабления</h3>
+      <ul class="checklist psc-checklist">${checks}</ul>
+      <h3 class="psc-info-subhead">EMA 50 / 100 / 200</h3>
+      <div class="psc-ema-block">${renderEmaBlock(row.ema_by_tf)}</div>
+    </div>
+    <div class="psc-book-section">
+      <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
+      <div class="psc-book-pane" id="pump-scan-book-pane"></div>
+    </div>
+    <footer class="psc-info-foot">
+      <button type="button" class="dismiss-watch" data-dismiss-board="pump_scan" data-symbol="${row.symbol}">Снять с отслеживания</button>
+      <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(pumpState.interval)}</p>
+    </footer>`;
   window.boardChart.renderBookPane(PUMP_CHART.book, detail?.book, row.last_price, row.symbol);
 }
 

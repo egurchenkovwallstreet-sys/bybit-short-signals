@@ -17,7 +17,7 @@ window.boardChart = {
   /** Стакан в боковой панели: глубина ±10% от текущей цены. */
   BOOK_DEPTH_PCT: 0.1,
   BOOK_PANEL: {
-    maxRowsPerSide: 28,
+    maxRowsPerSide: 64,
   },
   _bookFetch: new Map(),
 

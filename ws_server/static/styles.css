@@ -93,7 +93,7 @@ body {
   flex-direction: column;
   padding: 12px;
   gap: 12px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .pump-strategy-grid {
@@ -155,6 +155,10 @@ body {
   align-items: stretch;
 }
 
+.psc-workspace:not([hidden]) {
+  min-height: calc(100vh - 132px);
+}
+
 .psc-chart-pane {
   min-height: 0;
   display: flex;
@@ -184,15 +188,46 @@ body {
   min-height: min(72vh, 720px);
 }
 
+.psc-book-section {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.psc-book-section .psc-info-subhead {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
 .psc-book-pane {
+  flex: 1 1 0;
+  min-height: min(52vh, 720px);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   background: rgba(16, 20, 27, 0.85);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 6px;
-  max-height: min(48vh, 480px);
   overflow: auto;
+}
+
+.psc-info-meta {
+  flex: 0 1 auto;
+  max-height: min(34vh, 320px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+}
+
+.psc-info-foot {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .psc-book-table {
@@ -343,7 +378,8 @@ body {
 
 .psc-info-pane {
   min-height: 0;
-  overflow: auto;
+  height: 100%;
+  overflow: hidden;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;

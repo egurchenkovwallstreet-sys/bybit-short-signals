@@ -325,27 +325,33 @@ function renderPumpStrategyInfo() {
   const funding = window.boardChart.fundingFrom(row, detail);
   const taker = detail?.taker_ratio != null ? Number(detail.taker_ratio).toFixed(2) : "—";
   pane.innerHTML = `
-    <header class="psc-info-head">
-      <h2>${row.symbol}</h2>
-      <span class="tag">${row.kind_label}</span>
-      <button type="button" class="psc-close-chart">Закрыть график</button>
-      <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${row.symbol}" target="_blank" rel="noopener">Bybit</a>
-    </header>
-    <div class="psc-growth psc-growth-side">+${fmt(row.growth_pct)}%</div>
-    <dl class="psc-info-fields">
-      <div class="psc-row"><dt>Период</dt><dd>${row.period_label || "—"}</dd></div>
-      <div class="psc-row"><dt>Цена</dt><dd data-psc-live="price">${fmtPrice(row.last_price)}</dd></div>
-      <div class="psc-row"><dt>Дно / пик (окно)</dt><dd>${fmtPrice(row.valley_price)} → ${fmtPrice(row.peak_price)}</dd></div>
-      <div class="psc-row"><dt>Оборот 24 ч</dt><dd>${formatTurnover(row.turnover_24h_usdt)}</dd></div>
-      <div class="psc-row"><dt>OI · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
-      <div class="psc-row"><dt>OI · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
-      <div class="psc-row"><dt>Финансирование</dt><dd>${funding}</dd></div>
-      <div class="psc-row"><dt>Тейкеры buy/sell</dt><dd>${taker}</dd></div>
-    </dl>
-    <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
-    <div class="psc-book-pane" id="psc-book-pane"></div>
-    <button type="button" class="dismiss-watch" data-dismiss-board="pump_strategy" data-symbol="${row.symbol}">Снять с отслеживания</button>
-    <p class="quiet psc-info-hint">Таймфрейм: ${PSC_TF.find(([c]) => c === pumpStrategyState.interval)?.[1] || pumpStrategyState.interval}. Данные по списку подгружаются в фоне.</p>`;
+    <div class="psc-info-meta">
+      <header class="psc-info-head">
+        <h2>${row.symbol}</h2>
+        <span class="tag">${row.kind_label}</span>
+        <button type="button" class="psc-close-chart">Закрыть график</button>
+        <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${row.symbol}" target="_blank" rel="noopener">Bybit</a>
+      </header>
+      <div class="psc-growth psc-growth-side">+${fmt(row.growth_pct)}%</div>
+      <dl class="psc-info-fields">
+        <div class="psc-row"><dt>Период</dt><dd>${row.period_label || "—"}</dd></div>
+        <div class="psc-row"><dt>Цена</dt><dd data-psc-live="price">${fmtPrice(row.last_price)}</dd></div>
+        <div class="psc-row"><dt>Дно / пик (окно)</dt><dd>${fmtPrice(row.valley_price)} → ${fmtPrice(row.peak_price)}</dd></div>
+        <div class="psc-row"><dt>Оборот 24 ч</dt><dd>${formatTurnover(row.turnover_24h_usdt)}</dd></div>
+        <div class="psc-row"><dt>OI · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
+        <div class="psc-row"><dt>OI · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
+        <div class="psc-row"><dt>Финансирование</dt><dd>${funding}</dd></div>
+        <div class="psc-row"><dt>Тейкеры buy/sell</dt><dd>${taker}</dd></div>
+      </dl>
+    </div>
+    <div class="psc-book-section">
+      <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
+      <div class="psc-book-pane" id="psc-book-pane"></div>
+    </div>
+    <footer class="psc-info-foot">
+      <button type="button" class="dismiss-watch" data-dismiss-board="pump_strategy" data-symbol="${row.symbol}">Снять с отслеживания</button>
+      <p class="quiet psc-info-hint">Таймфрейм: ${PSC_TF.find(([c]) => c === pumpStrategyState.interval)?.[1] || pumpStrategyState.interval}. Данные по списку подгружаются в фоне.</p>
+    </footer>`;
   window.boardChart.renderBookPane("psc-book-pane", detail?.book, row.last_price, row.symbol);
 }
 
