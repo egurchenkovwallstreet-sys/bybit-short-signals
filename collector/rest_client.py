@@ -177,7 +177,7 @@ class BybitRest:
         interval: str,
         days: int | None = None,
     ) -> dict[str, Any] | None:
-        span = days if days is not None else config.PUMP_SCAN_CHART_WINDOW_DAYS
+        span = days if days is not None else config.PUMP_SCAN_CHART_FETCH_DAYS
         needed = config.kline_bars_for_days(interval, span)
         cutoff_ms = int(time.time() * 1000) - span * 86_400_000
         merged: list[dict[str, Any]] = []
@@ -223,7 +223,7 @@ class BybitRest:
         interval: str,
         days: int | None = None,
     ) -> dict[str, Any] | None:
-        span = days if days is not None else config.PUMP_SCAN_CHART_WINDOW_DAYS
+        span = days if days is not None else config.PUMP_SCAN_CHART_FETCH_DAYS
         needed = config.oi_bars_for_days(interval, span)
         cutoff_ms = int(time.time() * 1000) - span * 86_400_000
         merged: list[dict[str, Any]] = []

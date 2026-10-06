@@ -257,8 +257,9 @@ PUMP_SCAN_COLUMNS = {
     2: {"color": "yellow", "status": "СМЕНА ИМПУЛЬСА", "label": "2/4"},
     1: {"color": "blue", "status": "НАБЛЮДЕНИЕ", "label": "1/4"},
 }
-# Графики объёма и OI во вкладке «Памп-скан».
-PUMP_SCAN_CHART_WINDOW_DAYS = _env_int("PUMP_SCAN_CHART_WINDOW_DAYS", 7)
+# Графики объёма и OI во вкладке «Памп-скан»: грузим историю, прокрутка в UI.
+PUMP_SCAN_CHART_MIN_DAYS = _env_int("PUMP_SCAN_CHART_MIN_DAYS", 7)
+PUMP_SCAN_CHART_FETCH_DAYS = _env_int("PUMP_SCAN_CHART_FETCH_DAYS", 30)
 BYBIT_KLINE_MAX_LIMIT = _env_int("BYBIT_KLINE_MAX_LIMIT", 1000)
 
 _KLINE_BAR_MINUTES = {"1": 1, "5": 5, "15": 15, "30": 30, "60": 60, "240": 240, "D": 1440}
@@ -277,7 +278,7 @@ CHART_TF_TO_OI_INTERVAL = {
 def kline_bars_for_days(interval: str, days: int | None = None) -> int:
     import math
 
-    span = days if days is not None else PUMP_SCAN_CHART_WINDOW_DAYS
+    span = days if days is not None else PUMP_SCAN_CHART_FETCH_DAYS
     minutes = _KLINE_BAR_MINUTES.get(interval, 60)
     return max(10, int(math.ceil(span * 24 * 60 / minutes)))
 
@@ -285,7 +286,7 @@ def kline_bars_for_days(interval: str, days: int | None = None) -> int:
 def oi_bars_for_days(oi_interval: str, days: int | None = None) -> int:
     import math
 
-    span = days if days is not None else PUMP_SCAN_CHART_WINDOW_DAYS
+    span = days if days is not None else PUMP_SCAN_CHART_FETCH_DAYS
     minutes = _OI_BAR_MINUTES.get(oi_interval.lower(), 5)
     return max(10, int(math.ceil(span * 24 * 60 / minutes)))
 

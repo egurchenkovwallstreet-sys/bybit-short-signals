@@ -18,7 +18,10 @@ const PUMP_CHECKS = [
   ["taker_sellers", "Продавцы в контроле"],
 ];
 
-const PUMP_WINDOW_DAYS = 7;
+/** Сколько дней истории запрашиваем с биржи (прокрутка назад). */
+const PUMP_FETCH_DAYS = 30;
+/** Стартовый вид: последние N дней; дальше — колёсико и ползунок. */
+const PUMP_INITIAL_VIEW_DAYS = 7;
 
 const TF_TO_OI = {
   "1": "5min",
@@ -82,8 +85,30 @@ function oiIntervalForTf(tf) {
   return TF_TO_OI[tf] || "5min";
 }
 
-function pumpWindowMs() {
-  return PUMP_WINDOW_DAYS * 24 * 3600 * 1000;
+function pumpDataZoom(points, viewDays = PUMP_INITIAL_VIEW_DAYS) {
+  if (!points.length) {
+    return [
+      { type: "inside", xAxisIndex: 0, filterMode: "none" },
+      { type: "slider", xAxisIndex: 0, height: 20, bottom: 4, filterMode: "none" },
+    ];
+  }
+  const tMin = points[0][0];
+  const tMax = points[points.length - 1][0];
+  const span = Math.max(tMax - tMin, 1);
+  const viewMs = viewDays * 24 * 3600 * 1000;
+  const start = Math.max(0, Math.min(100, ((tMax - viewMs - tMin) / span) * 100));
+  const zoom = { start, end: 100 };
+  return [
+    { type: "inside", xAxisIndex: 0, filterMode: "none", ...zoom },
+    {
+      type: "slider",
+      xAxisIndex: 0,
+      height: 20,
+      bottom: 4,
+      filterMode: "none",
+      ...zoom,
+    },
+  ];
 }
 
 function selectPumpSymbol(symbol) {
@@ -181,7 +206,7 @@ function pumpDetailShell(s) {
     <ul class="checklist" id="pump-checks"></ul>
     <h3>EMA 50 / 100 / 200</h3>
     <div id="pump-ema"></div>
-    <p class="quiet">Объём и OI — минимум ${PUMP_WINDOW_DAYS} дней; OI подстраивается под выбранный TF (1m/5m → 5m OI, 15m → 15m … 1D → 1d).</p>
+    <p class="quiet">Объём/OI: история до ${PUMP_FETCH_DAYS} д · OI по TF · прокрутка — колёсико мыши на графике или ползунок внизу (влево = раньше).</p>
     <div class="tf-row pump-tf-row">${tfButtons}</div>
     <div class="pump-visual-stack detail-visual-stack">
       <section class="chart-block">
@@ -241,14 +266,14 @@ function renderEmaBlock(map) {
 async function ensurePumpCandles(symbol, interval) {
   const detail = pumpState.detail;
   if (!detail) return [];
-  const loadKey = `${symbol}:${interval}:${PUMP_WINDOW_DAYS}`;
+  const loadKey = `${symbol}:${interval}:${PUMP_FETCH_DAYS}`;
   if (pumpState.volLoadKey === loadKey && (detail.candles || []).length >= 20) {
     return detail.candles;
   }
   try {
     const q = new URLSearchParams({
       interval,
-      days: String(PUMP_WINDOW_DAYS),
+      days: String(PUMP_FETCH_DAYS),
       refresh: "1",
     });
     const res = await fetch(`/api/klines/${encodeURIComponent(symbol)}?${q}`);
@@ -267,14 +292,14 @@ async function ensurePumpOi(symbol, chartInterval) {
   const detail = pumpState.detail;
   if (!detail) return [];
   const oiInterval = oiIntervalForTf(chartInterval);
-  const loadKey = `${symbol}:${oiInterval}:${PUMP_WINDOW_DAYS}`;
+  const loadKey = `${symbol}:${oiInterval}:${PUMP_FETCH_DAYS}`;
   if (pumpState.oiLoadKey === loadKey && (detail.oi || []).length >= 20) {
     return detail.oi;
   }
   try {
     const q = new URLSearchParams({
       interval: oiInterval,
-      days: String(PUMP_WINDOW_DAYS),
+      days: String(PUMP_FETCH_DAYS),
       refresh: "1",
     });
     const res = await fetch(`/api/open-interest/${encodeURIComponent(symbol)}?${q}`);
@@ -302,36 +327,29 @@ async function refreshPumpCharts() {
 }
 
 function candleVolumePoints(candles) {
-  const cutoff = Date.now() - pumpWindowMs();
   const out = [];
   for (const row of candles || []) {
     const t = Number(row.timestamp ?? row.time);
     const ms = t > 1e12 ? t : t * 1000;
     const v = Number(row.volume ?? row.v ?? 0);
     if (!ms || Number.isNaN(v)) continue;
-    if (ms >= cutoff) out.push([ms, v]);
+    out.push([ms, v]);
   }
   out.sort((a, b) => a[0] - b[0]);
-  if (!out.length && candles?.length) {
-    for (const row of candles.slice(-500)) {
-      const t = Number(row.timestamp ?? row.time);
-      const ms = t > 1e12 ? t : t * 1000;
-      const v = Number(row.volume ?? row.v ?? 0);
-      if (ms && !Number.isNaN(v)) out.push([ms, v]);
-    }
-  }
   return out;
 }
 
-function chartTimeExtents(points) {
-  const now = Date.now();
-  let xmin = now - pumpWindowMs();
-  let xmax = now + 60000;
-  if (points.length) {
-    xmin = Math.min(xmin, ...points.map((p) => p[0]));
-    xmax = Math.max(xmax, ...points.map((p) => p[0]));
+function oiSeriesPoints(oiRows) {
+  const out = [];
+  for (const row of oiRows || []) {
+    const t = Number(row.timestamp ?? row.time);
+    const ms = t > 1e12 ? t : t * 1000;
+    const v = Number(row.open_interest ?? row.value);
+    if (!ms || Number.isNaN(v)) continue;
+    out.push([ms, v]);
   }
-  return { xmin, xmax };
+  out.sort((a, b) => a[0] - b[0]);
+  return out;
 }
 
 function drawPumpVolumeChart(candles, interval) {
@@ -340,18 +358,16 @@ function drawPumpVolumeChart(candles, interval) {
   const chart = echarts.getInstanceByDom(node) || echarts.init(node);
   const points = candleVolumePoints(candles);
   const tfLabel = PUMP_TF.find(([c]) => c === interval)?.[1] || interval;
-  const { xmin, xmax } = chartTimeExtents(points);
   chart.setOption({
     backgroundColor: "transparent",
     title: {
-      text: `Объём · ${tfLabel} · ${PUMP_WINDOW_DAYS} д`,
+      text: `Объём · ${tfLabel}`,
       textStyle: { color: "#c5d0de", fontSize: 13 },
     },
-    grid: { left: 52, right: 12, top: 36, bottom: 28 },
+    grid: { left: 52, right: 12, top: 36, bottom: 44 },
+    dataZoom: pumpDataZoom(points),
     xAxis: {
       type: "time",
-      min: xmin,
-      max: xmax,
       axisLabel: { color: "#8e9aab" },
     },
     yAxis: {
@@ -388,22 +404,18 @@ function drawPumpOiChart(oiRows, chartInterval) {
   const node = document.getElementById("pump-oi-chart");
   if (!node || !window.echarts) return;
   const chart = echarts.getInstanceByDom(node) || echarts.init(node);
-  const windowHours = PUMP_WINDOW_DAYS * 24;
-  const pointsFn = window.signalCharts?.pointsOf;
-  const points = pointsFn ? pointsFn(oiRows, "open_interest", windowHours) : [];
+  const points = oiSeriesPoints(oiRows);
   const oiIv = oiIntervalForTf(chartInterval);
-  const { xmin, xmax } = chartTimeExtents(points);
   chart.setOption({
     backgroundColor: "transparent",
     title: {
-      text: `Открытый интерес · ${oiIv} · ${PUMP_WINDOW_DAYS} д`,
+      text: `Открытый интерес · ${oiIv}`,
       textStyle: { color: "#c5d0de", fontSize: 13 },
     },
-    grid: { left: 52, right: 12, top: 36, bottom: 28 },
+    grid: { left: 52, right: 12, top: 36, bottom: 44 },
+    dataZoom: pumpDataZoom(points),
     xAxis: {
       type: "time",
-      min: xmin,
-      max: xmax,
       axisLabel: { color: "#8e9aab" },
     },
     yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },

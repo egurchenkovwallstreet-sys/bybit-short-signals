@@ -144,7 +144,7 @@ async def open_interest(
     interval = interval.lower()
     if interval not in _OI_INTERVALS:
         raise HTTPException(status_code=400, detail="Некорректный интервал OI")
-    window_days = days if days > 0 else config.PUMP_SCAN_CHART_WINDOW_DAYS
+    window_days = days if days > 0 else config.PUMP_SCAN_CHART_FETCH_DAYS
     hub: Hub = app.state.hub
     cached = hub.cache.oi.get(symbol)
     min_pts = max(10, config.oi_bars_for_days(interval, window_days) // 4)
@@ -193,7 +193,7 @@ async def klines(
         raise HTTPException(status_code=400, detail="Некорректный тикер")
     if interval not in {"1", "5", "15", "30", "60", "240", "D"}:
         raise HTTPException(status_code=400, detail="Некорректный интервал")
-    window_days = days if days > 0 else config.PUMP_SCAN_CHART_WINDOW_DAYS
+    window_days = days if days > 0 else config.PUMP_SCAN_CHART_FETCH_DAYS
     hub: Hub = app.state.hub
     key = (symbol, interval)
     min_bars = (
