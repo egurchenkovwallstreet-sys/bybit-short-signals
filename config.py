@@ -93,7 +93,7 @@ WS_TOPIC_TICKER = "tickers.{symbol}"
 OI_INTERVALS = ("5min", "15min", "30min", "1h", "4h", "1d")
 
 # Коды интервалов свечей Bybit v5: 1, 5, 15, 60, 240, D.
-KLINE_INTERVALS = ("1", "5", "15", "60", "240", "D")
+KLINE_INTERVALS = ("1", "5", "15", "30", "60", "240", "D")
 
 # Ссылка на график. Открывается только Bybit, решение о входе — вручную.
 BYBIT_TRADE_URL = "https://www.bybit.com/trade/usdt/{symbol}"
@@ -240,6 +240,15 @@ PROBABILITY_CAP = _env_float("PROBABILITY_CAP", 95)
 BAR_HISTORY_LIMIT = 200
 # Минутные бары для пампа. Старшие ТФ для свупов: 1H, 4H, 1D.
 HTF_INTERVALS = ("60", "240", "D")
+# Свечи для EMA 50/100/200 в «Памп-скан» (пересекаются с HTF на 60 и 240).
+PUMP_SCAN_EMA_INTERVALS = ("15", "30", "60", "240")
+PUMP_SCAN_MIN_24H_PCT = _env_float("PUMP_SCAN_MIN_24H_PCT", 35.0)
+PUMP_SCAN_COLUMNS = {
+    4: {"color": "green", "status": "К ШОРТУ", "label": "4/4"},
+    3: {"color": "orange", "status": "ОСЛАБЛЕНИЕ", "label": "3/4"},
+    2: {"color": "yellow", "status": "СМЕНА ИМПУЛЬСА", "label": "2/4"},
+    1: {"color": "blue", "status": "НАБЛЮДЕНИЕ", "label": "1/4"},
+}
 
 
 # --- Исход сигнала -----------------------------------------------------------

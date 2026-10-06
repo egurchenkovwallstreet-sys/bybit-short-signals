@@ -42,6 +42,7 @@ class SymbolState:
     last_price: float | None = None
     funding_rate: float | None = None
     turnover_24h_usdt: float | None = None
+    price_24h_change: float | None = None
 
     def ingest(self, message: dict) -> None:
         kind = message.get("type")
@@ -131,6 +132,9 @@ class SymbolState:
         turnover = _float(data.get("turnover_24h"))
         if turnover is not None and turnover >= 0:
             self.turnover_24h_usdt = turnover
+        change = _float(data.get("price_24h_change"))
+        if change is not None:
+            self.price_24h_change = change
 
     def _oi(self, data: dict) -> None:
         # Для решения «OI падает» хватает 5-минуток. Остальные интервалы не мешают.
@@ -162,9 +166,11 @@ class SymbolState:
             self.bars_1m = _merge_bars(self.bars_1m, incoming, config.BAR_HISTORY_LIMIT)
             self.last_price = self.bars_1m[-1].close
             return
-        if interval in config.HTF_INTERVALS:
+        stored = set(config.HTF_INTERVALS) | set(config.PUMP_SCAN_EMA_INTERVALS)
+        if interval in stored:
+            limit = config.LEVEL_LOOKBACK_CANDLES if interval in config.HTF_INTERVALS else config.BAR_HISTORY_LIMIT
             current = self.bars_htf.get(interval, [])
-            self.bars_htf[interval] = _merge_bars(current, incoming, config.LEVEL_LOOKBACK_CANDLES)
+            self.bars_htf[interval] = _merge_bars(current, incoming, limit)
 
     def _trim_buckets(self, timestamp: int) -> None:
         cutoff = minute_start(timestamp) - 180 * 60_000

@@ -11,6 +11,7 @@
     <div class="brand">Сигналы на шорт</div>
     <nav class="tabs">
       <button type="button" class="tab active" data-tab="signals">Сигналы</button>
+      <button type="button" class="tab" data-tab="pump_scan">Памп-скан</button>
       <button type="button" class="tab" data-tab="pending">Не отработанные</button>
       <button type="button" class="tab" data-tab="stats">Статистика</button>
       <button type="button" class="tab" data-tab="btc">Тест стратегии</button>
@@ -26,6 +27,16 @@
     <aside id="detail" class="detail">
       <p class="empty">Выберите сигнал слева.</p>
     </aside>
+  </section>
+
+  <section id="view-pump-scan" class="pump-scan-view" hidden>
+    <p class="quiet pump-scan-intro">Монеты с ростом ≥35% за 24ч и оборотом ≥1M USDT. Колонки — стадии ослабления пампа перед шортом.</p>
+    <div class="pump-scan-body workspace">
+      <div id="pump-columns" class="columns pump-columns"></div>
+      <aside id="pump-detail" class="detail">
+        <p class="empty">Выберите монету слева.</p>
+      </aside>
+    </div>
   </section>
 
   <section id="view-btc" class="btc-test" hidden>
@@ -132,6 +143,7 @@
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/btc_test.js?v=20251006d"></script>
-  <script src="/static/app.js?v=20251006l"></script>
+  <script src="/static/pump_scan.js?v=20251006a"></script>
+  <script src="/static/app.js?v=20251006m"></script>
 </body>
 </html>

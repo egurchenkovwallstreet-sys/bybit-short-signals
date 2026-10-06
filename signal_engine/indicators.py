@@ -5,6 +5,21 @@ from __future__ import annotations
 import numpy as np
 
 
+def ema(values: list[float], period: int) -> list[float | None]:
+    """EMA по всей серии; в начале None, пока мало данных."""
+    out: list[float | None] = [None] * len(values)
+    if period <= 0 or len(values) < period:
+        return out
+    k = 2 / (period + 1)
+    seed = float(sum(values[:period]) / period)
+    out[period - 1] = seed
+    prev = seed
+    for index in range(period, len(values)):
+        prev = values[index] * k + prev * (1 - k)
+        out[index] = prev
+    return out
+
+
 def sma(values: list[float], period: int) -> float | None:
     """Простая средняя последних period значений."""
     if period < 1 or len(values) < period:

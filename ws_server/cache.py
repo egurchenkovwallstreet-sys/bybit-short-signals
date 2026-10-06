@@ -56,6 +56,9 @@ class MarketCache:
         self.taker_sell: dict[str, float] = {}
         self.mini: dict[str, list[float]] = {}
         self.turnover_24h: dict[str, float] = {}
+        self.price_24h_pct: dict[str, float] = {}
+        self.pump_scan_columns: list[dict[str, Any]] = []
+        self.pump_scan_signals: dict[str, dict[str, Any]] = {}
 
     def apply(self, message: dict[str, Any]) -> str | None:
         kind = message.get("type")
@@ -63,6 +66,10 @@ class MarketCache:
             self.columns = list((message.get("data") or {}).get("columns") or [])
             self._reindex()
             return "board"
+        if kind == "pump_scan_board":
+            self.pump_scan_columns = list((message.get("data") or {}).get("columns") or [])
+            self._reindex_pump_scan()
+            return "pump_scan"
         if kind == "signal":
             self._upsert_signal(message.get("data") or {})
             return "board"
@@ -70,6 +77,42 @@ class MarketCache:
             self._market(message)
             return "market"
         return None
+
+    def view_pump_scan_board(self) -> list[dict[str, Any]]:
+        view = []
+        for column in self.pump_scan_columns:
+            signals = []
+            for signal in column.get("signals") or []:
+                symbol = signal.get("symbol") or ""
+                if not self._signal_turnover_ok(symbol):
+                    continue
+                item = dict(signal)
+                item["mini"] = self.mini_closes(symbol)
+                signals.append(item)
+            view.append({**column, "signals": signals})
+        return view
+
+    def pump_scan_detail(self, symbol: str) -> dict[str, Any] | None:
+        signal = self.pump_scan_signals.get(symbol)
+        if not signal:
+            return None
+        buy = self.taker_buy.get(symbol, 0.0)
+        sell = self.taker_sell.get(symbol, 0.0)
+        ratio = None
+        if buy or sell:
+            ratio = float("inf") if sell == 0 else buy / sell
+            if ratio == float("inf"):
+                ratio = None
+        return {
+            "signal": signal,
+            "book": self.book_view(symbol),
+            "liquidations": _trim_time_window(self.liquidations.get(symbol, [])[-400:], "time"),
+            "oi": _trim_time_window(self.oi.get(symbol, []), "timestamp"),
+            "cvd": _trim_time_window(self.cvd.get(symbol, []), "time"),
+            "funding_rate": self.funding.get(symbol),
+            "taker_ratio": ratio,
+            "mini": self.mini_closes(symbol),
+        }
 
     def view_board(self) -> list[dict[str, Any]]:
         """Колонки для браузера: мини-график и живой P&L шорта."""
@@ -165,6 +208,14 @@ class MarketCache:
                 if symbol:
                     self.signals[symbol] = signal
 
+    def _reindex_pump_scan(self) -> None:
+        self.pump_scan_signals = {}
+        for column in self.pump_scan_columns:
+            for signal in column.get("signals") or []:
+                symbol = signal.get("symbol")
+                if symbol:
+                    self.pump_scan_signals[symbol] = signal
+
     def _upsert_signal(self, data: dict[str, Any]) -> None:
         symbol = data.get("symbol")
         if not symbol or data.get("outcome"):
@@ -226,6 +277,10 @@ class MarketCache:
             turnover = _num(data.get("turnover_24h"))
             if turnover is not None:
                 self.turnover_24h[symbol] = turnover
+            change = _num(data.get("price_24h_change"))
+            if change is not None:
+                pct = change * 100.0 if abs(change) <= 2.0 else change
+                self.price_24h_pct[symbol] = pct
             price = _num(data.get("last_price"))
             if price:
                 self._touch_price(symbol, price)

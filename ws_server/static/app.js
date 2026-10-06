@@ -131,6 +131,7 @@ function connectSocket() {
   }
 
   socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+  window.signalSocket = socket;
 
   socket.addEventListener("open", () => {
     wsBackoffMs = 800;
@@ -171,12 +172,20 @@ function connectSocket() {
     renderDetail();
     renderStats();
     if (message.btc_test && window.btcTest) window.btcTest.onBtcMessage(message.btc_test);
+    if (window.pumpScan) {
+      window.pumpScan.onPumpScanSnapshot(message.pump_scan_board, message.pump_scan_detail);
+    }
   } else if (message.type === "btc_test" && window.btcTest) {
     window.btcTest.onBtcMessage(message.data);
   } else if (message.type === "board") {
     setDemo(message.demo);
     state.board = message.data || [];
     renderBoard();
+  } else if (message.type === "pump_scan_board" && window.pumpScan) {
+    setDemo(message.demo);
+    window.pumpScan.onPumpScanBoard(message.data);
+  } else if (message.type === "pump_scan_detail" && window.pumpScan) {
+    window.pumpScan.onPumpScanDetail(message.symbol, message.data);
   } else if (message.type === "detail" && (!state.selected || message.symbol === state.selected)) {
     const changed = state.selected !== message.symbol;
     state.selected = message.symbol;
@@ -206,6 +215,8 @@ function showTab(name) {
     button.classList.toggle("active", button.dataset.tab === name);
   });
   document.getElementById("view-signals").hidden = name !== "signals";
+  const pumpView = document.getElementById("view-pump-scan");
+  if (pumpView) pumpView.hidden = name !== "pump_scan";
   document.getElementById("view-pending").hidden = name !== "pending";
   document.getElementById("view-stats").hidden = name !== "stats";
   const btcView = document.getElementById("view-btc");
@@ -215,6 +226,9 @@ function showTab(name) {
       window.btcTest.initBtcTab();
       window.btcTest.fetchBtcFallback?.();
     });
+  }
+  if (name === "pump_scan" && window.pumpScan) {
+    window.pumpScan.initPumpScanTab();
   }
   if (name === "pending") {
     renderPending();

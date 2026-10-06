@@ -28,6 +28,8 @@ class Client:
         self.symbol: str | None = None
         self.interval = "1"
         self.force_detail = False
+        self.pump_scan_symbol: str | None = None
+        self.force_pump_scan_detail = False
 
 
 class Hub:
@@ -38,6 +40,7 @@ class Hub:
         self.btc_dirty = False
         self.demo = False
         self.board_dirty = False
+        self.pump_scan_dirty = False
         self.market_dirty = False
         self._stopped = False
         self._stats_cache: dict[str, Any] | None = None
@@ -77,12 +80,15 @@ class Hub:
         board = self.cache.view_board()
         symbol = client.symbol or _first_symbol(board)
         client.symbol = symbol
+        pump_symbol = client.pump_scan_symbol
         return {
             "type": "snapshot",
             "demo": self.demo,
             "board": board,
+            "pump_scan_board": self.cache.view_pump_scan_board(),
             "stats": self.stats(),
             "detail": self.cache.detail(symbol, client.interval) if symbol else None,
+            "pump_scan_detail": self.cache.pump_scan_detail(pump_symbol) if pump_symbol else None,
             "btc_test": self.btc.view(),
         }
 
@@ -100,6 +106,11 @@ class Hub:
             if interval in {"1", "5", "15", "60", "240", "D"}:
                 client.interval = interval
                 client.force_detail = True
+        elif kind == "select_pump_scan":
+            symbol = str(message.get("symbol") or "")
+            if symbol in self.cache.pump_scan_signals:
+                client.pump_scan_symbol = symbol
+                client.force_pump_scan_detail = True
 
     async def run(self) -> None:
         flush = asyncio.create_task(self._flush_loop())
@@ -161,6 +172,9 @@ class Hub:
                     self.demo = False
                     self.board_dirty = True
                     self._stats_cache = None
+                elif kind == "pump_scan":
+                    self.demo = False
+                    self.pump_scan_dirty = True
                 elif kind == "market":
                     self.market_dirty = True
         finally:
@@ -182,9 +196,11 @@ class Hub:
             await asyncio.sleep(tick)
             now = time.monotonic()
             board = self.cache.view_board() if self.board_dirty else None
+            pump_board = self.cache.view_pump_scan_board() if self.pump_scan_dirty else None
             send_detail = self.market_dirty
             btc = self.btc.view() if self.btc_dirty else None
             self.board_dirty = False
+            self.pump_scan_dirty = False
             self.market_dirty = False
             self.btc_dirty = False
             pnl = None
@@ -198,6 +214,13 @@ class Hub:
                         if not client.symbol:
                             client.symbol = _first_symbol(board)
                             client.force_detail = bool(client.symbol)
+                    if pump_board is not None:
+                        await client.websocket.send_json(
+                            {"type": "pump_scan_board", "data": pump_board, "demo": self.demo}
+                        )
+                        if not client.pump_scan_symbol:
+                            client.pump_scan_symbol = _first_symbol(pump_board)
+                            client.force_pump_scan_detail = bool(client.pump_scan_symbol)
                     if client.symbol and (send_detail or client.force_detail):
                         await client.websocket.send_json(
                             {
@@ -207,6 +230,15 @@ class Hub:
                             }
                         )
                         client.force_detail = False
+                    if client.pump_scan_symbol and (send_detail or client.force_pump_scan_detail):
+                        await client.websocket.send_json(
+                            {
+                                "type": "pump_scan_detail",
+                                "symbol": client.pump_scan_symbol,
+                                "data": self.cache.pump_scan_detail(client.pump_scan_symbol),
+                            }
+                        )
+                        client.force_pump_scan_detail = False
                     if pnl is not None:
                         await client.websocket.send_json({"type": "pnl", "items": pnl})
                     if btc is not None:
