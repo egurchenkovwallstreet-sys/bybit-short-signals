@@ -105,7 +105,7 @@ class MarketCache:
             signals = []
             for signal in column.get("signals") or []:
                 symbol = signal.get("symbol") or ""
-                if not self._signal_turnover_ok(symbol):
+                if not self._x2_turnover_ok(symbol, signal):
                     continue
                 item = dict(signal)
                 item["mini"] = self.mini_closes(symbol)
@@ -233,6 +233,18 @@ class MarketCache:
         if turnover is None:
             return False
         return turnover >= config.UNIVERSE_MIN_TURNOVER_24H_USDT
+
+    def _x2_turnover_ok(self, symbol: str, signal: dict[str, Any]) -> bool:
+        """Доска 2×: свой порог 300k; не показываем без turnover или ниже минимума."""
+        if not symbol:
+            return False
+        floor = config.X2_RETRACE_MIN_TURNOVER_24H_USDT
+        from_cache = self.turnover_24h.get(symbol)
+        from_signal = _num(signal.get("turnover_24h_usdt"))
+        values = [v for v in (from_cache, from_signal) if v is not None and v > 0]
+        if not values:
+            return False
+        return min(values) >= floor
 
     def mini_closes(self, symbol: str) -> list[float]:
         if self.mini.get(symbol):

@@ -14,6 +14,7 @@ from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import (
     TwoPeakMatch,
     absolute_high_since,
+    closed_bars,
     find_two_peak_htf,
     lower_high_chain_count,
 )
@@ -22,6 +23,7 @@ from signal_engine.watch_store import WatchRow, WatchStore
 BOARD_ID = "x2_retrace"
 
 _MS_24H = 24 * 3600 * 1000
+_MS_7D = 7 * 24 * 3600 * 1000
 _MS_1H = 3600 * 1000
 
 
@@ -37,12 +39,89 @@ def _resolve_last_price(state: SymbolState) -> float | None:
     return None
 
 
-def _eligible(state: SymbolState) -> bool:
+def _meets_x2_turnover(state: SymbolState) -> bool:
     turnover = state.turnover_24h_usdt
-    if turnover is not None and turnover < config.UNIVERSE_MIN_TURNOVER_24H_USDT:
+    if turnover is None or turnover < config.X2_RETRACE_MIN_TURNOVER_24H_USDT:
+        return False
+    return True
+
+
+def _eligible(state: SymbolState) -> bool:
+    if not _meets_x2_turnover(state):
         return False
     price = _resolve_last_price(state)
     if price is None or price <= 0:
+        return False
+    return True
+
+
+def price_change_7d_pct(state: SymbolState, now_ms: int) -> float | None:
+    """Изменение close за 7 суток (закрытые свечи 1D или 1H)."""
+    for interval, min_bars, lookback in (("D", 8, 7), ("60", 7 * 24 + 2, 7 * 24)):
+        bars = state.bars_htf.get(interval) or []
+        closed = closed_bars(bars, interval, now_ms)
+        if len(closed) < min_bars:
+            continue
+        ref = closed[-lookback - 1].close
+        cur = closed[-1].close
+        if ref <= 0 or cur <= 0:
+            continue
+        return (cur - ref) / ref * 100.0
+    price = _resolve_last_price(state)
+    if price is None:
+        return None
+    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
+    if len(bars_1h) < 2:
+        return None
+    ref_ts = now_ms - _MS_7D
+    ref_close: float | None = None
+    for bar in bars_1h:
+        if bar.timestamp <= ref_ts:
+            ref_close = float(bar.close)
+        else:
+            break
+    if ref_close is None or ref_close <= 0:
+        ref_close = float(bars_1h[0].close)
+    return (price - ref_close) / ref_close * 100.0
+
+
+def _pump_leg_volume_spike_ok(bars_1h: list[Bar], valley_ts: int, now_ms: int) -> bool:
+    """Обязательный всплеск объёма на участке роста до абсолютного пика 1H."""
+    closed = closed_bars(bars_1h, "60", now_ms)
+    leg = [b for b in closed if b.timestamp >= valley_ts]
+    if len(leg) < 3:
+        return False
+    peak_i = max(range(len(leg)), key=lambda i: leg[i].high)
+    growth = leg[: peak_i + 1]
+    if len(growth) < 2:
+        return False
+    vols = [float(b.volume) for b in growth]
+    peak_vol = max(vols)
+    pre = [b for b in closed if b.timestamp < valley_ts]
+    if len(pre) >= 2:
+        tail = pre[-5:]
+        baseline = sum(float(b.volume) for b in tail) / len(tail)
+    else:
+        head = vols[: max(1, len(vols) // 2)]
+        baseline = sum(head) / len(head)
+    if baseline <= 0:
+        return False
+    return peak_vol / baseline >= config.X2_RETRACE_PUMP_VOLUME_SPIKE_MIN
+
+
+def _entry_quality_ok(
+    state: SymbolState,
+    now_ms: int,
+    hist: HistoryPump,
+    two_peak: TwoPeakMatch | None,
+    bars_1h: list[Bar],
+) -> bool:
+    if two_peak is None:
+        return False
+    pct7 = price_change_7d_pct(state, now_ms)
+    if pct7 is None or pct7 < config.X2_RETRACE_MIN_PRICE_CHANGE_7D_PCT:
+        return False
+    if not _pump_leg_volume_spike_ok(bars_1h, hist.valley_ts, now_ms):
         return False
     return True
 
@@ -62,8 +141,6 @@ def _pullback_pct(
     drop = (abs_high - last_price) / abs_high * 100.0
     if drop < config.X2_RETRACE_MIN_PULLBACK_PCT:
         return False, drop
-    from signal_engine.swing_highs import closed_bars
-
     closed = closed_bars(bars_1h, "60", now_ms)
     recent = [b for b in closed if b.timestamp >= now_ms - _MS_24H]
     if len(recent) < 1:
@@ -93,7 +170,7 @@ def candidate_stage(
     if peak_mult < config.X2_RETRACE_MIN_MULTIPLIER:
         return 0
     if two_peak is None:
-        return 1
+        return 0
     if not pullback_ok:
         return 1
     lh_ok = two_peak is not None or lh_1h >= 1 or lh_4h >= 1
@@ -245,7 +322,8 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
         pump_start = hist.valley_ts
         bars_1h = state.bars_htf.get("60") or []
         bars_4h = state.bars_htf.get("240") or []
-        if find_two_peak_htf(bars_1h, bars_4h, pump_start, now_ms) is None:
+        two_peak = find_two_peak_htf(bars_1h, bars_4h, pump_start, now_ms)
+        if not _entry_quality_ok(state, now_ms, hist, two_peak, bars_1h):
             continue
         watch = WatchRow(
             board=BOARD_ID,
@@ -275,6 +353,9 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
             continue
         if state.last_price is None or state.last_price <= 0:
             state.last_price = price
+        if not _meets_x2_turnover(state):
+            watches.remove(BOARD_ID, symbol)
+            continue
         if _should_exit_watch(state, watch.meta, now_ms):
             watches.remove(BOARD_ID, symbol)
             continue
@@ -282,6 +363,11 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
         if measured is None:
             continue
         row, pullback_ok, two_peak = measured
+        hist_live = history_pump_metrics(state, now_ms)
+        bars_1h = state.bars_htf.get("60") or []
+        if hist_live is None or not _entry_quality_ok(state, now_ms, hist_live, two_peak, bars_1h):
+            watches.remove(BOARD_ID, symbol)
+            continue
         watch.meta["peak_mult"] = max(float(watch.meta.get("peak_mult") or 0), row.peak_mult)
         watch.meta["min_low"] = row.min_low_5d
         watch.meta["valley_ts"] = row.pump_start_ts

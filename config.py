@@ -297,6 +297,13 @@ def chart_tf_to_oi_interval(chart_tf: str) -> str:
 
 # --- Вкладка «2× откат» (рост от min 5d, LH 1H/4H, OI↓, EMA) ----------------
 
+# Мин. оборот фьючерса за 24h (turnover24h USDT). Ниже — не попадают на доску.
+X2_RETRACE_MIN_TURNOVER_24H_USDT = _env_float("X2_RETRACE_MIN_TURNOVER_24H_USDT", 300_000.0)
+# Рост цены за 7 календарных дней (%); отрицательный 7d — исключаем.
+X2_RETRACE_MIN_PRICE_CHANGE_7D_PCT = _env_float("X2_RETRACE_MIN_PRICE_CHANGE_7D_PCT", 0.0)
+# Всплеск объёма на 1H-свечах в фазе роста (от дна пампа до пика): max vol / база.
+X2_RETRACE_PUMP_VOLUME_SPIKE_MIN = _env_float("X2_RETRACE_PUMP_VOLUME_SPIKE_MIN", 4.0)
+
 X2_RETRACE_MIN_MULTIPLIER = _env_float("X2_RETRACE_MIN_MULTIPLIER", 1.72)
 X2_RETRACE_LOOKBACK_DAYS = _env_int("X2_RETRACE_LOOKBACK_DAYS", 21)
 X2_RETRACE_MIN_BARS = _env_int("X2_RETRACE_MIN_BARS", 8)
