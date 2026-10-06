@@ -34,6 +34,9 @@ class Client:
         self.x2_retrace_symbol: str | None = None
         self.x2_retrace_interval = "60"
         self.force_x2_retrace_detail = False
+        self.pump_strategy_symbol: str | None = None
+        self.pump_strategy_interval = "15"
+        self.force_pump_strategy_detail = False
 
 
 class Hub:
@@ -104,6 +107,13 @@ class Hub:
                 else None
             ),
             "pump_strategy_board": self.cache.view_pump_strategy_board(),
+            "pump_strategy_detail": (
+                self.cache.pump_strategy_detail(
+                    client.pump_strategy_symbol, client.pump_strategy_interval
+                )
+                if client.pump_strategy_symbol
+                else None
+            ),
             "btc_test": self.btc.view(),
         }
 
@@ -141,6 +151,16 @@ class Hub:
             if interval in {"1", "5", "15", "30", "60", "240", "D"}:
                 client.x2_retrace_interval = interval
                 client.force_x2_retrace_detail = True
+        elif kind == "select_pump_strategy":
+            symbol = str(message.get("symbol") or "")
+            if symbol in self.cache.pump_strategy_by_symbol:
+                client.pump_strategy_symbol = symbol
+                client.force_pump_strategy_detail = True
+        elif kind == "pump_strategy_interval":
+            interval = str(message.get("interval") or "15")
+            if interval in {"1", "5", "15", "30", "60", "240", "D"}:
+                client.pump_strategy_interval = interval
+                client.force_pump_strategy_detail = True
 
     async def run(self) -> None:
         flush = asyncio.create_task(self._flush_loop())
@@ -309,6 +329,18 @@ class Hub:
                             }
                         )
                         client.force_x2_retrace_detail = False
+                    if client.pump_strategy_symbol and (send_detail or client.force_pump_strategy_detail):
+                        await client.websocket.send_json(
+                            {
+                                "type": "pump_strategy_detail",
+                                "symbol": client.pump_strategy_symbol,
+                                "data": self.cache.pump_strategy_detail(
+                                    client.pump_strategy_symbol,
+                                    client.pump_strategy_interval,
+                                ),
+                            }
+                        )
+                        client.force_pump_strategy_detail = False
                     if pnl is not None:
                         await client.websocket.send_json({"type": "pnl", "items": pnl})
                     if btc is not None:

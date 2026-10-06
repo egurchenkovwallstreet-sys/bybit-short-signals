@@ -63,6 +63,7 @@ class MarketCache:
         self.x2_retrace_columns: list[dict[str, Any]] = []
         self.x2_retrace_signals: dict[str, dict[str, Any]] = {}
         self.pump_strategy_signals: list[dict[str, Any]] = []
+        self.pump_strategy_by_symbol: dict[str, dict[str, Any]] = {}
 
     def apply(self, message: dict[str, Any]) -> str | None:
         kind = message.get("type")
@@ -80,6 +81,7 @@ class MarketCache:
             return "x2_retrace"
         if kind == "pump_strategy_board":
             self.pump_strategy_signals = list((message.get("data") or {}).get("signals") or [])
+            self._reindex_pump_strategy()
             return "pump_strategy"
         if kind == "signal":
             self._upsert_signal(message.get("data") or {})
@@ -102,6 +104,27 @@ class MarketCache:
                 signals.append(item)
             view.append({**column, "signals": signals})
         return view
+
+    def pump_strategy_detail(self, symbol: str, interval: str = "15") -> dict[str, Any] | None:
+        signal = self.pump_strategy_by_symbol.get(symbol)
+        if not signal:
+            return None
+        buy = self.taker_buy.get(symbol, 0.0)
+        sell = self.taker_sell.get(symbol, 0.0)
+        ratio = None
+        if buy or sell:
+            ratio = float("inf") if sell == 0 else buy / sell
+            if ratio == float("inf"):
+                ratio = None
+        candles = self.klines.get((symbol, interval), [])
+        return {
+            "signal": signal,
+            "interval": interval,
+            "candles": candles,
+            "book": self.book_view(symbol),
+            "funding_rate": self.funding.get(symbol),
+            "taker_ratio": ratio,
+        }
 
     def view_pump_strategy_board(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -285,6 +308,13 @@ class MarketCache:
                 symbol = signal.get("symbol")
                 if symbol:
                     self.signals[symbol] = signal
+
+    def _reindex_pump_strategy(self) -> None:
+        self.pump_strategy_by_symbol = {}
+        for signal in self.pump_strategy_signals:
+            symbol = signal.get("symbol")
+            if symbol:
+                self.pump_strategy_by_symbol[str(symbol)] = signal
 
     def _reindex_pump_scan(self) -> None:
         self.pump_scan_signals = {}

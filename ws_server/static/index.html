@@ -46,7 +46,20 @@
       Быстрый памп: ≥40% за 1–12 ч. Длинный: минимум ×2 от дна до пика за 10 д. Оборот ≥300&nbsp;000&nbsp;USDT за сутки.
       Монета остаётся в списке, пока не нажмёте «Снять» или не упадёт оборот.
     </p>
-    <div id="pump-strategy-grid" class="pump-strategy-grid"></div>
+    <div id="pump-strategy-list-wrap">
+      <div id="pump-strategy-grid" class="pump-strategy-grid"></div>
+    </div>
+    <div id="pump-strategy-workspace" class="psc-workspace" hidden>
+      <div class="psc-chart-pane">
+        <div class="psc-tf-row" id="psc-tf-row"></div>
+        <div class="psc-chart-wrap">
+          <div id="psc-candle-chart" class="psc-candle-chart"></div>
+          <canvas id="psc-book-overlay" class="psc-book-overlay"></canvas>
+        </div>
+        <p class="quiet psc-chart-hint">Полоски справа — плотность стакана по цене (полупрозрачно). Объём под свечами.</p>
+      </div>
+      <aside class="psc-info-pane" id="psc-info-pane"></aside>
+    </div>
   </section>
 
   <section id="view-pump-scan" class="pump-scan-view" hidden>
@@ -166,6 +179,6 @@
   <script src="/static/app.js?v=20251006o"></script>
   <script src="/static/pump_scan.js?v=20251007b"></script>
   <script src="/static/x2_retrace.js?v=20251007d"></script>
-  <script src="/static/pump_strategy.js?v=20251007a"></script>
+  <script src="/static/pump_strategy.js?v=20251007b"></script>
 </body>
 </html>

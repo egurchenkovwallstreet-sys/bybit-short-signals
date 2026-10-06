@@ -179,7 +179,10 @@ function connectSocket() {
       window.x2Retrace.onX2Snapshot(message.x2_retrace_board, message.x2_retrace_detail);
     }
     if (window.pumpStrategy) {
-      window.pumpStrategy.onPumpStrategySnapshot(message.pump_strategy_board);
+      window.pumpStrategy.onPumpStrategySnapshot(
+        message.pump_strategy_board,
+        message.pump_strategy_detail,
+      );
     }
   } else if (message.type === "btc_test" && window.btcTest) {
     window.btcTest.onBtcMessage(message.data);
@@ -200,6 +203,8 @@ function connectSocket() {
   } else if (message.type === "pump_strategy_board" && window.pumpStrategy) {
     setDemo(message.demo);
     window.pumpStrategy.onPumpStrategyBoard(message.data);
+  } else if (message.type === "pump_strategy_detail" && window.pumpStrategy) {
+    window.pumpStrategy.onPumpStrategyDetail(message.symbol, message.data);
   } else if (message.type === "detail" && (!state.selected || message.symbol === state.selected)) {
     const changed = state.selected !== message.symbol;
     state.selected = message.symbol;
@@ -253,6 +258,9 @@ function showTab(name) {
   }
   if (name === "pump_strategy" && window.pumpStrategy) {
     window.pumpStrategy.initPumpStrategyTab();
+    requestAnimationFrame(() => {
+      if (window.pumpStrategy?.resizeChart) window.pumpStrategy.resizeChart();
+    });
   }
   if (name === "pending") {
     renderPending();
