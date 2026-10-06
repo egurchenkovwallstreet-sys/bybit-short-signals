@@ -96,6 +96,8 @@ class PumpScanItem:
             "liquidations_faded": r.liquidations_faded,
             "oi_drop": r.oi_drop,
             "oi_change_pct": r.oi_change_pct,
+            "oi_change_1h_pct": r.oi_change_1h_pct,
+            "oi_change_4h_pct": r.oi_change_4h_pct,
             "volume_faded": r.volume_faded,
             "volume_ratio": r.volume_ratio,
             "cvd_divergence": r.cvd_divergence,

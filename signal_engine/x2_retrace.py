@@ -199,6 +199,9 @@ class X2RetraceItem:
     turnover_24h_usdt: float
     oi_drop: bool
     oi_change_pct: float | None
+    oi_change_1h_pct: float | None
+    oi_change_4h_pct: float | None
+    funding_rate: float | None
     ema_depth: int
     two_peak_kind: str | None = None
     two_peak_tf: str | None = None
@@ -227,6 +230,9 @@ class X2RetraceItem:
             "turnover_24h_usdt": self.turnover_24h_usdt,
             "oi_drop": self.oi_drop,
             "oi_change_pct": self.oi_change_pct,
+            "oi_change_1h_pct": self.oi_change_1h_pct,
+            "oi_change_4h_pct": self.oi_change_4h_pct,
+            "funding_rate": self.funding_rate,
             "ema_depth": self.ema_depth,
             "two_peak_kind": self.two_peak_kind,
             "two_peak_tf": self.two_peak_tf,
@@ -276,6 +282,9 @@ def _metrics_for_state(state: SymbolState, now_ms: int, meta: dict) -> tuple[X2R
         turnover_24h_usdt=float(state.turnover_24h_usdt or 0),
         oi_drop=reading.oi_drop,
         oi_change_pct=reading.oi_change_pct,
+        oi_change_1h_pct=reading.oi_change_1h_pct,
+        oi_change_4h_pct=reading.oi_change_4h_pct,
+        funding_rate=reading.funding_rate,
         ema_depth=ema_depth,
         two_peak_kind=two_peak.kind if two_peak else None,
         two_peak_tf=_interval_label(two_peak.interval) if two_peak else None,

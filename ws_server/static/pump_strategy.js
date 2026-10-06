@@ -273,8 +273,8 @@ function renderPumpStrategyBoard() {
 }
 
 function pumpStrategyCardHtml(row, selected) {
-  const oi1 = formatOiChange(row.oi_change_1h_pct);
-  const oi4 = formatOiChange(row.oi_change_4h_pct);
+  const oi1 = window.boardChart.formatOiChange(row.oi_change_1h_pct);
+  const oi4 = window.boardChart.formatOiChange(row.oi_change_4h_pct);
   const active = row.symbol === selected ? " active" : "";
   return `<article class="pump-strategy-card board-rich-card${active}" data-symbol="${row.symbol}">
     <header class="psc-head">
@@ -319,10 +319,10 @@ function renderPumpStrategyInfo() {
     pane.innerHTML = '<p class="empty">Выберите карточку.</p>';
     return;
   }
-  const oi1 = formatOiChange(row.oi_change_1h_pct);
-  const oi4 = formatOiChange(row.oi_change_4h_pct);
-  const funding =
-    detail?.funding_rate != null ? `${(Number(detail.funding_rate) * 100).toFixed(4)}%` : "—";
+  const { h1, h4 } = window.boardChart.resolveOi1h4h(row, detail);
+  const oi1 = window.boardChart.formatOiChange(h1);
+  const oi4 = window.boardChart.formatOiChange(h4);
+  const funding = window.boardChart.fundingFrom(row, detail);
   const taker = detail?.taker_ratio != null ? Number(detail.taker_ratio).toFixed(2) : "—";
   pane.innerHTML = `
     <header class="psc-info-head">
@@ -566,16 +566,6 @@ function drawPumpStrategyBookOverlay() {
     ctx.fillStyle = "rgba(200, 210, 220, 0.75)";
     ctx.fillText(formatBookPrice(row.price), width - 6, y + 3);
   });
-}
-
-function formatOiChange(pct) {
-  if (pct === null || pct === undefined || Number.isNaN(Number(pct))) {
-    return { text: "нет данных", cls: "psc-muted" };
-  }
-  const n = Number(pct);
-  const sign = n > 0 ? "+" : "";
-  const cls = n > 0 ? "psc-up" : n < 0 ? "psc-down" : "";
-  return { text: `${sign}${n.toFixed(2)}%`, cls };
 }
 
 function formatTurnover(value) {

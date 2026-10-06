@@ -16,7 +16,7 @@ const EXTRAS = [
   ["round_level", "Круглый уровень"],
 ];
 
-const CHART_MIN_CANDLES = 100;
+const CHART_FETCH_DAYS = 30;
 const DETAIL_CHART_WINDOW_HOURS = 48;
 
 const INTERVALS = [
@@ -425,8 +425,27 @@ function renderDetail() {
   const funding = root.querySelector("[data-funding]");
   const taker = root.querySelector("[data-taker]");
   const liq = root.querySelector("[data-liq]");
-  if (funding) funding.textContent = formatFunding(detail.funding_rate);
-  if (taker) taker.textContent = detail.taker_ratio == null ? "—" : Number(detail.taker_ratio).toFixed(2);
+  const fr = detail.funding_rate ?? signal.funding_rate;
+  if (funding) funding.textContent = formatFunding(fr);
+  if (taker) {
+    const tr = detail.taker_ratio ?? signal.taker_ratio;
+    taker.textContent = tr == null ? "—" : Number(tr).toFixed(2);
+  }
+  const oi1El = root.querySelector("[data-oi-1h]");
+  const oi4El = root.querySelector("[data-oi-4h]");
+  if (oi1El || oi4El) {
+    const { h1, h4 } = window.boardChart.resolveOi1h4h(signal, detail);
+    const o1 = window.boardChart.formatOiChange(h1);
+    const o4 = window.boardChart.formatOiChange(h4);
+    if (oi1El) {
+      oi1El.textContent = o1.text;
+      oi1El.className = o1.cls;
+    }
+    if (oi4El) {
+      oi4El.textContent = o4.text;
+      oi4El.className = o4.cls;
+    }
+  }
   if (liq) {
     liq.textContent = signal.checks && signal.checks.liquidations_faded ? "затихли" : "ещё идут";
   }
@@ -471,6 +490,8 @@ function detailHtml(signal, interval) {
         <div id="obv-chart" class="plot"></div>
       </section>
       <div class="detail-metrics-row">
+        <div class="metric"><div>Открытый интерес · 1 ч</div><strong data-oi-1h class="psc-muted">—</strong></div>
+        <div class="metric"><div>Открытый интерес · 4 ч</div><strong data-oi-4h class="psc-muted">—</strong></div>
         <div class="metric"><div>Ставка финансирования</div><strong data-funding>—</strong></div>
         <div class="metric"><div>Доля покупок (тейкеры)</div><strong data-taker>—</strong></div>
         <div class="metric"><div>Ликвидации</div><strong data-liq>—</strong></div>
@@ -494,9 +515,13 @@ function infoHtml(signal) {
   const pnl = signal.strength === 5 ? formatPnl(signal.pnl_pct) : "";
   const ch5 = signal.price_change_5m != null ? `${Number(signal.price_change_5m).toFixed(1)}%` : "—";
   const ch15 = signal.price_change_15m != null ? `${Number(signal.price_change_15m).toFixed(1)}%` : "—";
+  const { h1, h4 } = window.boardChart.resolveOi1h4h(signal, null);
+  const o1 = window.boardChart.formatOiChange(h1);
+  const o4 = window.boardChart.formatOiChange(h4);
   return `    <div class="ticker">${signal.symbol} · ${signal.status}</div>
     <div class="scale" style="color: var(--${signal.color || "gray"})">${scale}</div>
-    <p>Рост: 5m ${ch5} · 15m ${ch15} · цена ≥30%/1ч или ≥50%/сут · объём ×5/×6/×8/×10/×12 (5m→1D); 1h: только при ≥30% и ×8</p>
+    <p>Рост: 5m ${ch5} · 15m ${ch15} · OI 1ч <span class="${o1.cls}">${o1.text}</span> · OI 4ч <span class="${o4.cls}">${o4.text}</span></p>
+    <p class="quiet">Порог пампа: ≥30%/1ч или ≥50%/сут · объём ×5…×12 (5m→1D)</p>
     <p>Вероятность ${Number(signal.probability || 0).toFixed(0)}% ${pnl}</p>
     <ul class="checks">${rows}</ul>`;
 }
@@ -557,9 +582,15 @@ function candleTimeForChart(raw, interval) {
 
 async function ensureCandles(symbol, interval, detail) {
   let candles = detail.candles || [];
-  const needFetch = candles.length < CHART_MIN_CANDLES;
+  const needBars = window.boardChart.minBarsForDays(interval, CHART_FETCH_DAYS);
+  const needFetch = candles.length < needBars;
   try {
-    const url = `/api/klines/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}${needFetch ? "&refresh=1" : ""}`;
+    const q = new URLSearchParams({
+      interval,
+      days: String(CHART_FETCH_DAYS),
+    });
+    if (needFetch) q.set("refresh", "1");
+    const url = `/api/klines/${encodeURIComponent(symbol)}?${q}`;
     const res = await fetch(url);
     if (!res.ok) return candles;
     const data = await res.json();
@@ -595,12 +626,17 @@ function focusChartOnCandles(bars, interval, resetChartScale) {
 function updateChartLegend(detail) {
   const el = document.getElementById("chart-legend");
   if (!el) return;
-  const fr = detail?.funding_rate != null ? `${(Number(detail.funding_rate) * 100).toFixed(3)}%` : "—";
-  const tk = detail?.taker_ratio != null ? Number(detail.taker_ratio).toFixed(2) : "—";
+  const sig = state.detail?.signal ?? null;
+  const fr = window.boardChart.formatFunding(detail?.funding_rate ?? sig?.funding_rate);
+  const tkRaw = detail?.taker_ratio ?? sig?.taker_ratio;
+  const tk = tkRaw == null ? "—" : Number(tkRaw).toFixed(2);
+  const { h1, h4 } = window.boardChart.resolveOi1h4h(sig, detail);
+  const o1 = window.boardChart.formatOiChange(h1);
+  const o4 = window.boardChart.formatOiChange(h4);
   el.innerHTML = `
     <span class="lg-price">Свечи (цена)</span>
     <span class="lg-vol">■ Объём</span>
-    <span class="lg-meta">Финансирование ${fr} · Тейкеры ${tk}</span>`;
+    <span class="lg-meta">OI 1ч <span class="${o1.cls}">${o1.text}</span> · OI 4ч <span class="${o4.cls}">${o4.text}</span> · Фин. ${fr} · Тейкеры ${tk}</span>`;
 }
 
 function drawCandles(candles, signal, detail, resetChartScale) {

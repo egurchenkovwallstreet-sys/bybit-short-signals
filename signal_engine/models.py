@@ -28,6 +28,8 @@ class Signal:
     liquidations_faded: bool = False
     oi_drop: bool = False
     oi_change_pct: float | None = None
+    oi_change_1h_pct: float | None = None
+    oi_change_4h_pct: float | None = None
     volume_faded: bool = False
     sweep: bool = False
     sweep_timeframes: list[str] = field(default_factory=list)
@@ -94,6 +96,8 @@ class Signal:
             "volume_ratio": self.volume_ratio,
             "rsi": self.rsi,
             "oi_change_pct": self.oi_change_pct,
+            "oi_change_1h_pct": self.oi_change_1h_pct,
+            "oi_change_4h_pct": self.oi_change_4h_pct,
             "sweep_timeframes": list(self.sweep_timeframes),
             "mega_level": self.mega_level,
             "taker_ratio": self.taker_ratio,

@@ -188,8 +188,11 @@ function renderX2Info(full) {
     return;
   }
   const detail = x2State.detail;
-  const funding =
-    detail?.funding_rate != null ? `${(Number(detail.funding_rate) * 100).toFixed(4)}%` : "—";
+  const BC = window.boardChart;
+  const { h1, h4 } = BC.resolveOi1h4h(s, detail);
+  const oi1 = BC.formatOiChange(h1);
+  const oi4 = BC.formatOiChange(h4);
+  const funding = BC.fundingFrom(s, detail);
   const mult = s.peak_mult != null ? Number(s.peak_mult).toFixed(2) : fmt(s.multiplier);
   pane.innerHTML = `
     <header class="psc-info-head">
@@ -205,7 +208,8 @@ function renderX2Info(full) {
       <div class="psc-row"><dt>Откат от max 1H</dt><dd>${s.pullback_pct != null ? s.pullback_pct + "%" : "—"}</dd></div>
       <div class="psc-row"><dt>LH · 1H / 4H</dt><dd>${s.lh_1h ?? 0} / ${s.lh_4h ?? 0}</dd></div>
       <div class="psc-row"><dt>Две вершины</dt><dd>${formatTwoPeak(s)}</dd></div>
-      <div class="psc-row"><dt>OI</dt><dd>${s.oi_drop ? "снижается" : "—"} ${s.oi_change_pct != null ? s.oi_change_pct.toFixed(2) + "%" : ""}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
       <div class="psc-row"><dt>Рост 24 ч</dt><dd>${s.price_24h_pct != null ? "+" + fmt(s.price_24h_pct) + "%" : "—"}</dd></div>
       <div class="psc-row"><dt>EMA (глубина)</dt><dd>${s.ema_depth ?? 0} / 3</dd></div>
       <div class="psc-row"><dt>Цена</dt><dd data-live="price">${fmtPrice(s.last_price)}</dd></div>
@@ -248,18 +252,10 @@ function x2CardHtml(row, color, active) {
         : row.two_peak_kind === "lower_high"
           ? `LH ${row.two_peak_tf || ""}, ${row.two_peak_bars_between ?? "?"} св.`
           : "—";
-  const oi =
-    row.oi_change_pct != null && !Number.isNaN(Number(row.oi_change_pct))
-      ? `${Number(row.oi_change_pct) >= 0 ? "+" : ""}${Number(row.oi_change_pct).toFixed(2)}%`
-      : row.oi_drop
-        ? "снижается"
-        : "—";
-  const oiCls =
-    row.oi_drop || (row.oi_change_pct != null && Number(row.oi_change_pct) < 0)
-      ? "psc-down"
-      : row.oi_change_pct != null && Number(row.oi_change_pct) > 0
-        ? "psc-up"
-        : "psc-muted";
+  const BC = window.boardChart;
+  const { h1, h4 } = BC.resolveOi1h4h(row, null);
+  const oi1 = BC.formatOiChange(h1);
+  const oi4 = BC.formatOiChange(h4);
   const pending = row.pending_stage ? `ожидает колонку ${row.pending_stage}` : "—";
   const pct24 =
     row.price_24h_pct != null ? `${Number(row.price_24h_pct) >= 0 ? "+" : ""}${fmt(row.price_24h_pct)}%` : "—";
@@ -274,7 +270,8 @@ function x2CardHtml(row, color, active) {
       <div class="psc-row"><dt>Две вершины</dt><dd>${peakHint}</dd></div>
       <div class="psc-row"><dt>LH · 1H / 4H</dt><dd>${row.lh_1h ?? 0} / ${row.lh_4h ?? 0}</dd></div>
       <div class="psc-row"><dt>Откат от пика 1H</dt><dd>${row.pullback_pct != null ? row.pullback_pct + "%" : "—"}</dd></div>
-      <div class="psc-row"><dt>Открытый интерес</dt><dd class="${oiCls}">${oi}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
       <div class="psc-row"><dt>Рост 24 ч</dt><dd>${pct24}</dd></div>
       <div class="psc-row"><dt>EMA (глубина)</dt><dd>${row.ema_depth ?? 0} / 3</dd></div>
       <div class="psc-row"><dt>Смена колонки</dt><dd>${pending}</dd></div>

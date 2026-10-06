@@ -10,7 +10,8 @@ window.boardChart = {
     ["240", "4H"],
     ["D", "1D"],
   ],
-  FETCH_DAYS: 14,
+  FETCH_DAYS: 30,
+  INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   PREFETCH_CONCURRENCY: 3,
 
@@ -27,6 +28,67 @@ window.boardChart = {
 
   createPrefetchStore() {
     return { map: new Map(), queue: [], active: 0 };
+  },
+
+  minBarsForDays(interval, days) {
+    const d = days ?? window.boardChart.FETCH_DAYS;
+    const minutes = window.boardChart.INTERVAL_MINUTES[interval] || 60;
+    return Math.max(24, Math.ceil((d * 24 * 60) / minutes));
+  },
+
+  formatOiChange(pct) {
+    if (pct === null || pct === undefined || Number.isNaN(Number(pct))) {
+      return { text: "нет данных", cls: "psc-muted" };
+    }
+    const n = Number(pct);
+    const sign = n > 0 ? "+" : "";
+    const cls = n > 0 ? "psc-up" : n < 0 ? "psc-down" : "";
+    return { text: `${sign}${n.toFixed(2)}%`, cls };
+  },
+
+  oiChangeFromSeries(points, lookbackMin) {
+    if (!points || points.length < 2) return null;
+    const sorted = [...points]
+      .map((p) => ({
+        ts: Number(p.timestamp ?? p.time ?? 0),
+        val: Number(p.open_interest ?? p.value ?? 0),
+      }))
+      .filter((p) => p.ts > 0 && p.val > 0)
+      .sort((a, b) => a.ts - b.ts);
+    if (sorted.length < 2) return null;
+    const latest = sorted[sorted.length - 1];
+    const cutoff = latest.ts - lookbackMin * 60 * 1000;
+    let reference = sorted[0].val;
+    for (const p of sorted) {
+      if (p.ts <= cutoff) reference = p.val;
+      else break;
+    }
+    if (reference <= 0) return null;
+    return ((latest.val - reference) / reference) * 100;
+  },
+
+  resolveOi1h4h(row, detail) {
+    const r = row || {};
+    let h1 = r.oi_change_1h_pct;
+    let h4 = r.oi_change_4h_pct;
+    const series = detail?.oi;
+    if (h1 == null && series?.length) {
+      h1 = window.boardChart.oiChangeFromSeries(series, 60);
+    }
+    if (h4 == null && series?.length) {
+      h4 = window.boardChart.oiChangeFromSeries(series, 240);
+    }
+    return { h1, h4 };
+  },
+
+  formatFunding(rate) {
+    if (rate == null || Number.isNaN(Number(rate))) return "—";
+    return `${(Number(rate) * 100).toFixed(4)}%`;
+  },
+
+  fundingFrom(row, detail) {
+    const rate = detail?.funding_rate ?? row?.funding_rate;
+    return window.boardChart.formatFunding(rate);
   },
 
   bindInfoPane(paneId, onClose, onDismiss) {
@@ -125,10 +187,12 @@ window.boardChart = {
   },
 
   async ensureCandles(store, symbol, interval, detail) {
+    const BC = window.boardChart;
+    const need = BC.minBarsForDays(interval, BC.FETCH_DAYS);
     const bucket = store.map.get(symbol);
     const cached = bucket?.intervals?.get(interval);
-    if (cached && cached.length >= 20) return cached;
-    const candles = await window.boardChart._fetchKlines(symbol, interval);
+    if (cached && cached.length >= need) return cached;
+    const candles = await BC._fetchKlines(symbol, interval);
     if (candles.length) {
       const b = store.map.get(symbol) || { intervals: new Map() };
       b.intervals.set(interval, candles);

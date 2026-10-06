@@ -33,6 +33,11 @@ def oi_falling(points: list[tuple[int, float]]) -> bool:
     return change is not None and change <= -config.OI_DROP_PCT
 
 
+def oi_changes_1h_4h(points: list[tuple[int, float]]) -> tuple[float | None, float | None]:
+    """Изменение OI за 1 ч и 4 ч — для карточек на всех вкладках."""
+    return oi_change_pct(points, lookback_min=60), oi_change_pct(points, lookback_min=240)
+
+
 def volume_faded(volumes: list[float]) -> bool:
     """Пик был аномальным, а последний закрытый бар уже не выше 20-периодной средней.
 

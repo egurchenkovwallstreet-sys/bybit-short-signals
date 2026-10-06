@@ -202,13 +202,17 @@ function renderPumpScanInfo(full) {
     updatePumpScanLive();
     return;
   }
-  const funding =
-    detail?.funding_rate != null ? `${(Number(detail.funding_rate) * 100).toFixed(4)}%` : "—";
-  const taker = detail?.taker_ratio != null ? Number(detail.taker_ratio).toFixed(2) : "—";
-  const oi =
-    row.oi_change_pct != null
-      ? `${Number(row.oi_change_pct) >= 0 ? "+" : ""}${Number(row.oi_change_pct).toFixed(2)}%`
-      : "—";
+  const BC = window.boardChart;
+  const { h1, h4 } = BC.resolveOi1h4h(row, detail);
+  const oi1 = BC.formatOiChange(h1);
+  const oi4 = BC.formatOiChange(h4);
+  const funding = BC.fundingFrom(row, detail);
+  const taker =
+    detail?.taker_ratio != null
+      ? Number(detail.taker_ratio).toFixed(2)
+      : row.taker_ratio != null
+        ? Number(row.taker_ratio).toFixed(2)
+        : "—";
   const checks = PUMP_CHECKS.map(([key, label]) => {
     let on = false;
     if (key === "taker_sellers") on = row.taker_ratio != null && row.taker_ratio < 1;
@@ -227,7 +231,8 @@ function renderPumpScanInfo(full) {
     <p class="quiet psc-sub">рост за 24 часа · ослабление ${row.weaken_score ?? 0}/7</p>
     <dl class="psc-info-fields">
       <div class="psc-row"><dt>EMA (глубина)</dt><dd>${row.ema_depth ?? 0} / 3</dd></div>
-      <div class="psc-row"><dt>OI (окно движка)</dt><dd>${oi}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
       <div class="psc-row"><dt>Объём × к MA</dt><dd>${row.volume_ratio != null ? Number(row.volume_ratio).toFixed(1) : "—"}</dd></div>
       <div class="psc-row"><dt>Цена</dt><dd data-live="price">${fmtPrice(row.last_price)}</dd></div>
       <div class="psc-row"><dt>Финансирование</dt><dd>${funding}</dd></div>
@@ -261,16 +266,10 @@ function renderPumpBoard() {
 }
 
 function pumpCardHtml(row, color, active) {
-  const oi =
-    row.oi_change_pct != null && !Number.isNaN(Number(row.oi_change_pct))
-      ? `${Number(row.oi_change_pct) >= 0 ? "+" : ""}${Number(row.oi_change_pct).toFixed(2)}%`
-      : "нет данных";
-  const oiCls =
-    row.oi_change_pct != null && Number(row.oi_change_pct) < 0
-      ? "psc-down"
-      : row.oi_change_pct != null && Number(row.oi_change_pct) > 0
-        ? "psc-up"
-        : "psc-muted";
+  const BC = window.boardChart;
+  const { h1, h4 } = BC.resolveOi1h4h(row, null);
+  const oi1 = BC.formatOiChange(h1);
+  const oi4 = BC.formatOiChange(h4);
   const pending = row.pending_stage ? `ожидает колонку ${row.pending_stage}` : "—";
   const emaLine = emaHintText(row.ema_by_tf);
   return `<article class="card pump-card board-rich-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
@@ -283,7 +282,8 @@ function pumpCardHtml(row, color, active) {
     <dl class="psc-fields">
       <div class="psc-row"><dt>Ослабление пампа</dt><dd>${row.weaken_score ?? 0} из 7</dd></div>
       <div class="psc-row"><dt>EMA (глубина)</dt><dd>${row.ema_depth ?? 0} / 3</dd></div>
-      <div class="psc-row"><dt>Открытый интерес</dt><dd class="${oiCls}">${oi}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес · 4 ч</dt><dd class="${oi4.cls}">${oi4.text}</dd></div>
       <div class="psc-row"><dt>Смена колонки</dt><dd>${pending}</dd></div>
       <div class="psc-row"><dt>EMA по ТФ</dt><dd class="psc-muted psc-ema-dd">${emaLine}</dd></div>
     </dl>

@@ -15,6 +15,7 @@ from signal_engine.flow import (
     funding_extreme,
     obv_bearish,
     oi_change_pct,
+    oi_changes_1h_4h,
     oi_falling,
     taker_ratio,
     taker_sellers_control,
@@ -45,6 +46,8 @@ class Reading:
     liquidations_faded: bool = False
     oi_drop: bool = False
     oi_change_pct: float | None = None
+    oi_change_1h_pct: float | None = None
+    oi_change_4h_pct: float | None = None
     volume_faded: bool = False
     sweep: bool = False
     sweep_timeframes: list[str] = field(default_factory=list)
@@ -91,6 +94,7 @@ def evaluate(state: SymbolState, now_ms: int) -> Reading:
     )
     oi_points = state.oi_points()
     oi_change = oi_change_pct(oi_points)
+    oi_1h, oi_4h = oi_changes_1h_4h(oi_points)
     ratio = taker_ratio(state.taker_buy, state.taker_sell, now_ms)
     if ratio is not None and ratio == float("inf"):
         ratio = None
@@ -153,6 +157,8 @@ def evaluate(state: SymbolState, now_ms: int) -> Reading:
         liquidations_faded=liquidations_faded(window_notionals(state.liq_notional, now_ms)),
         oi_drop=oi_falling(oi_points),
         oi_change_pct=oi_change,
+        oi_change_1h_pct=oi_1h,
+        oi_change_4h_pct=oi_4h,
         volume_faded=volume_faded(volumes),
         sweep=bool(swept_labels),
         sweep_timeframes=swept_labels,

@@ -184,6 +184,8 @@ class Engine:
         signal.liquidations_faded = reading.liquidations_faded
         signal.oi_drop = reading.oi_drop
         signal.oi_change_pct = reading.oi_change_pct
+        signal.oi_change_1h_pct = reading.oi_change_1h_pct
+        signal.oi_change_4h_pct = reading.oi_change_4h_pct
         signal.volume_faded = reading.volume_faded
         signal.sweep = reading.sweep
         signal.sweep_timeframes = list(reading.sweep_timeframes)

@@ -40,6 +40,26 @@ def _trim_time_window(rows: list[dict[str, Any]], time_key: str = "timestamp") -
     return list(tail)
 
 
+def _patch_signal_oi_from_cache(signal: dict[str, Any] | None, oi_rows: list[dict[str, Any]] | None) -> None:
+    if not signal or not oi_rows:
+        return
+    from signal_engine.flow import oi_changes_1h_4h
+
+    points: list[tuple[int, float]] = []
+    for row in oi_rows:
+        ts = _ts_ms(row.get("timestamp"))
+        val = _num(row.get("open_interest"))
+        if ts is not None and val is not None:
+            points.append((ts, val))
+    if len(points) < 2:
+        return
+    h1, h4 = oi_changes_1h_4h(points)
+    if signal.get("oi_change_1h_pct") is None and h1 is not None:
+        signal["oi_change_1h_pct"] = round(h1, 2)
+    if signal.get("oi_change_4h_pct") is None and h4 is not None:
+        signal["oi_change_4h_pct"] = round(h4, 2)
+
+
 class MarketCache:
     def __init__(self) -> None:
         self.columns: list[dict[str, Any]] = []
@@ -99,7 +119,7 @@ class MarketCache:
                 symbol = signal.get("symbol") or ""
                 if not self._signal_turnover_ok(symbol):
                     continue
-                item = dict(signal)
+                item = self._enrich_signal(symbol, dict(signal))
                 item["mini"] = self.mini_closes(symbol)
                 signals.append(item)
             view.append({**column, "signals": signals})
@@ -117,12 +137,13 @@ class MarketCache:
             if ratio == float("inf"):
                 ratio = None
         candles = self.klines.get((symbol, interval), [])
+        sig = self._enrich_signal(symbol, dict(signal))
         return {
-            "signal": signal,
+            "signal": sig,
             "interval": interval,
             "candles": candles,
             "book": self.book_view(symbol),
-            "funding_rate": self.funding.get(symbol),
+            "funding_rate": self.funding.get(symbol) or sig.get("funding_rate"),
             "taker_ratio": ratio,
         }
 
@@ -132,7 +153,7 @@ class MarketCache:
             symbol = signal.get("symbol") or ""
             if not self._pump_strategy_turnover_ok(symbol, signal):
                 continue
-            item = dict(signal)
+            item = self._enrich_signal(symbol, dict(signal))
             item["mini"] = self.mini_closes(symbol)
             out.append(item)
         return out
@@ -145,7 +166,7 @@ class MarketCache:
                 symbol = signal.get("symbol") or ""
                 if not self._x2_turnover_ok(symbol, signal):
                     continue
-                item = dict(signal)
+                item = self._enrich_signal(symbol, dict(signal))
                 item["mini"] = self.mini_closes(symbol)
                 signals.append(item)
             view.append({**column, "signals": signals})
@@ -156,13 +177,14 @@ class MarketCache:
         if not signal:
             return None
         candles = self.klines.get((symbol, interval), [])
+        sig = self._enrich_signal(symbol, dict(signal))
         return {
-            "signal": signal,
+            "signal": sig,
             "interval": interval,
             "candles": candles,
             "book": self.book_view(symbol),
             "oi": _trim_time_window(self.oi.get(symbol, []), "timestamp"),
-            "funding_rate": self.funding.get(symbol),
+            "funding_rate": self.funding.get(symbol) or sig.get("funding_rate"),
             "mini": self.mini_closes(symbol),
         }
 
@@ -178,16 +200,18 @@ class MarketCache:
             if ratio == float("inf"):
                 ratio = None
         candles = self.klines.get((symbol, interval), [])
+        sig = self._enrich_signal(symbol, dict(signal))
+        oi_rows = self.oi.get(symbol, [])
         return {
-            "signal": signal,
+            "signal": sig,
             "interval": interval,
             "candles": candles,
             "book": self.book_view(symbol),
             "liquidations": _trim_time_window(self.liquidations.get(symbol, [])[-400:], "time"),
-            "oi": _trim_time_window(self.oi.get(symbol, []), "timestamp"),
+            "oi": _trim_time_window(oi_rows, "timestamp"),
             "cvd": _trim_time_window(self.cvd.get(symbol, []), "time"),
             "obv": _trim_time_window(self._obv(symbol), "time"),
-            "funding_rate": self.funding.get(symbol),
+            "funding_rate": self.funding.get(symbol) or sig.get("funding_rate"),
             "taker_ratio": ratio,
             "mini": self.mini_closes(symbol),
         }
@@ -201,7 +225,7 @@ class MarketCache:
                 symbol = signal.get("symbol") or ""
                 if not self._signal_turnover_ok(symbol):
                     continue
-                item = dict(signal)
+                item = self._enrich_signal(symbol, dict(signal))
                 item["mini"] = self.mini_closes(symbol)
                 entry = item.get("entry_price")
                 price = item.get("last_price")
@@ -240,19 +264,29 @@ class MarketCache:
                 ratio = None
         elif signal and signal.get("taker_ratio") is not None:
             ratio = signal.get("taker_ratio")
+        sig = self._enrich_signal(symbol, dict(signal)) if signal else None
+        oi_rows = self.oi.get(symbol, [])
         return {
-            "signal": signal,
+            "signal": sig,
             "interval": interval,
             "candles": self.klines.get((symbol, interval), []),
             "book": self.book_view(symbol),
             "liquidations": _trim_time_window(self.liquidations.get(symbol, [])[-400:], "time"),
-            "oi": _trim_time_window(self.oi.get(symbol, []), "timestamp"),
+            "oi": _trim_time_window(oi_rows, "timestamp"),
             "cvd": _trim_time_window(self.cvd.get(symbol, []), "time"),
             "obv": _trim_time_window(self._obv(symbol), "time"),
-            "funding_rate": self.funding.get(symbol),
+            "funding_rate": self.funding.get(symbol) or (sig.get("funding_rate") if sig else None),
             "taker_ratio": ratio,
             "mini": self.mini_closes(symbol),
         }
+
+    def _enrich_signal(self, symbol: str, item: dict[str, Any]) -> dict[str, Any]:
+        _patch_signal_oi_from_cache(item, self.oi.get(symbol))
+        if item.get("funding_rate") is None:
+            fr = self.funding.get(symbol)
+            if fr is not None:
+                item["funding_rate"] = fr
+        return item
 
     def book_view(self, symbol: str) -> dict[str, Any]:
         book = self.books.get(symbol) or {"bids": [], "asks": [], "walls": []}
