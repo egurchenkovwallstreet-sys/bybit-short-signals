@@ -14,33 +14,85 @@ window.boardChart = {
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   PREFETCH_CONCURRENCY: 3,
-  /** Полоски плотности стакана справа на графике. */
+  /** Стакан на графике: вертикальная граница по центру, продажи вверх, покупки вниз. */
   BOOK_VIS: {
-    bandFrac: 0.31,
-    bandMax: 210,
-    barHeight: 48,
-    minBarLen: 14,
-    rowGap: 10,
-    padRight: 4,
+    barHeight: 16,
+    rowGap: 5,
+    binTicks: 15,
+    maxLevelsPerSide: 32,
+    centerLineWidth: 2,
+    padX: 10,
+    padY: 8,
+    minBarLen: 8,
+    bandFrac: 0.46,
   },
 
-  layoutBookRows(rows, yForRow, vis, height) {
+  normalizeBookSide(side) {
+    if (!side) return [];
+    if (Array.isArray(side) && side.length && Array.isArray(side[0])) return side;
+    if (typeof side === "object" && !Array.isArray(side)) {
+      return Object.entries(side).map(([p, s]) => [Number(p), Number(s)]);
+    }
+    return [];
+  },
+
+  inferPriceTick(price) {
+    const p = Math.abs(Number(price));
+    if (!p || Number.isNaN(p)) return 0.0001;
+    const exp = Math.floor(Math.log10(p));
+    const mag = 10 ** exp;
+    const norm = p / mag;
+    if (norm >= 5) return mag;
+    if (norm >= 2) return mag / 2;
+    if (norm >= 1) return mag / 5;
+    return mag / 10;
+  },
+
+  bookBinSize(refPrice, vis) {
+    const tick = window.boardChart.inferPriceTick(refPrice);
+    return tick * (vis.binTicks ?? 15);
+  },
+
+  aggregateBookLevels(levels, binSize, isBid) {
+    if (!levels.length || binSize <= 0) return [];
+    const bins = new Map();
+    for (const [priceRaw, sizeRaw] of levels) {
+      const price = Number(priceRaw);
+      const size = Number(sizeRaw);
+      if (!(price > 0) || !(size > 0)) continue;
+      const key = Math.floor(price / binSize + 1e-12);
+      const slot = bins.get(key) || { size: 0, wPrice: 0 };
+      slot.size += size;
+      slot.wPrice += price * size;
+      bins.set(key, slot);
+    }
+    const out = [];
+    for (const slot of bins.values()) {
+      out.push({
+        price: slot.wPrice / slot.size,
+        size: slot.size,
+        bid: isBid,
+      });
+    }
+    if (isBid) out.sort((a, b) => b.price - a.price);
+    else out.sort((a, b) => a.price - b.price);
+    return out;
+  },
+
+  stackBookFromCenter(rows, midY, side, vis, height) {
     const halfH = vis.barHeight / 2;
-    const minStep = vis.barHeight + (vis.rowGap ?? 6);
-    const pad = halfH + 6;
-    let items = rows.map((row) => ({ row, y: yForRow(row) }));
-    items.sort((a, b) => a.y - b.y);
-    for (let i = 1; i < items.length; i += 1) {
-      const need = items[i - 1].y + minStep;
-      if (items[i].y < need) items[i].y = need;
+    const step = vis.barHeight + vis.rowGap;
+    const cap = Math.min(rows.length, vis.maxLevelsPerSide);
+    const slice = rows.slice(0, cap);
+    const items = [];
+    for (let i = 0; i < slice.length; i += 1) {
+      const y =
+        side === "ask"
+          ? midY - halfH - vis.padY - i * step
+          : midY + halfH + vis.padY + i * step;
+      if (y < vis.padY || y > height - vis.padY) break;
+      items.push({ row: slice[i], y });
     }
-    for (let i = items.length - 2; i >= 0; i -= 1) {
-      const need = items[i + 1].y - minStep;
-      if (items[i].y > need) items[i].y = need;
-    }
-    items.forEach((it) => {
-      it.y = Math.max(pad, Math.min(height - pad, it.y));
-    });
     return items;
   },
 
@@ -336,7 +388,7 @@ window.boardChart = {
   drawBookOverlay(runtime, overlayElId, chartElId, getBook) {
     const canvas = document.getElementById(overlayElId);
     const chartEl = document.getElementById(chartElId);
-    if (!canvas || !chartEl || !runtime.series) return;
+    if (!canvas || !chartEl) return;
     const book = typeof getBook === "function" ? getBook() : getBook;
     const ratio = window.devicePixelRatio || 1;
     const width = chartEl.clientWidth;
@@ -351,65 +403,74 @@ window.boardChart = {
     ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
-    const pMin = runtime.priceRange.min;
-    const pMax = runtime.priceRange.max;
-    const span = pMax - pMin || 1;
+    const BC = window.boardChart;
+    const vis = BC.BOOK_VIS;
+    const midX = width / 2;
+    const midY = height / 2;
+    const bandW = Math.max(vis.minBarLen, (width / 2 - vis.padX) * vis.bandFrac);
+    const halfH = vis.barHeight / 2;
 
-    const normalizeSide = (side) => {
-      if (!side) return [];
-      if (Array.isArray(side) && side.length && Array.isArray(side[0])) return side;
-      if (typeof side === "object" && !Array.isArray(side)) {
-        return Object.entries(side).map(([p, s]) => [Number(p), Number(s)]);
-      }
-      return [];
-    };
-
-    const rows = [
-      ...normalizeSide(book?.bids).map(([price, size]) => ({
-        price: Number(price),
-        size: Number(size),
-        bid: true,
-      })),
-      ...normalizeSide(book?.asks).map(([price, size]) => ({
-        price: Number(price),
-        size: Number(size),
-        bid: false,
-      })),
-    ].filter((r) => r.price > 0 && r.size > 0);
-
-    if (!rows.length) {
+    const bidsRaw = BC.normalizeBookSide(book?.bids);
+    const asksRaw = BC.normalizeBookSide(book?.asks);
+    if (!bidsRaw.length && !asksRaw.length) {
       ctx.fillStyle = "rgba(142, 154, 171, 0.7)";
       ctx.font = "12px Segoe UI, sans-serif";
-      ctx.fillText("Стакан…", width - 72, 20);
+      ctx.fillText("Стакан…", midX + 8, 20);
       return;
     }
 
-    const list = rows.filter((r) => r.price >= pMin - span * 0.02 && r.price <= pMax + span * 0.02);
-    const draw = list.length ? list : rows;
-    const maxSize = Math.max(...draw.map((r) => r.size), 1);
-    const BC = window.boardChart;
-    const vis = BC.BOOK_VIS;
-    const bandW = Math.min(vis.bandMax, width * vis.bandFrac);
-    const halfH = vis.barHeight / 2;
-    const yForRow = (row) => {
-      let y = runtime.series.priceToCoordinate(row.price);
-      if (y == null || Number.isNaN(y)) {
-        y = height - 12 - ((row.price - pMin) / span) * (height - 24);
-      }
-      return y;
-    };
-    const laid = BC.layoutBookRows(draw, yForRow, vis, height);
+    const pr = runtime?.priceRange || {};
+    const pLo = Number(pr.min);
+    const pHi = Number(pr.max);
+    const refPrice =
+      (pLo > 0 && pHi > 0 ? (pLo + pHi) / 2 : 0) ||
+      Number(bidsRaw[0]?.[0]) ||
+      Number(asksRaw[0]?.[0]) ||
+      1;
+    const binSize = BC.bookBinSize(refPrice, vis);
+    const bids = BC.aggregateBookLevels(bidsRaw, binSize, true);
+    const asks = BC.aggregateBookLevels(asksRaw, binSize, false);
+
+    ctx.fillStyle = "rgba(255, 93, 115, 0.06)";
+    ctx.fillRect(midX, 0, width - midX, midY);
+    ctx.fillStyle = "rgba(61, 214, 140, 0.06)";
+    ctx.fillRect(midX, midY, width - midX, height - midY);
+
+    ctx.strokeStyle = "rgba(200, 210, 220, 0.55)";
+    ctx.lineWidth = vis.centerLineWidth;
+    ctx.beginPath();
+    ctx.moveTo(midX, vis.padY);
+    ctx.lineTo(midX, height - vis.padY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(midX, midY);
+    ctx.lineTo(width - vis.padX, midY);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(142, 154, 171, 0.85)";
+    ctx.font = "11px Segoe UI, sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillText("продажа ↑", midX + 6, vis.padY + 12);
+    ctx.fillText("покупка ↓", midX + 6, height - vis.padY - 4);
+
+    const maxSize = Math.max(...[...bids, ...asks].map((r) => r.size), 1);
+    const laid = [
+      ...BC.stackBookFromCenter(asks, midY, "ask", vis, height),
+      ...BC.stackBookFromCenter(bids, midY, "bid", vis, height),
+    ];
 
     laid.forEach(({ row, y }) => {
       const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
-      ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.42)" : "rgba(255, 93, 115, 0.42)";
-      ctx.fillRect(width - barLen - vis.padRight, y - halfH, barLen, vis.barHeight);
-      ctx.fillStyle = row.bid ? "rgba(200, 255, 220, 0.85)" : "rgba(255, 200, 210, 0.85)";
+      ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.5)" : "rgba(255, 93, 115, 0.5)";
+      ctx.fillRect(midX + 1, y - halfH, barLen, vis.barHeight);
+      ctx.fillStyle = row.bid ? "rgba(200, 255, 220, 0.9)" : "rgba(255, 200, 210, 0.9)";
       ctx.font = "10px Segoe UI, sans-serif";
-      ctx.textAlign = "right";
-      ctx.fillText(BC.formatBookSize(row.size), width - barLen - 8, y + 4);
-      ctx.fillStyle = "rgba(200, 210, 220, 0.75)";
-      ctx.fillText(BC.formatBookPrice(row.price), width - 6, y + 4);
+      ctx.textAlign = "left";
+      ctx.fillText(
+        `${BC.formatBookPrice(row.price)} · ${BC.formatBookSize(row.size)}`,
+        midX + barLen + 6,
+        y + 4,
+      );
     });
   },
 

@@ -488,91 +488,15 @@ function drawPumpStrategyCandles(candles, interval, resetScale) {
 }
 
 function drawPumpStrategyBookOverlay() {
-  const canvas = document.getElementById("psc-book-overlay");
-  const chartEl = document.getElementById("psc-candle-chart");
-  if (!canvas || !chartEl || !pumpStrategyState.series) return;
-  const book = pumpStrategyState.detail?.book;
-  const ratio = window.devicePixelRatio || 1;
-  const width = chartEl.clientWidth;
-  const height = chartEl.clientHeight;
-  if (width <= 0 || height <= 0) return;
-  canvas.width = width * ratio;
-  canvas.height = height * ratio;
-  canvas.style.width = `${width}px`;
-  canvas.style.height = `${height}px`;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, width, height);
-
-  let pMin = pumpStrategyState.priceRange.min;
-  let pMax = pumpStrategyState.priceRange.max;
-  if (pumpStrategyState.chart && pumpStrategyState.series) {
-    try {
-      const y1 = pumpStrategyState.series.priceToCoordinate(pMax);
-      const y2 = pumpStrategyState.series.priceToCoordinate(pMin);
-      if (y1 != null && y2 != null) {
-        /* диапазон совпадает с шкалой графика */
-      }
-    } catch (_e) {
-      /* ignore */
-    }
-  }
-  const span = pMax - pMin || 1;
-
-  const normalizeSide = (side) => {
-    if (!side) return [];
-    if (Array.isArray(side) && side.length && Array.isArray(side[0])) return side;
-    if (typeof side === "object" && !Array.isArray(side)) {
-      return Object.entries(side).map(([p, s]) => [Number(p), Number(s)]);
-    }
-    return [];
-  };
-
-  const bids = normalizeSide(book?.bids);
-  const asks = normalizeSide(book?.asks);
-  const rows = [
-    ...bids.map(([price, size]) => ({ price: Number(price), size: Number(size), bid: true })),
-    ...asks.map(([price, size]) => ({ price: Number(price), size: Number(size), bid: false })),
-  ].filter((r) => r.price > 0 && r.size > 0);
-
-  if (!rows.length) {
-    ctx.fillStyle = "rgba(142, 154, 171, 0.7)";
-    ctx.font = "12px Segoe UI, sans-serif";
-    ctx.fillText("Стакан…", width - 72, 20);
-    return;
-  }
-
-  const inRange = rows.filter((r) => r.price >= pMin - span * 0.02 && r.price <= pMax + span * 0.02);
-  const list = inRange.length ? inRange : rows;
-  const maxSize = Math.max(...list.map((r) => r.size), 1);
-  const BC = window.boardChart;
-  const vis = BC.BOOK_VIS;
-  const bandW = Math.min(vis.bandMax, width * vis.bandFrac);
-  const halfH = vis.barHeight / 2;
-  const yForRow = (row) => {
-    let y;
-    if (pumpStrategyState.series) {
-      y = pumpStrategyState.series.priceToCoordinate(row.price);
-    }
-    if (y == null || Number.isNaN(y)) {
-      y = height - 12 - ((row.price - pMin) / span) * (height - 24);
-    }
-    return y;
-  };
-  const laid = BC.layoutBookRows(list, yForRow, vis, height);
-
-  laid.forEach(({ row, y }) => {
-    const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
-    ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.42)" : "rgba(255, 93, 115, 0.42)";
-    ctx.fillRect(width - barLen - vis.padRight, y - halfH, barLen, vis.barHeight);
-    ctx.fillStyle = row.bid ? "rgba(200, 255, 220, 0.85)" : "rgba(255, 200, 210, 0.85)";
-    ctx.font = "10px Segoe UI, sans-serif";
-    ctx.textAlign = "right";
-    ctx.fillText(formatBookSize(row.size), width - barLen - 8, y + 4);
-    ctx.fillStyle = "rgba(200, 210, 220, 0.75)";
-    ctx.fillText(formatBookPrice(row.price), width - 6, y + 4);
-  });
+  window.boardChart.drawBookOverlay(
+    {
+      series: pumpStrategyState.series,
+      priceRange: pumpStrategyState.priceRange,
+    },
+    "psc-book-overlay",
+    "psc-candle-chart",
+    () => pumpStrategyState.detail?.book,
+  );
 }
 
 function formatTurnover(value) {
