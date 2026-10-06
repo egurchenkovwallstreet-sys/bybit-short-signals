@@ -12,11 +12,18 @@ import time
 from typing import Any
 
 import config
-from collector.normalize import kline_message, oi_message, orderbook_from_rest
+from collector.normalize import envelope, kline_message, oi_message, orderbook_from_rest, parse_kline_rows, parse_oi_rows
 from collector.symbol_filter import filter_universe
 
 
 log = logging.getLogger(__name__)
+
+
+def _merge_series(rows: list[dict[str, Any]], chunk: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    by_key = {row[key]: row for row in rows}
+    for row in chunk:
+        by_key[row[key]] = row
+    return [by_key[k] for k in sorted(by_key)]
 
 
 def _result(payload: dict[str, Any]) -> dict[str, Any]:
@@ -163,6 +170,98 @@ class BybitRest:
         payload = await self._call("publicGetV5MarketOpenInterest", params)
         rows = _result(payload).get("list") or []
         return oi_message(symbol, interval, rows)
+
+    async def fetch_klines_for_days(
+        self,
+        symbol: str,
+        interval: str,
+        days: int | None = None,
+    ) -> dict[str, Any] | None:
+        span = days if days is not None else config.PUMP_SCAN_CHART_WINDOW_DAYS
+        needed = config.kline_bars_for_days(interval, span)
+        cutoff_ms = int(time.time() * 1000) - span * 86_400_000
+        merged: list[dict[str, Any]] = []
+        end: int | None = None
+        max_batch = config.BYBIT_KLINE_MAX_LIMIT
+        while len(merged) < needed:
+            batch_limit = min(max_batch, needed - len(merged))
+            params: dict[str, Any] = {
+                "category": config.BYBIT_CATEGORY,
+                "symbol": symbol,
+                "interval": interval,
+                "limit": batch_limit,
+            }
+            if end is not None:
+                params["end"] = end
+            payload = await self._call("publicGetV5MarketKline", params)
+            rows = _result(payload).get("list") or []
+            if not rows:
+                break
+            chunk = parse_kline_rows(rows)
+            if not chunk:
+                break
+            merged = _merge_series(merged, chunk, "timestamp")
+            oldest = chunk[0]["timestamp"]
+            if oldest <= cutoff_ms:
+                break
+            end = oldest - 1
+            if len(rows) < batch_limit:
+                break
+        merged = [row for row in merged if row["timestamp"] >= cutoff_ms]
+        if not merged:
+            return None
+        return envelope(
+            symbol,
+            merged[-1]["timestamp"],
+            "kline",
+            {"interval": interval, "candles": merged},
+        )
+
+    async def fetch_open_interest_for_days(
+        self,
+        symbol: str,
+        interval: str,
+        days: int | None = None,
+    ) -> dict[str, Any] | None:
+        span = days if days is not None else config.PUMP_SCAN_CHART_WINDOW_DAYS
+        needed = config.oi_bars_for_days(interval, span)
+        cutoff_ms = int(time.time() * 1000) - span * 86_400_000
+        merged: list[dict[str, Any]] = []
+        end: int | None = None
+        max_batch = config.BYBIT_KLINE_MAX_LIMIT
+        while len(merged) < needed:
+            batch_limit = min(max_batch, needed - len(merged))
+            params: dict[str, Any] = {
+                "category": config.BYBIT_CATEGORY,
+                "symbol": symbol,
+                "intervalTime": interval,
+                "limit": batch_limit,
+            }
+            if end is not None:
+                params["end"] = end
+            payload = await self._call("publicGetV5MarketOpenInterest", params)
+            rows = _result(payload).get("list") or []
+            if not rows:
+                break
+            chunk = parse_oi_rows(rows)
+            if not chunk:
+                break
+            merged = _merge_series(merged, chunk, "timestamp")
+            oldest = chunk[0]["timestamp"]
+            if oldest <= cutoff_ms:
+                break
+            end = oldest - 1
+            if len(rows) < batch_limit:
+                break
+        merged = [row for row in merged if row["timestamp"] >= cutoff_ms]
+        if not merged:
+            return None
+        return envelope(
+            symbol,
+            merged[-1]["timestamp"],
+            "open_interest",
+            {"interval": interval, "points": merged},
+        )
 
     async def _call(self, method_name: str, params: dict[str, Any]) -> dict[str, Any]:
         if self._exchange is None:

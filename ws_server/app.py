@@ -133,16 +133,34 @@ _OI_INTERVALS = {"5min", "15min", "30min", "1h", "4h", "1d"}
 
 
 @app.get("/api/open-interest/{symbol}")
-async def open_interest(symbol: str, interval: str = "5min", refresh: bool = False) -> dict[str, Any]:
+async def open_interest(
+    symbol: str,
+    interval: str = "5min",
+    refresh: bool = False,
+    days: int = 0,
+) -> dict[str, Any]:
     if not _SYMBOL.fullmatch(symbol or ""):
         raise HTTPException(status_code=400, detail="Некорректный тикер")
     interval = interval.lower()
     if interval not in _OI_INTERVALS:
         raise HTTPException(status_code=400, detail="Некорректный интервал OI")
+    window_days = days if days > 0 else config.PUMP_SCAN_CHART_WINDOW_DAYS
     hub: Hub = app.state.hub
     cached = hub.cache.oi.get(symbol)
-    if cached and len(cached) >= 10 and not refresh and hub.cache.oi_interval.get(symbol) == interval:
-        return {"symbol": symbol, "interval": interval, "points": cached}
+    min_pts = max(10, config.oi_bars_for_days(interval, window_days) // 4)
+    if (
+        cached
+        and len(cached) >= min_pts
+        and not refresh
+        and days <= 0
+        and hub.cache.oi_interval.get(symbol) == interval
+    ):
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "window_days": window_days,
+            "points": cached,
+        }
     from collector.rest_client import BybitRest
 
     rest: BybitRest | None = getattr(app.state, "bybit_rest", None)
@@ -150,7 +168,10 @@ async def open_interest(symbol: str, interval: str = "5min", refresh: bool = Fal
         rest = BybitRest()
         await rest.open()
         app.state.bybit_rest = rest
-    message = await rest.fetch_open_interest(symbol, interval)
+    if days > 0 or refresh:
+        message = await rest.fetch_open_interest_for_days(symbol, interval, window_days)
+    else:
+        message = await rest.fetch_open_interest(symbol, interval)
     points = (message.get("data") or {}).get("points") or [] if message else []
     if points:
         hub.cache.oi[symbol] = list(points)
@@ -158,21 +179,31 @@ async def open_interest(symbol: str, interval: str = "5min", refresh: bool = Fal
         hub.cache.market_dirty = True
     elif cached:
         points = cached
-    return {"symbol": symbol, "interval": interval, "points": points}
+    return {"symbol": symbol, "interval": interval, "window_days": window_days, "points": points}
 
 
 @app.get("/api/klines/{symbol}")
-async def klines(symbol: str, interval: str = "1", refresh: bool = False) -> dict[str, Any]:
+async def klines(
+    symbol: str,
+    interval: str = "1",
+    refresh: bool = False,
+    days: int = 0,
+) -> dict[str, Any]:
     if not _SYMBOL.fullmatch(symbol or ""):
         raise HTTPException(status_code=400, detail="Некорректный тикер")
     if interval not in {"1", "5", "15", "30", "60", "240", "D"}:
         raise HTTPException(status_code=400, detail="Некорректный интервал")
+    window_days = days if days > 0 else config.PUMP_SCAN_CHART_WINDOW_DAYS
     hub: Hub = app.state.hub
     key = (symbol, interval)
-    min_bars = max(100, config.KLINE_FETCH_LIMIT // 2)
+    min_bars = (
+        config.kline_bars_for_days(interval, window_days)
+        if days > 0
+        else max(100, config.KLINE_FETCH_LIMIT // 2)
+    )
     cached = hub.cache.klines.get(key)
-    if cached and len(cached) >= min_bars and not refresh:
-        return {"symbol": symbol, "interval": interval, "candles": cached}
+    if cached and len(cached) >= min_bars and not refresh and days <= 0:
+        return {"symbol": symbol, "interval": interval, "window_days": window_days, "candles": cached}
     from collector.rest_client import BybitRest
 
     rest: BybitRest | None = getattr(app.state, "bybit_rest", None)
@@ -180,14 +211,17 @@ async def klines(symbol: str, interval: str = "1", refresh: bool = False) -> dic
         rest = BybitRest()
         await rest.open()
         app.state.bybit_rest = rest
-    message = await rest.fetch_klines(symbol, interval)
+    if days > 0 or refresh:
+        message = await rest.fetch_klines_for_days(symbol, interval, window_days)
+    else:
+        message = await rest.fetch_klines(symbol, interval)
     candles = (message.get("data") or {}).get("candles") or [] if message else []
     if candles:
         hub.cache.klines[key] = list(candles)
         hub.cache.market_dirty = True
     elif cached:
         candles = cached
-    return {"symbol": symbol, "interval": interval, "candles": candles}
+    return {"symbol": symbol, "interval": interval, "window_days": window_days, "candles": candles}
 
 
 @app.websocket("/ws")
