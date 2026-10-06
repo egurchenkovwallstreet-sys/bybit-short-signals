@@ -149,22 +149,48 @@ function renderX2Board() {
 
 function x2CardHtml(row, color, active) {
   const peak = row.peak_mult != null ? Number(row.peak_mult).toFixed(2) : null;
-  const mult = peak ? `пик ×${peak}` : row.multiplier != null ? `×${Number(row.multiplier).toFixed(2)}` : "×2+";
+  const multNum = peak || (row.multiplier != null ? Number(row.multiplier).toFixed(2) : null);
+  const multLabel = multNum ? `×${multNum}` : "×2+";
   const peakHint =
     row.two_peak_kind === "double_top"
       ? `двойная вершина ${row.two_peak_tf || ""}`
       : row.two_peak_kind === "marginal_hh"
-        ? `2 верш. ${row.two_peak_tf || ""} (чуть выше)`
+        ? `2-я вершина чуть выше (${row.two_peak_tf || ""})`
         : row.two_peak_kind === "lower_high"
-          ? `LH ${row.two_peak_tf || ""} (между ${row.two_peak_bars_between ?? "?"} св.)`
-          : "вершины —";
-  const lh = `LH 1H:${row.lh_1h ?? 0} · 4H:${row.lh_4h ?? 0} · ${peakHint}`;
-  const pb = row.pullback_pct != null ? `откат ${row.pullback_pct}%` : "—";
-  return `<article class="card x2-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
-    <header><strong>${row.symbol}</strong> <span class="tag">${mult} от min 5d</span></header>
-    <div class="meta">${lh} · ${pb} · EMA ${row.ema_depth ?? 0}/3${row.pending_stage ? ` · →${row.pending_stage}?` : ""}</div>
-    <canvas class="mini" width="120" height="36" data-symbol="${row.symbol}"></canvas>
-    <p class="quiet">${row.oi_drop ? "OI ↓" : "OI —"} · 24h ${row.price_24h_pct != null ? "+" + fmt(row.price_24h_pct) + "%" : "—"}</p>
+          ? `LH ${row.two_peak_tf || ""}, ${row.two_peak_bars_between ?? "?"} св.`
+          : "—";
+  const oi =
+    row.oi_change_pct != null && !Number.isNaN(Number(row.oi_change_pct))
+      ? `${Number(row.oi_change_pct) >= 0 ? "+" : ""}${Number(row.oi_change_pct).toFixed(2)}%`
+      : row.oi_drop
+        ? "снижается"
+        : "—";
+  const oiCls =
+    row.oi_drop || (row.oi_change_pct != null && Number(row.oi_change_pct) < 0)
+      ? "psc-down"
+      : row.oi_change_pct != null && Number(row.oi_change_pct) > 0
+        ? "psc-up"
+        : "psc-muted";
+  const pending = row.pending_stage ? `ожидает колонку ${row.pending_stage}` : "—";
+  const pct24 =
+    row.price_24h_pct != null ? `${Number(row.price_24h_pct) >= 0 ? "+" : ""}${fmt(row.price_24h_pct)}%` : "—";
+  return `<article class="card x2-card board-rich-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
+    <header class="psc-head">
+      <h3 class="psc-symbol">${row.symbol.replace("USDT", "")}</h3>
+      <span class="psc-kind">${row.status || ""} ${row.label || ""}</span>
+    </header>
+    <div class="psc-growth">${multLabel}</div>
+    <p class="quiet psc-sub">рост от минимума за 21 д</p>
+    <dl class="psc-fields">
+      <div class="psc-row"><dt>Две вершины</dt><dd>${peakHint}</dd></div>
+      <div class="psc-row"><dt>LH · 1H / 4H</dt><dd>${row.lh_1h ?? 0} / ${row.lh_4h ?? 0}</dd></div>
+      <div class="psc-row"><dt>Откат от пика 1H</dt><dd>${row.pullback_pct != null ? row.pullback_pct + "%" : "—"}</dd></div>
+      <div class="psc-row"><dt>Открытый интерес</dt><dd class="${oiCls}">${oi}</dd></div>
+      <div class="psc-row"><dt>Рост 24 ч</dt><dd>${pct24}</dd></div>
+      <div class="psc-row"><dt>EMA (глубина)</dt><dd>${row.ema_depth ?? 0} / 3</dd></div>
+      <div class="psc-row"><dt>Смена колонки</dt><dd>${pending}</dd></div>
+    </dl>
+    <canvas class="mini mini-strategy" width="280" height="48" data-symbol="${row.symbol}"></canvas>
   </article>`;
 }
 

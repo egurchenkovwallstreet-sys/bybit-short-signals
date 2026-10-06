@@ -197,12 +197,33 @@ function renderPumpBoard() {
 }
 
 function pumpCardHtml(row, color, active) {
-  const emaHint = emaHintText(row.ema_by_tf);
-  return `<article class="card pump-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
-    <header><strong>${row.symbol}</strong> <span class="tag">+${fmt(row.price_24h_pct)}% / 24h</span></header>
-    <div class="meta">ослабление ${row.weaken_score} · EMA ${row.ema_depth}/3${row.pending_stage ? ` · →${row.pending_stage}?` : ""}</div>
-    <canvas class="mini" width="120" height="36" data-symbol="${row.symbol}"></canvas>
-    <p class="quiet ema-hint">${emaHint}</p>
+  const oi =
+    row.oi_change_pct != null && !Number.isNaN(Number(row.oi_change_pct))
+      ? `${Number(row.oi_change_pct) >= 0 ? "+" : ""}${Number(row.oi_change_pct).toFixed(2)}%`
+      : "нет данных";
+  const oiCls =
+    row.oi_change_pct != null && Number(row.oi_change_pct) < 0
+      ? "psc-down"
+      : row.oi_change_pct != null && Number(row.oi_change_pct) > 0
+        ? "psc-up"
+        : "psc-muted";
+  const pending = row.pending_stage ? `ожидает колонку ${row.pending_stage}` : "—";
+  const emaLine = emaHintText(row.ema_by_tf);
+  return `<article class="card pump-card board-rich-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
+    <header class="psc-head">
+      <h3 class="psc-symbol">${row.symbol.replace("USDT", "")}</h3>
+      <span class="psc-kind">${row.status || ""} ${row.label || ""}</span>
+    </header>
+    <div class="psc-growth">+${fmt(row.price_24h_pct)}%</div>
+    <p class="quiet psc-sub">рост за 24 часа</p>
+    <dl class="psc-fields">
+      <div class="psc-row"><dt>Ослабление пампа</dt><dd>${row.weaken_score ?? 0} из 7</dd></div>
+      <div class="psc-row"><dt>EMA (глубина)</dt><dd>${row.ema_depth ?? 0} / 3</dd></div>
+      <div class="psc-row"><dt>Открытый интерес</dt><dd class="${oiCls}">${oi}</dd></div>
+      <div class="psc-row"><dt>Смена колонки</dt><dd>${pending}</dd></div>
+      <div class="psc-row"><dt>EMA по ТФ</dt><dd class="psc-muted psc-ema-dd">${emaLine}</dd></div>
+    </dl>
+    <canvas class="mini mini-strategy" width="280" height="48" data-symbol="${row.symbol}"></canvas>
   </article>`;
 }
 

@@ -276,7 +276,7 @@ function pumpStrategyCardHtml(row, selected) {
   const oi1 = formatOiChange(row.oi_change_1h_pct);
   const oi4 = formatOiChange(row.oi_change_4h_pct);
   const active = row.symbol === selected ? " active" : "";
-  return `<article class="pump-strategy-card${active}" data-symbol="${row.symbol}">
+  return `<article class="pump-strategy-card board-rich-card${active}" data-symbol="${row.symbol}">
     <header class="psc-head">
       <h3 class="psc-symbol">${row.symbol.replace("USDT", "")}</h3>
       <span class="psc-kind">${row.kind_label || "Длинный рост"}</span>
