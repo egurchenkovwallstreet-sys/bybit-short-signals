@@ -372,8 +372,9 @@ function renderDetail() {
     const info = root.querySelector(".signal-info");
     if (info) info.innerHTML = infoHtml(signal);
   }
+  const resetChartScale = !same;
   void ensureCandles(signal.symbol, detail.interval || state.interval, detail).then((candles) => {
-    drawCandles(candles, signal, detail);
+    drawCandles(candles, signal, detail, resetChartScale);
   });
   drawBook(document.getElementById("book-map"), detail.book || {});
   drawLiquidations(document.getElementById("liq-map"), detail.liquidations || []);
@@ -547,7 +548,7 @@ function updateChartLegend(detail) {
     <span class="lg-meta">Funding ${fr} · Taker ${tk}</span>`;
 }
 
-function drawCandles(candles, signal, detail) {
+function drawCandles(candles, signal, detail, resetChartScale) {
   if (!state.series) return;
   const bars = (candles || [])
     .map((candle) => ({
@@ -618,12 +619,8 @@ function drawCandles(candles, signal, detail) {
         text: `свуп ${level.timeframe}`,
       }));
     state.series.setMarkers(markers);
-    const ts = state.chart.timeScale();
-    ts.fitContent();
-    ts.applyOptions({ rightOffset: 28, fixRightEdge: false });
-    const lr = ts.getVisibleLogicalRange();
-    if (lr) {
-      ts.setVisibleLogicalRange({ from: lr.from, to: lr.to + 18 });
+    if (resetChartScale) {
+      state.chart.timeScale().fitContent();
     }
   }
 }
