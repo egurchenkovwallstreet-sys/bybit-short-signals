@@ -219,7 +219,7 @@ function renderX2Info(full) {
     <div class="psc-book-pane" id="x2-book-pane"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="x2_retrace" data-symbol="${s.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(x2State.interval)}</p>`;
-  window.boardChart.renderBookPane(X2_CHART.book, detail?.book, s.last_price);
+  window.boardChart.renderBookPane(X2_CHART.book, detail?.book, s.last_price, s.symbol);
 }
 
 function renderX2Board() {
