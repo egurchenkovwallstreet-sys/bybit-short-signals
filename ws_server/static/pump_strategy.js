@@ -546,11 +546,11 @@ function drawPumpStrategyBookOverlay() {
   const inRange = rows.filter((r) => r.price >= pMin - span * 0.02 && r.price <= pMax + span * 0.02);
   const list = inRange.length ? inRange : rows;
   const maxSize = Math.max(...list.map((r) => r.size), 1);
-  const vis = window.boardChart.BOOK_VIS;
+  const BC = window.boardChart;
+  const vis = BC.BOOK_VIS;
   const bandW = Math.min(vis.bandMax, width * vis.bandFrac);
   const halfH = vis.barHeight / 2;
-
-  list.forEach((row) => {
+  const yForRow = (row) => {
     let y;
     if (pumpStrategyState.series) {
       y = pumpStrategyState.series.priceToCoordinate(row.price);
@@ -558,15 +558,20 @@ function drawPumpStrategyBookOverlay() {
     if (y == null || Number.isNaN(y)) {
       y = height - 12 - ((row.price - pMin) / span) * (height - 24);
     }
+    return y;
+  };
+  const laid = BC.layoutBookRows(list, yForRow, vis, height);
+
+  laid.forEach(({ row, y }) => {
     const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
     ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.42)" : "rgba(255, 93, 115, 0.42)";
     ctx.fillRect(width - barLen - vis.padRight, y - halfH, barLen, vis.barHeight);
     ctx.fillStyle = row.bid ? "rgba(200, 255, 220, 0.85)" : "rgba(255, 200, 210, 0.85)";
     ctx.font = "10px Segoe UI, sans-serif";
     ctx.textAlign = "right";
-    ctx.fillText(formatBookSize(row.size), width - barLen - 8, y + 3);
+    ctx.fillText(formatBookSize(row.size), width - barLen - 8, y + 4);
     ctx.fillStyle = "rgba(200, 210, 220, 0.75)";
-    ctx.fillText(formatBookPrice(row.price), width - 6, y + 3);
+    ctx.fillText(formatBookPrice(row.price), width - 6, y + 4);
   });
 }
 

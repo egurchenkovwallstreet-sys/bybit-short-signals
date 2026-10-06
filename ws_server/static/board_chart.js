@@ -14,13 +14,34 @@ window.boardChart = {
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   PREFETCH_CONCURRENCY: 3,
-  /** Полоски плотности стакана справа на графике (≈×3.5 к исходному размеру). */
+  /** Полоски плотности стакана справа на графике. */
   BOOK_VIS: {
-    bandFrac: 0.62,
-    bandMax: 420,
-    barHeight: 34,
-    minBarLen: 28,
+    bandFrac: 0.31,
+    bandMax: 210,
+    barHeight: 48,
+    minBarLen: 14,
+    rowGap: 10,
     padRight: 4,
+  },
+
+  layoutBookRows(rows, yForRow, vis, height) {
+    const halfH = vis.barHeight / 2;
+    const minStep = vis.barHeight + (vis.rowGap ?? 6);
+    const pad = halfH + 6;
+    let items = rows.map((row) => ({ row, y: yForRow(row) }));
+    items.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < items.length; i += 1) {
+      const need = items[i - 1].y + minStep;
+      if (items[i].y < need) items[i].y = need;
+    }
+    for (let i = items.length - 2; i >= 0; i -= 1) {
+      const need = items[i + 1].y - minStep;
+      if (items[i].y > need) items[i].y = need;
+    }
+    items.forEach((it) => {
+      it.y = Math.max(pad, Math.min(height - pad, it.y));
+    });
+    return items;
   },
 
   createRuntime() {
@@ -366,24 +387,29 @@ window.boardChart = {
     const list = rows.filter((r) => r.price >= pMin - span * 0.02 && r.price <= pMax + span * 0.02);
     const draw = list.length ? list : rows;
     const maxSize = Math.max(...draw.map((r) => r.size), 1);
-    const vis = window.boardChart.BOOK_VIS;
+    const BC = window.boardChart;
+    const vis = BC.BOOK_VIS;
     const bandW = Math.min(vis.bandMax, width * vis.bandFrac);
     const halfH = vis.barHeight / 2;
-
-    draw.forEach((row) => {
+    const yForRow = (row) => {
       let y = runtime.series.priceToCoordinate(row.price);
       if (y == null || Number.isNaN(y)) {
         y = height - 12 - ((row.price - pMin) / span) * (height - 24);
       }
+      return y;
+    };
+    const laid = BC.layoutBookRows(draw, yForRow, vis, height);
+
+    laid.forEach(({ row, y }) => {
       const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
       ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.42)" : "rgba(255, 93, 115, 0.42)";
       ctx.fillRect(width - barLen - vis.padRight, y - halfH, barLen, vis.barHeight);
       ctx.fillStyle = row.bid ? "rgba(200, 255, 220, 0.85)" : "rgba(255, 200, 210, 0.85)";
       ctx.font = "10px Segoe UI, sans-serif";
       ctx.textAlign = "right";
-      ctx.fillText(window.boardChart.formatBookSize(row.size), width - barLen - 8, y + 3);
+      ctx.fillText(BC.formatBookSize(row.size), width - barLen - 8, y + 4);
       ctx.fillStyle = "rgba(200, 210, 220, 0.75)";
-      ctx.fillText(window.boardChart.formatBookPrice(row.price), width - 6, y + 3);
+      ctx.fillText(BC.formatBookPrice(row.price), width - 6, y + 4);
     });
   },
 
