@@ -29,6 +29,7 @@ class Client:
         self.interval = "1"
         self.force_detail = False
         self.pump_scan_symbol: str | None = None
+        self.pump_scan_interval = "15"
         self.force_pump_scan_detail = False
 
 
@@ -88,7 +89,9 @@ class Hub:
             "pump_scan_board": self.cache.view_pump_scan_board(),
             "stats": self.stats(),
             "detail": self.cache.detail(symbol, client.interval) if symbol else None,
-            "pump_scan_detail": self.cache.pump_scan_detail(pump_symbol) if pump_symbol else None,
+            "pump_scan_detail": (
+                self.cache.pump_scan_detail(pump_symbol, client.pump_scan_interval) if pump_symbol else None
+            ),
             "btc_test": self.btc.view(),
         }
 
@@ -110,6 +113,11 @@ class Hub:
             symbol = str(message.get("symbol") or "")
             if symbol in self.cache.pump_scan_signals:
                 client.pump_scan_symbol = symbol
+                client.force_pump_scan_detail = True
+        elif kind == "pump_scan_interval":
+            interval = str(message.get("interval") or "15")
+            if interval in {"1", "5", "15", "30", "60", "240", "D"}:
+                client.pump_scan_interval = interval
                 client.force_pump_scan_detail = True
 
     async def run(self) -> None:
@@ -235,7 +243,9 @@ class Hub:
                             {
                                 "type": "pump_scan_detail",
                                 "symbol": client.pump_scan_symbol,
-                                "data": self.cache.pump_scan_detail(client.pump_scan_symbol),
+                                "data": self.cache.pump_scan_detail(
+                                    client.pump_scan_symbol, client.pump_scan_interval
+                                ),
                             }
                         )
                         client.force_pump_scan_detail = False

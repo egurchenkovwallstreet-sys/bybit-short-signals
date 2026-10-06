@@ -171,6 +171,38 @@ body {
   padding-left: 18px;
 }
 
+#pump-detail {
+  overflow: auto;
+  max-height: calc(100vh - 88px);
+}
+
+.pump-visual-stack .plot {
+  width: 100%;
+  height: 200px;
+  background: #10141b;
+  border-radius: 12px;
+}
+
+.pump-book-canvas {
+  width: 100%;
+  height: 320px;
+  display: block;
+  background: #10141b;
+  border-radius: 12px;
+}
+
+.pump-tf-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.pump-detail-head {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .columns {
   min-height: 0;
   display: grid;

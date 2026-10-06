@@ -989,3 +989,10 @@ function renderTable() {
     })
     .join("");
 }
+
+window.signalCharts = {
+  drawBook,
+  drawLine,
+  pointsOf,
+  DETAIL_CHART_WINDOW_HOURS,
+};

@@ -92,7 +92,7 @@ class MarketCache:
             view.append({**column, "signals": signals})
         return view
 
-    def pump_scan_detail(self, symbol: str) -> dict[str, Any] | None:
+    def pump_scan_detail(self, symbol: str, interval: str = "15") -> dict[str, Any] | None:
         signal = self.pump_scan_signals.get(symbol)
         if not signal:
             return None
@@ -103,12 +103,16 @@ class MarketCache:
             ratio = float("inf") if sell == 0 else buy / sell
             if ratio == float("inf"):
                 ratio = None
+        candles = self.klines.get((symbol, interval), [])
         return {
             "signal": signal,
+            "interval": interval,
+            "candles": candles,
             "book": self.book_view(symbol),
             "liquidations": _trim_time_window(self.liquidations.get(symbol, [])[-400:], "time"),
             "oi": _trim_time_window(self.oi.get(symbol, []), "timestamp"),
             "cvd": _trim_time_window(self.cvd.get(symbol, []), "time"),
+            "obv": _trim_time_window(self._obv(symbol), "time"),
             "funding_rate": self.funding.get(symbol),
             "taker_ratio": ratio,
             "mini": self.mini_closes(symbol),

@@ -133,7 +133,7 @@ async def signals_unprocessed() -> dict[str, Any]:
 async def klines(symbol: str, interval: str = "1", refresh: bool = False) -> dict[str, Any]:
     if not _SYMBOL.fullmatch(symbol or ""):
         raise HTTPException(status_code=400, detail="Некорректный тикер")
-    if interval not in {"1", "5", "15", "60", "240", "D"}:
+    if interval not in {"1", "5", "15", "30", "60", "240", "D"}:
         raise HTTPException(status_code=400, detail="Некорректный интервал")
     hub: Hub = app.state.hub
     key = (symbol, interval)
