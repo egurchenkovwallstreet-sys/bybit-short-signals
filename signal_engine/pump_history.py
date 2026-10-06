@@ -19,7 +19,8 @@ class HistoryPump:
 
 
 def _pick_bars(state: SymbolState) -> tuple[str, list[Bar]]:
-    for key in ("60", "240", "D"):
+    # 4H даёт ~33d при лимите 200 — лучше для пампа длиннее недели.
+    for key in ("240", "60", "D"):
         bars = state.bars_htf.get(key) or []
         if len(bars) >= config.X2_RETRACE_MIN_BARS:
             return key, bars
@@ -35,15 +36,28 @@ def history_pump_metrics(state: SymbolState, now_ms: int) -> HistoryPump | None:
     window = [b for b in bars if b.timestamp >= now_ms - window_ms]
     if len(window) < config.X2_RETRACE_MIN_BARS:
         window = bars[-max(config.X2_RETRACE_MIN_BARS, len(bars)) :]
-    min_low = min(b.low for b in window)
-    peak_high = max(b.high for b in window)
-    if min_low <= 0 or peak_high <= 0:
+
+    def _metrics(segment: list[Bar]) -> tuple[float, float, int] | None:
+        if len(segment) < config.X2_RETRACE_MIN_BARS:
+            return None
+        min_low = min(b.low for b in segment)
+        peak_high = max(b.high for b in segment)
+        if min_low <= 0 or peak_high <= 0:
+            return None
+        mult = peak_high / min_low
+        if mult < config.X2_RETRACE_MIN_MULTIPLIER:
+            return None
+        valley_ts = max(b.timestamp for b in segment if b.low == min_low)
+        return min_low, peak_high, valley_ts
+
+    parsed = _metrics(window)
+    if parsed is None:
+        parsed = _metrics(bars[-config.LEVEL_LOOKBACK_CANDLES :])
+    if parsed is None:
         return None
+    min_low, peak_high, valley_ts = parsed
     peak_mult = peak_high / min_low
-    if peak_mult < config.X2_RETRACE_MIN_MULTIPLIER:
-        return None
-    valley_ts = max(b.timestamp for b in window if b.low == min_low)
-    last = state.last_price or window[-1].close
+    last = state.last_price or bars[-1].close
     current_mult = float(last) / min_low
     return HistoryPump(
         min_low=min_low,

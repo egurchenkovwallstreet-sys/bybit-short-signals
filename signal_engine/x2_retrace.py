@@ -27,7 +27,7 @@ _MS_1H = 3600 * 1000
 
 def _eligible(state: SymbolState) -> bool:
     turnover = state.turnover_24h_usdt
-    if turnover is None or turnover < config.UNIVERSE_MIN_TURNOVER_24H_USDT:
+    if turnover is not None and turnover < config.UNIVERSE_MIN_TURNOVER_24H_USDT:
         return False
     if state.last_price is None or state.last_price <= 0:
         return False
