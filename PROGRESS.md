@@ -2,6 +2,8 @@
 
 Этот файл отслеживает прогресс реализации проекта. Обновляется после каждого завершённого этапа.
 
+**Для нового чата Cursor:** прочитать целиком **`TZ.md`** (включая раздел «РАСШИРЕНИЯ UI И ДОСОК») и **журнал ниже**, затем изучить код по таблице файлов в TZ. Деплой — всегда сам (commit/push/deploy), пользователю только отчёт в чат.
+
 ---
 
 ## ЭТАПЫ
@@ -63,6 +65,16 @@
 - [ ] Проверка появления карточек на реальном рынке (пока в журнале 0 сигналов).
 - [ ] Исправление ошибок (перегруз буфера `market:data`).
 - [x] Автоперезапуск после деплоя / reboot (PM2, `scripts/setup_pm2.sh`).
+
+### Расширения: Памп-скан, 2× откат, липкие доски ✅ (2026-10-06)
+
+- [x] Вкладка **«Памп-скан»**: ≥35% / 24h, EMA, объём/OI, синхронизация TF, липкий список + debounce колонок.
+- [x] Вкладка **«2× откат»**: рост от min за 21d, два pivot-high (4H/1H), OI↓, EMA, колонки 1–4, dismiss.
+- [x] `WatchStore` / `board_watches`, debounce стадий (`stage_debounce`), dismiss API.
+- [x] Основные **«Сигналы»**: debounce смены колонки силы.
+- [x] Верификация эталонов NIL, HUMA, MINA, SAND, GRASS на VPS (`scripts/verify_x2_examples.py`).
+- [x] Ужесточение фильтров 2×: turnover **300k**, рост **7d ≥ 0%**, **2 пика обязательны**, **всплеск объёма** на ноге роста; UI-фильтр turnover в `cache.py`.
+- [ ] Донастройка порога 7d (например +5%) и строго 2.0× вместо 1.72× — по решению пользователя.
 
 ### Этап 6: Deploy 🔄
 
@@ -137,3 +149,22 @@
 - Модуль `strategy_test/`: MTF 1m–1D, перпы (vol, funding, OI, liq), grade A/B/C, журнал `data/btc_strategy.db`, аналитика win/loss по факторам.
 - Процесс: `.venv/bin/python -m strategy_test`, Redis `btc:strategy:updates`, вкладка **BTC · тест** на странице.
 - Режимы **intraday** и **scalp** одновременно; статистика по каждому сигналу и срезы факторов для докрутки правил.
+
+### 2026-10-06 (вкладки Памп-скан и 2× откат, липкие watches)
+
+- **Памп-скан:** `pump_scan.py`, лидеры 24h, стадии ослабления, latch + debounce; выход при отрицательном 24h (`growth_pct_negative`).
+- **2× откат:** `x2_retrace.py`, `pump_history.py`, `swing_highs.py`; UI `x2_retrace.js`; lookback 21d, min mult 1.72; два пика на 4H/1H; цена из HTF при пустом ticker.
+- **Исправленные баги 2×:** пустая вкладка; `_eligible` без ticker; выход по «минус 24h» убран; `_should_exit_watch` при `hist is None` не удалял; массовое обнуление watches.
+- **Фильтры мусора (коммиты `aa8921e`, `01e9dd1`):** `X2_RETRACE_MIN_TURNOVER_24H_USDT=300_000`; `price_change_7d_pct`; `_pump_leg_volume_spike_ok`; `_entry_quality_ok`; пересчёт активных watches; `_x2_turnover_ok` в ws cache; `scripts/audit_x2_turnover.py`.
+- **Deploy:** VPS `/opt/signals`, UI http://129.101.127.78:8787, PM2 restart через `scripts/deploy.sh`.
+- **HEAD на момент записи:** `01e9dd1` (после деплоя watches пересобираются движком; эталоны проходят verify).
+
+### Архитектура (шпаргалка)
+
+| Слой | Файлы |
+|------|--------|
+| Config | `config.py` |
+| Collector | `collector/` |
+| Engine | `signal_engine/engine.py`, `pump_scan.py`, `x2_retrace.py`, `watch_store.py` |
+| Web | `ws_server/app.py`, `hub.py`, `cache.py`, `static/` |
+| Ops | `scripts/deploy.sh`, `verify_x2_examples.py`, `audit_x2_turnover.py` |

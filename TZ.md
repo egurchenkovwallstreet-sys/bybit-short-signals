@@ -381,3 +381,80 @@ AI-слой анализирует новости и мультитаймфре�
 - Самообучение (корректировка весов).
 
 AI НЕ принимает решения за пользователя.
+
+---
+
+## РАСШИРЕНИЯ UI И ДОСОК (реализовано, дополнение к базовому ТЗ)
+
+### Общие правила досок (кроме вкладки «BTC · тест»)
+
+- **Липкий список (latch):** монета, попавшая на доску, не исчезает при кратковременном падении % или ослаблении одного признака; снятие — по явным правилам выхода доски.
+- **Debounce колонок:** смена стадии/колонки подтверждается ~15–20 мин (`WATCH_STAGE_CONFIRM_*` в `config.py`).
+- **Dismiss:** кнопка в UI и `POST /api/watch/dismiss` (`board`: `pump_scan` | `x2_retrace`) — монета не возвращается, пока не снят dismiss.
+- **Хранение:** SQLite `board_watches` через `signal_engine/watch_store.py`.
+
+### Вкладка «Памп-скан»
+
+- Кандидаты: рост **≥ 35% за 24h** (`PUMP_SCAN_MIN_24H_PCT`), оборот ≥ `UNIVERSE_MIN_TURNOVER_24H_USDT` (по умолчанию 1M).
+- Колонки 1–4: ослабление пампа (ликвидации, OI, объём, CVD/taker/OBV/funding, EMA по TF).
+- Графики: история свечей/OI на несколько дней (`PUMP_SCAN_CHART_*`).
+- Код: `signal_engine/pump_scan.py`, `ws_server/static/pump_scan.js` (если есть), `engine.py`.
+
+### Вкладка «2× откат»
+
+**Идея:** шорт-setup после сильного роста от локального дна и формирования двух вершин (LH / double top / marginal HH) на старших TF.
+
+**Вход на доску (все условия обязательны):**
+
+| Критерий | Параметр (`config.py`) | Значение по умолчанию |
+|---|---|---|
+| Оборот 24h USDT (turnover24h) | `X2_RETRACE_MIN_TURNOVER_24H_USDT` | **300 000** (нет turnover — не входить) |
+| Рост от min за lookback | `X2_RETRACE_MIN_MULTIPLIER` | **1.72×** (HUMA ~1.73×; строго 2× — через env) |
+| Окно min/max | `X2_RETRACE_LOOKBACK_DAYS` | **21** |
+| Рост цены за **7 дней** | `X2_RETRACE_MIN_PRICE_CHANGE_7D_PCT` | **≥ 0%** (падение за 7d — исключить) |
+| Две вершины | `find_two_peak_htf` (4H, затем 1H) | обязательно |
+| Всплеск объёма на ноге роста (1H) | `X2_RETRACE_PUMP_VOLUME_SPIKE_MIN` | **×4** к базе до пампа |
+| Pivot wing / расстояние пиков | `X2_RETRACE_PIVOT_WING`, `X2_RETRACE_MIN_BARS_BETWEEN_PEAKS`, tolerances | см. config |
+
+**Стадии колонок 1–4:** памп 2×+ → структура LH → OI/EMA → к шорту (`X2_RETRACE_COLUMNS`).
+
+**Выход с доски (не «красный 24h»):**
+
+- Цена у дна пампа: `X2_RETRACE_EXIT_NEAR_VALLEY_MULT` (≈1.08× min low).
+- Текущий mult слишком мал: `X2_RETRACE_EXIT_MIN_CURRENT_MULT` (≈1.15).
+- Временно нет метрик пампа (`hist is None`) — **не** снимать.
+- Не проходит turnover / 7d / два пика / volume spike — снимать при пересчёте.
+- Нет `SymbolState` в движке — снимать запись watch.
+
+**Ключевые файлы:**
+
+- `signal_engine/x2_retrace.py` — доска, `_entry_quality_ok`, `price_change_7d_pct`, `_pump_leg_volume_spike_ok`
+- `signal_engine/pump_history.py` — `history_pump_metrics`
+- `signal_engine/swing_highs.py` — pivot, two peaks, LH
+- `ws_server/cache.py` — `_x2_turnover_ok` для UI
+- `ws_server/static/x2_retrace.js`, `index.html`, `app.js`
+
+**Эталонные тикеры для проверки (скриншоты Bybit):** NIL, HUMA, MINA, SAND, GRASS (USDT perpetual).
+
+**Операционные скрипты:**
+
+- `scripts/verify_x2_examples.py` — REST + логика входа + `board_watches`
+- `scripts/audit_x2_turnover.py` — turnover активных watches vs Bybit
+- `scripts/seed_x2_examples.py` — разовый bootstrap (не крутить в prod loop)
+- `scripts/query_x2_watches.py` — список watches в SQLite
+
+### Вкладка «Сигналы» (основная)
+
+- Debounce смены силы/колонки: `engine._confirmed_signal_strength` + `stage_debounce`.
+
+### Деплой и окружение
+
+- Репозиторий: GitHub `bybit-short-signals`, ветка **main**.
+- VPS: Timeweb Amsterdam **`129.101.127.78`**, каталог **`/opt/signals`**, venv **`.venv`**, PM2 (`scripts/deploy.sh`, `scripts/ecosystem.config.cjs`).
+- UI: **http://129.101.127.78:8787**
+- Bybit: на VPS часто **api.bybit.kz** / stream KZ (см. `.env` на сервере); локально — по `.env.example`.
+- После каждой задачи с изменениями: **commit → push origin main → deploy** (см. `.cursor/rules/deploy-workflow.mdc`).
+
+### Принцип «чистый лист» в новом чате
+
+Новая сессия должна **сначала прочитать `TZ.md` и `PROGRESS.md`**, затем обойти ключевые модули в коде и продолжать с текущего состояния репозитория на `main`, не переписывая архитектуру без запроса пользователя.
