@@ -330,8 +330,9 @@ th { cursor: pointer; color: var(--muted); }
 }
 
 .btc-chart {
-  height: min(62vh, 680px);
-  min-height: 480px;
+  flex: 1 1 auto;
+  height: clamp(560px, 58vh, 900px);
+  min-height: 560px;
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;

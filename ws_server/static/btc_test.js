@@ -53,8 +53,13 @@ function initBtcTab() {
   const box = document.getElementById("btc-chart");
   if (!box) return;
   if (btcState.chart) {
-    resizeBtcChart();
-    renderBtcChart(true);
+    requestAnimationFrame(() => {
+      resizeBtcChart();
+      requestAnimationFrame(() => {
+        resizeBtcChart();
+        renderBtcChart(true);
+      });
+    });
     return;
   }
 
