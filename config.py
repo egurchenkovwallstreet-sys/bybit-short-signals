@@ -170,6 +170,13 @@ BTC_TEST_SQLITE_PATH = Path(_env("BTC_TEST_SQLITE_PATH", str(DATA_DIR / "btc_str
 REDIS_CHANNEL_BTC_TEST = _env("REDIS_CHANNEL_BTC_TEST", "btc:strategy:updates")
 BTC_TEST_SCAN_SEC = _env_float("BTC_TEST_SCAN_SEC", 3.0)
 BTC_TEST_KLINE_REFRESH_SEC = _env_int("BTC_TEST_KLINE_REFRESH_SEC", 45)
+# Taker ~0.055% за сделку (открытие + закрытие = 2×).
+BTC_TEST_FEE_RATE_TAKER = _env_float("BTC_TEST_FEE_RATE_TAKER", 0.00055)
+BTC_TEST_MIN_MTF_SCORE_INTRADAY = _env_int("BTC_TEST_MIN_MTF_SCORE_INTRADAY", 6)
+BTC_TEST_MIN_MTF_SCORE_SCALP = _env_int("BTC_TEST_MIN_MTF_SCORE_SCALP", 5)
+BTC_TEST_MIN_PERP_SCORE = _env_int("BTC_TEST_MIN_PERP_SCORE", 2)
+BTC_TEST_MIN_ENTRY_SCORE = _env_int("BTC_TEST_MIN_ENTRY_SCORE", 8)
+BTC_TEST_ENTRY_COOLDOWN_SEC = _env_int("BTC_TEST_ENTRY_COOLDOWN_SEC", 300)
 
 
 # --- Telegram (опционально, отправка не входит в Этап 1) --------------------

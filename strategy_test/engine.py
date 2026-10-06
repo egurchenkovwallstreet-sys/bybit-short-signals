@@ -8,6 +8,7 @@ from typing import Any
 
 import config
 from strategy_test import indicators as ind
+from strategy_test.fees import net_pnl_pct
 
 
 @dataclass
@@ -138,23 +139,23 @@ class BtcStrategyEngine:
         vols = self._volumes("5")
         if len(vols) >= 21:
             sma = ind.sma(vols, 20)[-1]
-            if sma and vols[-1] >= 1.2 * sma:
+            if sma and vols[-1] >= 1.5 * sma:
                 checks["vol_perp"] = True
         fr = self.perp.funding
         if fr is not None:
-            if side == "long" and fr <= 0.0003:
+            if side == "long" and fr <= 0.0002:
                 checks["funding_perp"] = True
-            if side == "short" and fr >= 0.0005:
+            if side == "short" and fr >= 0.0006:
                 checks["funding_perp"] = True
         if self.perp.oi_last and self.perp.oi_ref and self.perp.oi_ref > 0:
             chg = (self.perp.oi_last - self.perp.oi_ref) / self.perp.oi_ref * 100
-            if side == "long" and chg >= -0.2:
+            if side == "long" and chg >= -0.15:
                 checks["oi_perp"] = True
-            if side == "short" and chg <= 0.2:
+            if side == "short" and chg <= 0.15:
                 checks["oi_perp"] = True
-        if side == "long" and self.perp.liq_short > self.perp.liq_long * 1.5:
+        if side == "long" and self.perp.liq_short > self.perp.liq_long * 2.0:
             checks["liq_perp"] = True
-        if side == "short" and self.perp.liq_long > self.perp.liq_short * 1.5:
+        if side == "short" and self.perp.liq_long > self.perp.liq_short * 2.0:
             checks["liq_perp"] = True
         return checks, sum(1 for v in checks.values() if v)
 
@@ -168,12 +169,22 @@ class BtcStrategyEngine:
             "m5_trigger": False,
             "m1_trigger": False,
         }
-        if self.bias == "LONG" and side == "long":
-            checks["bias_4h"] = checks["bias_1h"] = True
-        elif self.bias == "SHORT" and side == "short":
-            checks["bias_4h"] = checks["bias_1h"] = True
-        elif self.bias == "BOTH":
-            checks["bias_4h"] = checks["bias_1h"] = True
+        c4 = self._closes("240")
+        c1 = self._closes("60")
+        if len(c4) >= 25:
+            e20_4 = ind.ema(c4, 20)[-1]
+            if e20_4:
+                if side == "long" and c4[-1] > e20_4:
+                    checks["bias_4h"] = True
+                if side == "short" and c4[-1] < e20_4:
+                    checks["bias_4h"] = True
+        if len(c1) >= 25:
+            e20_1 = ind.ema(c1, 20)[-1]
+            if e20_1:
+                if side == "long" and c1[-1] > e20_1:
+                    checks["bias_1h"] = True
+                if side == "short" and c1[-1] < e20_1:
+                    checks["bias_1h"] = True
 
         c30 = self._closes("30")
         if len(c30) >= 25:
@@ -189,7 +200,7 @@ class BtcStrategyEngine:
         if len(c15) >= 25 and len(vol15) >= 21:
             e20 = ind.ema(c15, 20)[-1]
             sma = ind.sma(vol15, 20)[-1]
-            if e20 and sma and vol15[-1] >= 1.1 * sma:
+            if e20 and sma and vol15[-1] >= 1.25 * sma:
                 if side == "long" and c15[-1] > e20:
                     checks["m15_vol"] = True
                 if side == "short" and c15[-1] < e20:
@@ -213,9 +224,9 @@ class BtcStrategyEngine:
                 e9 = ind.ema(c1, 9)[-1]
                 rs = ind.rsi(c1, 14)
                 if e9 and rs[-1] is not None:
-                    if side == "long" and c1[-1] > e9 and rs[-1] > 48:
+                    if side == "long" and c1[-1] > e9 and rs[-1] > 52:
                         checks["m1_trigger"] = True
-                    if side == "short" and c1[-1] < e9 and rs[-1] < 52:
+                    if side == "short" and c1[-1] < e9 and rs[-1] < 48:
                         checks["m1_trigger"] = True
         else:
             checks["m1_trigger"] = True
@@ -233,7 +244,8 @@ class BtcStrategyEngine:
         if self.open.get(mode):
             return None
         key = f"{mode}:{side}"
-        if now_ms - self._cooldown.get(key, 0) < 180_000:
+        cooldown_ms = config.BTC_TEST_ENTRY_COOLDOWN_SEC * 1000
+        if now_ms - self._cooldown.get(key, 0) < cooldown_ms:
             return None
         if self.bias == "LONG" and side == "short":
             return None
@@ -242,15 +254,27 @@ class BtcStrategyEngine:
         mtf, mtf_score = self._mtf_checks(side, mode)
         if not mtf.get("d_veto_ok"):
             return None
-        need_mtf = 5 if mode == "intraday" else 4
+        if not mtf.get("bias_4h") or not mtf.get("bias_1h"):
+            return None
+        if not mtf.get("m5_trigger") or not mtf.get("m30_structure") or not mtf.get("m15_vol"):
+            return None
+        need_mtf = (
+            config.BTC_TEST_MIN_MTF_SCORE_INTRADAY
+            if mode == "intraday"
+            else config.BTC_TEST_MIN_MTF_SCORE_SCALP
+        )
         if mtf_score < need_mtf:
             return None
         perp, perp_score = self._perp_checks(side)
-        if perp_score < 1:
+        if perp_score < config.BTC_TEST_MIN_PERP_SCORE:
             return None
         checks = {**mtf, **perp}
         score = mtf_score + perp_score
+        if score < config.BTC_TEST_MIN_ENTRY_SCORE:
+            return None
         grade = self._grade(score)
+        if grade == "C":
+            return None
         price = self.last_price or (self._last("5") or {}).get("c")
         if not price:
             return None
@@ -329,11 +353,12 @@ class BtcStrategyEngine:
     ) -> dict[str, Any]:
         self.open[mode] = None
         if trade.side == "long":
-            pnl = (exit_price - trade.entry_price) / trade.entry_price * 100 * config.PNL_LEVERAGE
+            gross = (exit_price - trade.entry_price) / trade.entry_price * 100 * config.PNL_LEVERAGE
             r_mult = (exit_price - trade.entry_price) / trade.risk if trade.risk else 0
         else:
-            pnl = (trade.entry_price - exit_price) / trade.entry_price * 100 * config.PNL_LEVERAGE
+            gross = (trade.entry_price - exit_price) / trade.entry_price * 100 * config.PNL_LEVERAGE
             r_mult = (trade.entry_price - exit_price) / trade.risk if trade.risk else 0
+        pnl = net_pnl_pct(gross)
         outcome = "WIN" if pnl > 0 else "LOSS"
         return {
             "id": trade.id,

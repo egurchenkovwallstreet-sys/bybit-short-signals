@@ -516,7 +516,7 @@ function renderBtcExtendedStats() {
   }
 
   if (equity.length) {
-    html += `<h4>Кривая PnL (последние ${equity.length} закрытий, % с плечом из config)</h4>`;
+    html += `<h4>Кривая PnL (последние ${equity.length} закрытий; плечо и комиссия open+close taker)</h4>`;
     html += `<div class="btc-equity-scroll"><table class="btc-mini-table"><tr><th>#</th><th>PnL%</th><th>Кум.</th></tr>`;
     html += equity
       .slice()
