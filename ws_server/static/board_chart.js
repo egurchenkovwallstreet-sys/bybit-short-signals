@@ -14,17 +14,16 @@ window.boardChart = {
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   PREFETCH_CONCURRENCY: 3,
-  /** Стакан на графике: вертикальная граница по центру, продажи вверх, покупки вниз. */
+  /** Горизонтальный объём стакана: Y = цена на графике, от центра влево bid / вправо ask. */
   BOOK_VIS: {
-    barHeight: 16,
-    rowGap: 5,
+    barHeight: 10,
     binTicks: 15,
-    maxLevelsPerSide: 32,
     centerLineWidth: 2,
-    padX: 10,
-    padY: 8,
-    minBarLen: 8,
-    bandFrac: 0.46,
+    padX: 12,
+    padY: 10,
+    minBarLen: 4,
+    bandFrac: 0.88,
+    labelMinShare: 0.55,
   },
 
   normalizeBookSide(side) {
@@ -79,21 +78,23 @@ window.boardChart = {
     return out;
   },
 
-  stackBookFromCenter(rows, midY, side, vis, height) {
-    const halfH = vis.barHeight / 2;
-    const step = vis.barHeight + vis.rowGap;
-    const cap = Math.min(rows.length, vis.maxLevelsPerSide);
-    const slice = rows.slice(0, cap);
-    const items = [];
-    for (let i = 0; i < slice.length; i += 1) {
-      const y =
-        side === "ask"
-          ? midY - halfH - vis.padY - i * step
-          : midY + halfH + vis.padY + i * step;
-      if (y < vis.padY || y > height - vis.padY) break;
-      items.push({ row: slice[i], y });
+  bookPriceToY(runtime, price, pMin, pMax, height) {
+    if (runtime?.series) {
+      const y = runtime.series.priceToCoordinate(price);
+      if (y != null && !Number.isNaN(y)) return y;
     }
-    return items;
+    const pad = window.boardChart.BOOK_VIS.padY ?? 10;
+    const span = pMax - pMin || 1;
+    return height - pad - ((price - pMin) / span) * (height - 2 * pad);
+  },
+
+  filterBookByPriceRange(rows, pMin, pMax) {
+    if (!(pMax > pMin)) return rows;
+    const span = pMax - pMin;
+    const lo = pMin - span * 0.03;
+    const hi = pMax + span * 0.03;
+    const inRange = rows.filter((r) => r.price >= lo && r.price <= hi);
+    return inRange.length ? inRange : rows;
   },
 
   createRuntime() {
@@ -406,8 +407,8 @@ window.boardChart = {
     const BC = window.boardChart;
     const vis = BC.BOOK_VIS;
     const midX = width / 2;
-    const midY = height / 2;
-    const bandW = Math.max(vis.minBarLen, (width / 2 - vis.padX) * vis.bandFrac);
+    const halfW = midX - vis.padX;
+    const bandW = Math.max(vis.minBarLen, halfW * vis.bandFrac);
     const halfH = vis.barHeight / 2;
 
     const bidsRaw = BC.normalizeBookSide(book?.bids);
@@ -420,58 +421,58 @@ window.boardChart = {
     }
 
     const pr = runtime?.priceRange || {};
-    const pLo = Number(pr.min);
-    const pHi = Number(pr.max);
+    let pLo = Number(pr.min);
+    let pHi = Number(pr.max);
+    if (!(pHi > pLo)) {
+      const prices = [...bidsRaw, ...asksRaw].map(([p]) => Number(p)).filter((p) => p > 0);
+      pLo = Math.min(...prices);
+      pHi = Math.max(...prices);
+    }
     const refPrice =
       (pLo > 0 && pHi > 0 ? (pLo + pHi) / 2 : 0) ||
       Number(bidsRaw[0]?.[0]) ||
       Number(asksRaw[0]?.[0]) ||
       1;
     const binSize = BC.bookBinSize(refPrice, vis);
-    const bids = BC.aggregateBookLevels(bidsRaw, binSize, true);
-    const asks = BC.aggregateBookLevels(asksRaw, binSize, false);
+    let bids = BC.filterBookByPriceRange(BC.aggregateBookLevels(bidsRaw, binSize, true), pLo, pHi);
+    let asks = BC.filterBookByPriceRange(BC.aggregateBookLevels(asksRaw, binSize, false), pLo, pHi);
 
-    ctx.fillStyle = "rgba(255, 93, 115, 0.06)";
-    ctx.fillRect(midX, 0, width - midX, midY);
-    ctx.fillStyle = "rgba(61, 214, 140, 0.06)";
-    ctx.fillRect(midX, midY, width - midX, height - midY);
-
-    ctx.strokeStyle = "rgba(200, 210, 220, 0.55)";
+    ctx.strokeStyle = "rgba(200, 210, 220, 0.65)";
     ctx.lineWidth = vis.centerLineWidth;
     ctx.beginPath();
     ctx.moveTo(midX, vis.padY);
     ctx.lineTo(midX, height - vis.padY);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(midX, midY);
-    ctx.lineTo(width - vis.padX, midY);
-    ctx.stroke();
 
-    ctx.fillStyle = "rgba(142, 154, 171, 0.85)";
-    ctx.font = "11px Segoe UI, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText("продажа ↑", midX + 6, vis.padY + 12);
-    ctx.fillText("покупка ↓", midX + 6, height - vis.padY - 4);
+    const maxBid = Math.max(...bids.map((r) => r.size), 1);
+    const maxAsk = Math.max(...asks.map((r) => r.size), 1);
 
-    const maxSize = Math.max(...[...bids, ...asks].map((r) => r.size), 1);
-    const laid = [
-      ...BC.stackBookFromCenter(asks, midY, "ask", vis, height),
-      ...BC.stackBookFromCenter(bids, midY, "bid", vis, height),
-    ];
+    const drawSide = (rows, isBid) => {
+      const maxSize = isBid ? maxBid : maxAsk;
+      for (const row of rows) {
+        const y = BC.bookPriceToY(runtime, row.price, pLo, pHi, height);
+        if (y < vis.padY || y > height - vis.padY) continue;
+        const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
+        if (isBid) {
+          ctx.fillStyle = "rgba(61, 214, 140, 0.45)";
+          ctx.fillRect(midX - barLen, y - halfH, barLen, vis.barHeight);
+        } else {
+          ctx.fillStyle = "rgba(255, 93, 115, 0.45)";
+          ctx.fillRect(midX + 1, y - halfH, barLen, vis.barHeight);
+        }
+        if (row.size >= maxSize * vis.labelMinShare) {
+          ctx.fillStyle = isBid ? "rgba(200, 255, 220, 0.92)" : "rgba(255, 200, 210, 0.92)";
+          ctx.font = "10px Segoe UI, sans-serif";
+          ctx.textAlign = isBid ? "right" : "left";
+          const label = BC.formatBookSize(row.size);
+          if (isBid) ctx.fillText(label, midX - barLen - 4, y + 3);
+          else ctx.fillText(label, midX + barLen + 4, y + 3);
+        }
+      }
+    };
 
-    laid.forEach(({ row, y }) => {
-      const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
-      ctx.fillStyle = row.bid ? "rgba(61, 214, 140, 0.5)" : "rgba(255, 93, 115, 0.5)";
-      ctx.fillRect(midX + 1, y - halfH, barLen, vis.barHeight);
-      ctx.fillStyle = row.bid ? "rgba(200, 255, 220, 0.9)" : "rgba(255, 200, 210, 0.9)";
-      ctx.font = "10px Segoe UI, sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText(
-        `${BC.formatBookPrice(row.price)} · ${BC.formatBookSize(row.size)}`,
-        midX + barLen + 6,
-        y + 4,
-      );
-    });
+    drawSide(bids, true);
+    drawSide(asks, false);
   },
 
   renderWalls(containerId, book) {
