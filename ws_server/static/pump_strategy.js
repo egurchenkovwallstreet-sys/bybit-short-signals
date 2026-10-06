@@ -344,13 +344,7 @@ function renderPumpStrategyInfo() {
         <div class="psc-row"><dt>Тейкеры buy/sell</dt><dd>${taker}</dd></div>
       </dl>
     </div>
-    <div class="psc-book-section">
-      <div class="psc-book-head">
-        <h3 class="psc-info-subhead">Стакан</h3>
-        <button type="button" class="psc-toggle-meta">Скрыть метрики</button>
-      </div>
-      <div class="psc-book-pane" id="psc-book-pane"></div>
-    </div>
+    ${window.boardChart.bookSectionHtml("psc-book-pane")}
     <footer class="psc-info-foot">
       <button type="button" class="dismiss-watch" data-dismiss-board="pump_strategy" data-symbol="${row.symbol}">Снять с отслеживания</button>
       <p class="quiet psc-info-hint">Таймфрейм: ${PSC_TF.find(([c]) => c === pumpStrategyState.interval)?.[1] || pumpStrategyState.interval}. Данные по списку подгружаются в фоне.</p>

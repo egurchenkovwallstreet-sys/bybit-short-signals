@@ -242,13 +242,7 @@ function renderPumpScanInfo(full) {
       <h3 class="psc-info-subhead">EMA 50 / 100 / 200</h3>
       <div class="psc-ema-block">${renderEmaBlock(row.ema_by_tf)}</div>
     </div>
-    <div class="psc-book-section">
-      <div class="psc-book-head">
-        <h3 class="psc-info-subhead">Стакан</h3>
-        <button type="button" class="psc-toggle-meta">Скрыть метрики</button>
-      </div>
-      <div class="psc-book-pane" id="pump-scan-book-pane"></div>
-    </div>
+    ${window.boardChart.bookSectionHtml("pump-scan-book-pane")}
     <footer class="psc-info-foot">
       <button type="button" class="dismiss-watch" data-dismiss-board="pump_scan" data-symbol="${row.symbol}">Снять с отслеживания</button>
       <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(pumpState.interval)}</p>

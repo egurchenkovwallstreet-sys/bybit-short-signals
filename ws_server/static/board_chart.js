@@ -142,10 +142,6 @@ window.boardChart = {
     const binTicks = BC.BOOK_PANEL.binTicks ?? 10;
     let bids = BC.aggregateBookLevels(bidsRaw, true, mid, binTicks);
     let asks = BC.aggregateBookLevels(asksRaw, false, mid, binTicks);
-    const cap = BC.BOOK_PANEL.maxRowsPerSide;
-    const nearMid = (r) => Math.abs(r.price - mid);
-    bids = [...bids].sort((a, b) => nearMid(a) - nearMid(b)).slice(0, cap);
-    asks = [...asks].sort((a, b) => nearMid(a) - nearMid(b)).slice(0, cap);
     bids.sort((a, b) => b.price - a.price);
     asks.sort((a, b) => a.price - b.price);
     const walls = new Map();
@@ -174,35 +170,72 @@ window.boardChart = {
       }
       return null;
     };
-    const rowHtml = (r, side) => {
+    const maxAsk = Math.max(...asks.map((r) => r.size), 1);
+    const maxBid = Math.max(...bids.map((r) => r.size), 1);
+    const rowHtml = (r, side, maxVol) => {
       const tag = BC.wallTag(wallAt(r.price));
-      const priceLabel =
-        bin > 1 && r.step ? BC.formatBookPrice(r.price) : BC.formatBookPrice(r.price);
+      const priceLabel = BC.formatBookPrice(r.price);
+      const barPct = Math.max(4, Math.round((r.size / maxVol) * 100));
       return `<tr class="psc-book-tr ${side}">
         <td class="psc-book-price">${priceLabel}</td>
-        <td class="psc-book-size">${BC.formatBookSize(r.size)}${tag}</td>
+        <td class="psc-book-vol">
+          <span class="psc-book-vol-wrap">
+            <span class="psc-book-vol-bar ${side}" style="width:${barPct}%"></span>
+            <span class="psc-book-vol-text">${BC.formatBookSize(r.size)}${tag}</span>
+          </span>
+        </td>
       </tr>`;
     };
-    const askRows = [...asks].reverse().map((r) => rowHtml(r, "ask")).join("");
-    const bidRows = bids.map((r) => rowHtml(r, "bid")).join("");
+    const askRows = [...asks].reverse().map((r) => rowHtml(r, "ask", maxAsk)).join("");
+    const bidRows = bids.map((r) => rowHtml(r, "bid", maxBid)).join("");
     const binOpts = [1, 5, 10, 20, 50]
       .map((t) => `<option value="${t}"${t === bin ? " selected" : ""}>${t} тик${t === 1 ? "" : "ов"}</option>`)
       .join("");
     return `<div class="psc-book-toolbar">
       <label class="quiet">Объединение</label>
       <select class="psc-book-bin" title="Сумма объёма за N шагов цены">${binOpts}</select>
-      <span class="quiet psc-book-toolbar-hint">±${pct}% · прокрутка от mid</span>
+      <span class="quiet psc-book-toolbar-hint">±${pct}% от mid · шкала = доля объёма</span>
     </div>
     <div class="psc-book-scroll">
-      <table class="psc-book-table psc-book-table--dense">
-        <thead><tr><th>Цена</th><th>Vol</th></tr></thead>
-        <tbody class="psc-book-asks">${askRows || `<tr><td colspan="2" class="quiet">нет ask</td></tr>`}</tbody>
-        <tbody class="psc-book-mid-body"><tr class="psc-book-mid-row" data-book-mid="1">
-          <td colspan="2"><span class="psc-book-mid-tag">MID</span> <strong>${BC.formatBookPrice(mid)}</strong></td>
-        </tr></tbody>
-        <tbody class="psc-book-bids">${bidRows || `<tr><td colspan="2" class="quiet">нет bid</td></tr>`}</tbody>
-      </table>
+      <div class="psc-book-scroll-pad">
+        <table class="psc-book-table psc-book-table--dense">
+          <thead><tr><th>Цена</th><th>Объём</th></tr></thead>
+          <tbody class="psc-book-asks">${askRows || `<tr><td colspan="2" class="quiet">нет ask</td></tr>`}</tbody>
+          <tbody class="psc-book-mid-body"><tr class="psc-book-mid-row" data-book-mid="1">
+            <td colspan="2"><span class="psc-book-mid-tag">MID</span> <strong>${BC.formatBookPrice(mid)}</strong>
+            <span class="quiet psc-book-mid-range">${BC.formatBookPrice(lo)} – ${BC.formatBookPrice(hi)}</span></td>
+          </tr></tbody>
+          <tbody class="psc-book-bids">${bidRows || `<tr><td colspan="2" class="quiet">нет bid</td></tr>`}</tbody>
+        </table>
+      </div>
     </div>`;
+  },
+
+  bookSectionHtml(paneId) {
+    return `<div class="psc-book-section">
+      <div class="psc-book-head">
+        <h3 class="psc-info-subhead">Стакан ±10%</h3>
+        <div class="psc-book-head-actions">
+          <button type="button" class="psc-toggle-meta">Скрыть метрики</button>
+          <button type="button" class="psc-book-fullscreen" title="Стакан на весь экран" aria-pressed="false">⛶</button>
+        </div>
+      </div>
+      <div class="psc-book-pane" id="${paneId}"></div>
+    </div>`;
+  },
+
+  setBookFullscreen(section, on) {
+    if (!section) return;
+    section.classList.toggle("psc-book-section--fullscreen", on);
+    const btn = section.querySelector(".psc-book-fullscreen");
+    if (btn) {
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+      btn.textContent = on ? "✕" : "⛶";
+      btn.title = on ? "Вернуть стакан на место" : "Стакан на весь экран";
+    }
+    document.body.classList.toggle("psc-book-fs-active", on);
+    const pane = section.querySelector(".psc-book-pane");
+    if (pane) window.boardChart.scrollBookToMid(pane);
   },
 
   bookScrollEl(paneEl) {
@@ -635,6 +668,17 @@ window.boardChart = {
       }
     });
     document.addEventListener("click", (e) => {
+      const fsBtn = e.target.closest(".psc-book-fullscreen");
+      if (fsBtn) {
+        const section = fsBtn.closest(".psc-book-section");
+        if (!section) return;
+        const on = !section.classList.contains("psc-book-section--fullscreen");
+        document.querySelectorAll(".psc-book-section--fullscreen").forEach((s) => {
+          if (s !== section) BC.setBookFullscreen(s, false);
+        });
+        BC.setBookFullscreen(section, on);
+        return;
+      }
       const btn = e.target.closest(".psc-toggle-meta");
       if (!btn) return;
       const info = btn.closest(".psc-info-pane");
@@ -642,6 +686,10 @@ window.boardChart = {
       if (!meta) return;
       const hidden = meta.classList.toggle("psc-info-meta--hidden");
       btn.textContent = hidden ? "Метрики ▾" : "Скрыть метрики";
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      document.querySelectorAll(".psc-book-section--fullscreen").forEach((s) => BC.setBookFullscreen(s, false));
     });
   },
 };
