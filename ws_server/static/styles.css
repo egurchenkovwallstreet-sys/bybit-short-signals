@@ -235,13 +235,67 @@ body {
   border-collapse: collapse;
 }
 
+.psc-book-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.psc-toggle-meta {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.psc-toggle-meta:hover {
+  color: var(--text);
+  border-color: var(--blue);
+}
+
+.psc-info-meta--hidden {
+  display: none !important;
+}
+
+.psc-book-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.psc-book-bin {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #10141b;
+  color: var(--text);
+}
+
+.psc-book-toolbar-hint {
+  margin-left: auto;
+  font-size: 10px;
+}
+
 .psc-book-table th {
   text-align: left;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   color: var(--muted);
-  padding: 4px 6px;
+  padding: 2px 4px;
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: rgba(16, 20, 27, 0.95);
+  z-index: 1;
 }
 
 .psc-book-tr.ask .psc-book-price {
@@ -258,8 +312,54 @@ body {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
+.psc-book-table--dense .psc-book-tr td {
+  padding: 0 4px;
+  line-height: 1.15;
+  border-bottom: none;
+  font-size: 10px;
+}
+
+.psc-book-table--dense .psc-book-price {
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+.psc-book-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 13px;
+}
+
+.psc-book-bar-inline {
+  flex: 0 0 auto;
+  height: 4px;
+  max-width: 42%;
+  min-width: 3px;
+  border-radius: 1px;
+  opacity: 0.85;
+}
+
+.psc-book-bar-inline.ask {
+  background: rgba(255, 93, 115, 0.85);
+}
+
+.psc-book-bar-inline.bid {
+  background: rgba(61, 214, 140, 0.85);
+}
+
+.psc-book-table--dense .psc-book-size {
+  font-size: 9px;
+  gap: 3px;
+}
+
+.psc-book-table--dense .psc-book-wall {
+  font-size: 8px;
+  padding: 0 3px;
+}
+
 .psc-book-size-cell {
-  min-width: 120px;
+  min-width: 88px;
 }
 
 .psc-book-bar-track {
@@ -286,6 +386,12 @@ body {
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.03);
+}
+
+.psc-book-table--dense .psc-book-mid-row td {
+  padding: 2px 4px !important;
+  font-size: 10px;
+  line-height: 1.2;
 }
 
 .psc-book-mid {

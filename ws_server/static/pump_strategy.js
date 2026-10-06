@@ -345,7 +345,10 @@ function renderPumpStrategyInfo() {
       </dl>
     </div>
     <div class="psc-book-section">
-      <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
+      <div class="psc-book-head">
+        <h3 class="psc-info-subhead">Стакан</h3>
+        <button type="button" class="psc-toggle-meta">Скрыть метрики</button>
+      </div>
       <div class="psc-book-pane" id="psc-book-pane"></div>
     </div>
     <footer class="psc-info-foot">

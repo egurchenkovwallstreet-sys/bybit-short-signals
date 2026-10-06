@@ -218,7 +218,10 @@ function renderX2Info(full) {
       <div class="psc-ema-block">${renderX2EmaBlock(s.ema_by_tf)}</div>
     </div>
     <div class="psc-book-section">
-      <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
+      <div class="psc-book-head">
+        <h3 class="psc-info-subhead">Стакан</h3>
+        <button type="button" class="psc-toggle-meta">Скрыть метрики</button>
+      </div>
       <div class="psc-book-pane" id="x2-book-pane"></div>
     </div>
     <footer class="psc-info-foot">
