@@ -41,6 +41,7 @@ class SymbolState:
     taker_sell: dict[int, float] = field(default_factory=dict)
     last_price: float | None = None
     funding_rate: float | None = None
+    turnover_24h_usdt: float | None = None
 
     def ingest(self, message: dict) -> None:
         kind = message.get("type")
@@ -127,6 +128,9 @@ class SymbolState:
         if oi is not None:
             self.ticker_oi = oi
             self.ticker_oi_ts = timestamp
+        turnover = _float(data.get("turnover_24h"))
+        if turnover is not None and turnover >= 0:
+            self.turnover_24h_usdt = turnover
 
     def _oi(self, data: dict) -> None:
         # Для решения «OI падает» хватает 5-минуток. Остальные интервалы не мешают.

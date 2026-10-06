@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from signal_engine.engine import Engine
+from signal_engine.engine import Engine, _meets_turnover
 from signal_engine.evaluate import Reading
 from signal_engine.flow import (
     cvd_bearish,
@@ -379,6 +379,18 @@ class EngineTest(unittest.TestCase):
             }
         )
         self.assertEqual(state.liq_notional, {})
+
+
+class TurnoverFilterTest(unittest.TestCase):
+    def test_meets_turnover_threshold(self) -> None:
+        import config
+
+        state = SymbolState("BTCUSDT")
+        self.assertFalse(_meets_turnover(state))
+        state.turnover_24h_usdt = config.UNIVERSE_MIN_TURNOVER_24H_USDT
+        self.assertTrue(_meets_turnover(state))
+        state.turnover_24h_usdt = config.UNIVERSE_MIN_TURNOVER_24H_USDT - 1.0
+        self.assertFalse(_meets_turnover(state))
 
 
 if __name__ == "__main__":

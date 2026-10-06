@@ -55,6 +55,7 @@ class MarketCache:
         self.taker_buy: dict[str, float] = {}
         self.taker_sell: dict[str, float] = {}
         self.mini: dict[str, list[float]] = {}
+        self.turnover_24h: dict[str, float] = {}
 
     def apply(self, message: dict[str, Any]) -> str | None:
         kind = message.get("type")
@@ -76,8 +77,11 @@ class MarketCache:
         for column in self.columns:
             signals = []
             for signal in column.get("signals") or []:
+                symbol = signal.get("symbol") or ""
+                if not self._signal_turnover_ok(symbol):
+                    continue
                 item = dict(signal)
-                item["mini"] = self.mini_closes(item.get("symbol") or "")
+                item["mini"] = self.mini_closes(symbol)
                 entry = item.get("entry_price")
                 price = item.get("last_price")
                 if item.get("strength") == 5 and entry and price:
@@ -138,6 +142,14 @@ class MarketCache:
         if isinstance(asks, dict):
             asks = sorted(asks.items())
         return {"bids": bids, "asks": asks, "walls": book.get("walls") or []}
+
+    def _signal_turnover_ok(self, symbol: str) -> bool:
+        if not symbol:
+            return False
+        turnover = self.turnover_24h.get(symbol)
+        if turnover is None:
+            return False
+        return turnover >= config.UNIVERSE_MIN_TURNOVER_24H_USDT
 
     def mini_closes(self, symbol: str) -> list[float]:
         if self.mini.get(symbol):
@@ -211,6 +223,9 @@ class MarketCache:
             rate = _num(data.get("funding_rate"))
             if rate is not None:
                 self.funding[symbol] = rate
+            turnover = _num(data.get("turnover_24h"))
+            if turnover is not None:
+                self.turnover_24h[symbol] = turnover
             price = _num(data.get("last_price"))
             if price:
                 self._touch_price(symbol, price)
