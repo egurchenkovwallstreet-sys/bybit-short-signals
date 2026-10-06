@@ -29,9 +29,17 @@ async def main() -> None:
 
     store = WatchStore(config.SQLITE_PATH)
     store.open()
-    build_x2_retrace_board(states, now, store)
+    board = build_x2_retrace_board(states, now, store)
+    active = store.active("x2_retrace")
+    on_board = {
+        sig["symbol"]
+        for col in (board.get("data") or {}).get("columns") or []
+        for sig in col.get("signals") or []
+    }
+    print("watches:", sorted(active.keys()))
+    print("board:", sorted(on_board))
     store.close()
-    print("seeded", SYMS, "into", config.SQLITE_PATH)
+    print("seeded into", config.SQLITE_PATH)
 
 
 if __name__ == "__main__":

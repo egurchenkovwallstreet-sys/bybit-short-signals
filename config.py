@@ -308,6 +308,9 @@ X2_RETRACE_MIN_BARS_BETWEEN_PEAKS = _env_int("X2_RETRACE_MIN_BARS_BETWEEN_PEAKS"
 X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT = _env_float("X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT", 2.5)
 # Вторая вершина чуть выше первой (failed breakout) — всё ещё «две вершины».
 X2_RETRACE_MAX_SECOND_PEAK_ABOVE_PCT = _env_float("X2_RETRACE_MAX_SECOND_PEAK_ABOVE_PCT", 15.0)
+# Выход с доски 2×: цена у дна пампа или текущий mult слишком мал (не «красный 24h»).
+X2_RETRACE_EXIT_NEAR_VALLEY_MULT = _env_float("X2_RETRACE_EXIT_NEAR_VALLEY_MULT", 1.08)
+X2_RETRACE_EXIT_MIN_CURRENT_MULT = _env_float("X2_RETRACE_EXIT_MIN_CURRENT_MULT", 1.15)
 # Подтверждение смены колонки на досках и вкладке «Сигналы» (секунды).
 WATCH_STAGE_CONFIRM_SEC = _env_int("WATCH_STAGE_CONFIRM_SEC", 900)
 WATCH_STAGE_DOWN_CONFIRM_SEC = _env_int("WATCH_STAGE_DOWN_CONFIRM_SEC", 1200)

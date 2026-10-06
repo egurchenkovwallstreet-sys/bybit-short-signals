@@ -17,7 +17,7 @@ from signal_engine.swing_highs import (
     find_two_peak_htf,
     lower_high_chain_count,
 )
-from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
+from signal_engine.watch_store import WatchRow, WatchStore
 
 BOARD_ID = "x2_retrace"
 
@@ -213,6 +213,22 @@ def _interval_label(code: str) -> str:
     return {"60": "1H", "240": "4H", "D": "1D"}.get(code, code)
 
 
+def _should_exit_watch(state: SymbolState, meta: dict, now_ms: int) -> bool:
+    """Откат часто с красным 24h — снимаем, только если памп сдулся к дну."""
+    hist = history_pump_metrics(state, now_ms)
+    if hist is None:
+        return True
+    min_low = float(meta.get("min_low") or hist.min_low)
+    price = _resolve_last_price(state)
+    if price is None or min_low <= 0:
+        return False
+    if price < min_low * config.X2_RETRACE_EXIT_NEAR_VALLEY_MULT:
+        return True
+    if hist.current_mult < config.X2_RETRACE_EXIT_MIN_CURRENT_MULT:
+        return True
+    return False
+
+
 def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches: WatchStore) -> dict:
     active = watches.active(BOARD_ID)
     for symbol, state in states.items():
@@ -259,7 +275,7 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
             continue
         if state.last_price is None or state.last_price <= 0:
             state.last_price = price
-        if growth_pct_negative(state):
+        if _should_exit_watch(state, watch.meta, now_ms):
             watches.remove(BOARD_ID, symbol)
             continue
         measured = _metrics_for_state(state, now_ms, watch.meta)
