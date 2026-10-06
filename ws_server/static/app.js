@@ -143,7 +143,7 @@ function showTab(name) {
   const btcView = document.getElementById("view-btc");
   if (btcView) btcView.hidden = name !== "btc";
   if (name === "btc" && window.btcTest) {
-    window.btcTest.initBtcTab();
+    requestAnimationFrame(() => window.btcTest.initBtcTab());
   }
   if (name === "stats") {
     renderStats();

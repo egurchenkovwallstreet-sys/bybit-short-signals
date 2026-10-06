@@ -41,9 +41,22 @@ const btcState = {
   userAtLiveEdge: true,
 };
 
+function resizeBtcChart() {
+  const box = document.getElementById("btc-chart");
+  if (!box || !btcState.chart) return;
+  const w = box.clientWidth;
+  const h = box.clientHeight || 420;
+  if (w > 0) btcState.chart.resize(w, h);
+}
+
 function initBtcTab() {
   const box = document.getElementById("btc-chart");
-  if (!box || btcState.chart) return;
+  if (!box) return;
+  if (btcState.chart) {
+    resizeBtcChart();
+    renderBtcChart(true);
+    return;
+  }
 
   btcState.chart = LightweightCharts.createChart(box, {
     layout: { background: { color: "#0d1117" }, textColor: "#c9d1d9" },
@@ -67,7 +80,8 @@ function initBtcTab() {
   });
   btcState.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
 
-  window.addEventListener("resize", () => btcState.chart && btcState.chart.resize());
+  new ResizeObserver(() => resizeBtcChart()).observe(box);
+  window.addEventListener("resize", resizeBtcChart);
 
   document.querySelectorAll("[data-btc-interval]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -94,6 +108,11 @@ function initBtcTab() {
     if (!candles.length) return;
     const lastIdx = candles.length - 1;
     btcState.userAtLiveEdge = range.to >= lastIdx - 2;
+  });
+
+  requestAnimationFrame(() => {
+    resizeBtcChart();
+    if (btcState.data) renderBtcChart(true);
   });
 }
 
@@ -126,11 +145,19 @@ function volumeBars(candles) {
 
 function scrollLive() {
   if (!btcState.chart || !btcState.followLive || !btcState.userAtLiveEdge) return;
-  btcState.chart.timeScale().scrollToPosition(0, false);
+  try {
+    const ts = btcState.chart.timeScale();
+    if (typeof ts.scrollToPosition === "function") ts.scrollToPosition(0, false);
+    else if (typeof ts.scrollToRealTime === "function") ts.scrollToRealTime();
+  } catch (_err) {
+    /* старые версии библиотеки */
+  }
 }
 
 function onBtcMessage(data) {
   btcState.data = data;
+  const btcView = document.getElementById("view-btc");
+  if (btcView && !btcView.hidden) initBtcTab();
   renderBtcHeader();
   renderBtcChart(false);
   renderBtcJournal();
@@ -148,9 +175,17 @@ function renderBtcHeader() {
 }
 
 function renderBtcChart(forceTf) {
-  if (!btcState.candleSeries || !btcState.data) return;
+  if (!btcState.data) return;
+  if (!btcState.candleSeries) return;
   const candles = currentCandles();
-  if (!candles.length) return;
+  const root = document.getElementById("btc-chart");
+  if (!candles.length) {
+    if (root) {
+      root.dataset.empty = "1";
+    }
+    return;
+  }
+  if (root) root.dataset.empty = "0";
 
   const withVol = candles.map((c) => ({
     ...c,

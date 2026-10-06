@@ -331,9 +331,22 @@ th { cursor: pointer; color: var(--muted); }
 
 .btc-chart {
   height: 420px;
+  min-height: 320px;
+  width: 100%;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
+  position: relative;
+}
+
+.btc-chart[data-empty="1"]::after {
+  content: "Загрузка свечей BTC…";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
 }
 
 .btc-analytics {
