@@ -252,9 +252,11 @@ function showTab(name) {
   }
   if (name === "pump_scan" && window.pumpScan) {
     window.pumpScan.initPumpScanTab();
+    requestAnimationFrame(() => window.pumpScan.resizeChart?.());
   }
   if (name === "x2_retrace" && window.x2Retrace) {
     window.x2Retrace.initX2RetraceTab();
+    requestAnimationFrame(() => window.x2Retrace.resizeChart?.());
   }
   if (name === "pump_strategy" && window.pumpStrategy) {
     window.pumpStrategy.initPumpStrategyTab();

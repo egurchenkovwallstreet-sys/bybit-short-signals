@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20251007d">
+  <link rel="stylesheet" href="/static/styles.css?v=20251007e">
 </head>
 <body>
   <header class="topbar">
@@ -33,11 +33,21 @@
 
   <section id="view-x2-retrace" class="pump-scan-view" hidden>
     <p class="quiet pump-scan-intro">До 21d: пик/min ≥2×; две вершины на 4H/1H (LH, double top или 2-я до +15%), ≥4 свечи между. Липкий список.</p>
-    <div class="pump-scan-body workspace">
-      <div id="x2-columns" class="columns pump-columns"></div>
-      <aside id="x2-detail" class="detail">
-        <p class="empty">Выберите монету слева.</p>
-      </aside>
+    <div id="x2-list-wrap">
+      <div class="pump-scan-body">
+        <div id="x2-columns" class="columns pump-columns"></div>
+      </div>
+    </div>
+    <div id="x2-workspace" class="psc-workspace" hidden>
+      <div class="psc-chart-pane">
+        <div class="psc-tf-row" id="x2-tf-row"></div>
+        <div class="psc-chart-wrap">
+          <div id="x2-candle-chart" class="psc-candle-chart"></div>
+          <canvas id="x2-book-overlay" class="psc-book-overlay"></canvas>
+        </div>
+        <p class="quiet psc-chart-hint">Полоски справа — плотность стакана по цене. Объём под свечами.</p>
+      </div>
+      <aside class="psc-info-pane" id="x2-info-pane"></aside>
     </div>
   </section>
 
@@ -64,11 +74,21 @@
 
   <section id="view-pump-scan" class="pump-scan-view" hidden>
     <p class="quiet pump-scan-intro">Вход при ≥35% / 24h; дальше монета не пропадает при падении % (выход: 24h &lt; 0 или «Снять»). Колонка меняется после ~15 мин подтверждения.</p>
-    <div class="pump-scan-body workspace">
-      <div id="pump-columns" class="columns pump-columns"></div>
-      <aside id="pump-detail" class="detail">
-        <p class="empty">Выберите монету слева.</p>
-      </aside>
+    <div id="pump-scan-list-wrap">
+      <div class="pump-scan-body">
+        <div id="pump-columns" class="columns pump-columns"></div>
+      </div>
+    </div>
+    <div id="pump-scan-workspace" class="psc-workspace" hidden>
+      <div class="psc-chart-pane">
+        <div class="psc-tf-row" id="pump-scan-tf-row"></div>
+        <div class="psc-chart-wrap">
+          <div id="pump-scan-candle-chart" class="psc-candle-chart"></div>
+          <canvas id="pump-scan-book-overlay" class="psc-book-overlay"></canvas>
+        </div>
+        <p class="quiet psc-chart-hint">Полоски справа — плотность стакана по цене. Объём под свечами.</p>
+      </div>
+      <aside class="psc-info-pane" id="pump-scan-info-pane"></aside>
     </div>
   </section>
 
@@ -176,9 +196,10 @@
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/btc_test.js?v=20251006e"></script>
-  <script src="/static/app.js?v=20251006o"></script>
-  <script src="/static/pump_scan.js?v=20251007c"></script>
-  <script src="/static/x2_retrace.js?v=20251007e"></script>
+  <script src="/static/app.js?v=20251007e"></script>
+  <script src="/static/board_chart.js?v=20251007a"></script>
+  <script src="/static/pump_scan.js?v=20251007d"></script>
+  <script src="/static/x2_retrace.js?v=20251007f"></script>
   <script src="/static/pump_strategy.js?v=20251007c"></script>
 </body>
 </html>

@@ -254,6 +254,20 @@ body {
   font-size: 12px;
 }
 
+.psc-info-subhead {
+  margin: 8px 0 4px;
+  font-size: 0.95rem;
+}
+
+.psc-checklist {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+.psc-ema-block {
+  font-size: 13px;
+}
+
 @media (max-width: 960px) {
   .psc-workspace {
     grid-template-columns: 1fr;
