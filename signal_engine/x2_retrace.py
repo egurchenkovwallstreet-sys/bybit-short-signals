@@ -347,6 +347,7 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
     for symbol, watch in list(active.items()):
         state = states.get(symbol)
         if state is None:
+            watches.remove(BOARD_ID, symbol)
             continue
         price = _resolve_last_price(state)
         if price is None:

@@ -17,14 +17,20 @@ from signal_engine.pump_history import history_pump_metrics
 from signal_engine.state import SymbolState
 from signal_engine.swing_highs import find_two_peak_htf
 from signal_engine.watch_store import WatchStore
-from signal_engine.x2_retrace import _eligible, _resolve_last_price, build_x2_retrace_board
+from signal_engine.x2_retrace import (
+    _eligible,
+    _entry_quality_ok,
+    _resolve_last_price,
+    build_x2_retrace_board,
+    price_change_7d_pct,
+)
 
 SYMS = ["NILUSDT", "HUMAUSDT", "MINAUSDT", "SANDUSDT", "GRASSUSDT"]
 
 
 async def hydrate_symbol(rest: BybitRest, sym: str, turnover_map: dict[str, float], now: int) -> SymbolState:
     state = SymbolState(sym)
-    for iv in ("240", "60"):
+    for iv in ("240", "60", "D"):
         msg = await rest.fetch_klines(sym, iv)
         if msg and msg.get("data"):
             state.ingest(
@@ -67,11 +73,15 @@ async def check_symbols() -> dict[str, SymbolState]:
         b4 = state.bars_htf.get("240") or []
         tp = find_two_peak_htf(b1, b4, pump_start, now) if hist else None
         ok_el = _eligible(state)
-        would_enter = bool(hist and tp and ok_el)
+        pct7 = price_change_7d_pct(state, now)
+        quality = bool(
+            hist and tp and ok_el and _entry_quality_ok(state, now, hist, tp, b1)
+        )
         print(
             f"{sym}: mult={round(hist.peak_mult, 2) if hist else None} "
             f"peak={tp.kind if tp else None}@{tp.interval if tp else '-'} "
-            f"turnover={turnover_map.get(sym)} eligible={ok_el} enter={would_enter}"
+            f"7d={round(pct7, 2) if pct7 is not None else None}% "
+            f"turnover={turnover_map.get(sym)} eligible={ok_el} enter={quality}"
         )
     await rest.close()
     return states
