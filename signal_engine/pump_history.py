@@ -18,6 +18,18 @@ class HistoryPump:
     interval: str
 
 
+def _last_price(state: SymbolState) -> float | None:
+    if state.last_price is not None and state.last_price > 0:
+        return float(state.last_price)
+    for key in ("60", "240", "15", "30"):
+        bars = state.bars_htf.get(key) or []
+        if bars:
+            return float(bars[-1].close)
+    if state.bars_1m:
+        return float(state.bars_1m[-1].close)
+    return None
+
+
 def _pick_bars(state: SymbolState) -> tuple[str, list[Bar]]:
     # 4H даёт ~33d при лимите 200 — лучше для пампа длиннее недели.
     for key in ("240", "60", "D"):
@@ -57,7 +69,7 @@ def history_pump_metrics(state: SymbolState, now_ms: int) -> HistoryPump | None:
         return None
     min_low, peak_high, valley_ts = parsed
     peak_mult = peak_high / min_low
-    last = state.last_price or bars[-1].close
+    last = _last_price(state) or bars[-1].close
     current_mult = float(last) / min_low
     return HistoryPump(
         min_low=min_low,

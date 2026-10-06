@@ -25,11 +25,24 @@ _MS_24H = 24 * 3600 * 1000
 _MS_1H = 3600 * 1000
 
 
+def _resolve_last_price(state: SymbolState) -> float | None:
+    if state.last_price is not None and state.last_price > 0:
+        return float(state.last_price)
+    for key in ("60", "240", "15", "30"):
+        bars = state.bars_htf.get(key) or []
+        if bars:
+            return float(bars[-1].close)
+    if state.bars_1m:
+        return float(state.bars_1m[-1].close)
+    return None
+
+
 def _eligible(state: SymbolState) -> bool:
     turnover = state.turnover_24h_usdt
     if turnover is not None and turnover < config.UNIVERSE_MIN_TURNOVER_24H_USDT:
         return False
-    if state.last_price is None or state.last_price <= 0:
+    price = _resolve_last_price(state)
+    if price is None or price <= 0:
         return False
     return True
 
@@ -244,6 +257,11 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
         if growth_pct_negative(state):
             watches.remove(BOARD_ID, symbol)
             continue
+        price = _resolve_last_price(state)
+        if price is None:
+            continue
+        if state.last_price is None or state.last_price <= 0:
+            state.last_price = price
         measured = _metrics_for_state(state, now_ms, watch.meta)
         if measured is None:
             continue

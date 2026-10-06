@@ -55,6 +55,10 @@ async def check_symbols() -> dict[str, SymbolState]:
         state = await hydrate_symbol(rest, sym, turnover_map, now)
         states[sym] = state
         hist = history_pump_metrics(state, now)
+        if hist is None and state.bars_htf.get("240"):
+            b4 = state.bars_htf["240"]
+            lo, hi = min(b.low for b in b4), max(b.high for b in b4)
+            print(f"  raw240 mult={hi/lo:.2f}" if lo else "")
         pump_start = hist.valley_ts if hist else 0
         b1 = state.bars_htf.get("60") or []
         b4 = state.bars_htf.get("240") or []
