@@ -42,6 +42,7 @@ class ConfigDefaultsTest(unittest.TestCase):
     def test_pump_and_outcome_thresholds(self) -> None:
         self.assertEqual(config.PUMP_PRICE_CHANGE_15M, 5.0)
         self.assertEqual(config.PUMP_PRICE_CHANGE_5M, 3.0)
+        self.assertEqual(config.PUMP_VOLUME_SPIKE_MIN, 5.0)
         self.assertEqual(config.PUMP_VOLUME_MULTIPLIER, 5.0)
         self.assertEqual(config.PUMP_VOLUME_MA_PERIOD, 20)
         self.assertEqual(config.PUMP_RSI_MIN, 60.0)

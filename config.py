@@ -180,12 +180,15 @@ TELEGRAM_CHAT_ID = _env("TELEGRAM_CHAT_ID", "")
 
 # --- Детекция пампа (шаг 1 signal engine) -----------------------------------
 
-# Памп по цене: ≥30% за 1ч или ≥50% за сутки (минутные/D свечи). Объём/RSI — доп. фильтр слабых движений.
+# Памп по цене: ≥30% за 1ч или ≥50% за сутки. Вход только при всплеске объёма ≥ PUMP_VOLUME_SPIKE_MIN
+# на одном из окон: 5m, 30m, 1h (минутки), 4h и 1D (свечи HTF).
 PUMP_PRICE_CHANGE_1H = _env_float("PUMP_PRICE_CHANGE_1H", 30.0)
 PUMP_PRICE_CHANGE_24H = _env_float("PUMP_PRICE_CHANGE_24H", 50.0)
 PUMP_PRICE_CHANGE_15M = _env_float("PUMP_PRICE_CHANGE_15M", 5.0)
 PUMP_PRICE_CHANGE_5M = _env_float("PUMP_PRICE_CHANGE_5M", 3.0)
-PUMP_VOLUME_MULTIPLIER = _env_float("PUMP_VOLUME_MULTIPLIER", 3.0)
+PUMP_VOLUME_SPIKE_MIN = _env_float("PUMP_VOLUME_SPIKE_MIN", 5.0)
+PUMP_VOLUME_SPIKE_WINDOWS_1M = (5, 30, 60)
+PUMP_VOLUME_MULTIPLIER = _env_float("PUMP_VOLUME_MULTIPLIER", 5.0)
 PUMP_VOLUME_MA_PERIOD = _env_int("PUMP_VOLUME_MA_PERIOD", 20)
 PUMP_RSI_MIN = _env_float("PUMP_RSI_MIN", 60.0)
 PUMP_RSI_MAX = _env_float("PUMP_RSI_MAX", 85.0)

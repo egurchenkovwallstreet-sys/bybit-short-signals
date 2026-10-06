@@ -80,7 +80,15 @@ def evaluate(state: SymbolState, now_ms: int) -> Reading:
     if state.last_price is not None and closes:
         closes = closes[:-1] + [state.last_price]
     daily_closes = [bar.close for bar in state.bars_htf.get("D", [])]
-    pump = detect_pump(closes, volumes, daily_closes=daily_closes)
+    volumes_4h = [bar.volume for bar in state.bars_htf.get("240", [])]
+    volumes_1d = [bar.volume for bar in state.bars_htf.get("D", [])]
+    pump = detect_pump(
+        closes,
+        volumes,
+        daily_closes=daily_closes,
+        volumes_4h=volumes_4h,
+        volumes_1d=volumes_1d,
+    )
     oi_points = state.oi_points()
     oi_change = oi_change_pct(oi_points)
     ratio = taker_ratio(state.taker_buy, state.taker_sell, now_ms)

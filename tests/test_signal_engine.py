@@ -30,7 +30,7 @@ from signal_engine.levels import (
 )
 from signal_engine.liquidations import is_short_liquidation, liquidations_faded, window_notionals
 from signal_engine.outcomes import classify_outcome, short_pnl_pct
-from signal_engine.pump import detect_pump, price_change_pct
+from signal_engine.pump import detect_pump, period_volume_ratio, price_change_pct, volume_spike_ok
 from signal_engine.rating import column_for, expert_probability, probability_pct, signal_rating, sort_by_rating
 from signal_engine.state import SymbolState
 from signal_engine.store import SignalStore
@@ -86,6 +86,25 @@ def _engine(folder: str) -> tuple[Engine, SignalStore]:
     return engine, store
 
 
+def _strong_pump_series() -> tuple[list[float], list[float]]:
+    closes = [100.0]
+    for _ in range(60):
+        closes.append(closes[-1] * 1.005)
+    volumes = [10.0] * len(closes)
+    for index in range(max(0, len(closes) - 5), len(closes)):
+        volumes[index] = 50.0
+    return closes, volumes
+
+
+def _ticker(symbol: str, *, turnover: float = 2_000_000.0) -> dict:
+    return {
+        "symbol": symbol,
+        "timestamp": START,
+        "type": "ticker",
+        "data": {"turnover_24h": turnover, "last_price": 100.0},
+    }
+
+
 class IndicatorTest(unittest.TestCase):
     def test_rsi_wilder_period_two(self) -> None:
         # Закрытия 10, 12, 11, 13. Второе значение RSI Уайлдера для периода 2 — 85.714...
@@ -99,28 +118,55 @@ class IndicatorTest(unittest.TestCase):
 
 
 class PumpTest(unittest.TestCase):
+    @staticmethod
+    def _spike_volumes_1m(length: int, spike: float = 5.0) -> list[float]:
+        base = 10.0
+        vols = [base] * length
+        for index in range(max(0, length - 5), length):
+            vols[index] = base * spike
+        return vols
+
     def test_hour_pump_matches(self) -> None:
         closes = [100.0]
         for _ in range(60):
             closes.append(closes[-1] * 1.005)
-        volumes = [10.0] * (len(closes) - 1) + [40.0]
+        volumes = self._spike_volumes_1m(len(closes))
         reading = detect_pump(closes, volumes)
         self.assertGreaterEqual(reading.price_change_1h or 0, 30)
+        self.assertTrue(volume_spike_ok(reading.volume_spikes))
         self.assertTrue(reading.matched)
 
     def test_daily_pump_from_htf(self) -> None:
         closes = [100.0] * 120
-        volumes = [10.0] * len(closes)
-        reading = detect_pump(closes, volumes, daily_closes=[100.0, 160.0])
+        volumes = self._spike_volumes_1m(len(closes))
+        reading = detect_pump(
+            closes,
+            volumes,
+            daily_closes=[100.0, 160.0],
+            volumes_1d=[100.0, 600.0],
+        )
         self.assertGreaterEqual(reading.price_change_24h or 0, 50)
         self.assertTrue(reading.matched)
 
     def test_small_move_rejects(self) -> None:
         closes = _pump_closes()
-        volumes = [10.0] * (len(closes) - 1) + [80.0]
+        volumes = [10.0] * len(closes)
         reading = detect_pump(closes, volumes)
         self.assertLess(reading.price_change_1h or 0, 30)
         self.assertFalse(reading.matched)
+
+    def test_price_pump_without_volume_spike_rejects(self) -> None:
+        closes = [100.0]
+        for _ in range(60):
+            closes.append(closes[-1] * 1.005)
+        volumes = [10.0] * len(closes)
+        reading = detect_pump(closes, volumes)
+        self.assertGreaterEqual(reading.price_change_1h or 0, 30)
+        self.assertFalse(reading.matched)
+
+    def test_period_volume_ratio(self) -> None:
+        vols = [1.0] * 5 + [5.0] * 5
+        self.assertAlmostEqual(period_volume_ratio(vols, 5) or 0, 5.0)
 
     def test_price_change_windows(self) -> None:
         closes = [100.0] * 16
@@ -269,11 +315,11 @@ class OutcomeTest(unittest.TestCase):
 
 class EngineTest(unittest.TestCase):
     def test_open_update_and_take_profit(self) -> None:
-        closes = _pump_closes()
-        volumes = [10.0] * (len(closes) - 1) + [80.0]
+        closes, volumes = _strong_pump_series()
         now = START + (len(closes) - 1) * 60_000
         with tempfile.TemporaryDirectory() as folder:
             engine, store = _engine(folder)
+            engine.ingest(_ticker("BEAMUSDT"))
             engine.ingest(_klines("BEAMUSDT", closes, volumes))
             opened = engine.scan(now)
             signal_messages = [item for item in opened if item["type"] == "signal"]
@@ -335,11 +381,11 @@ class EngineTest(unittest.TestCase):
             store.close()
 
     def test_liquidation_and_time_exit(self) -> None:
-        closes = _pump_closes()
-        volumes = [10.0] * (len(closes) - 1) + [80.0]
+        closes, volumes = _strong_pump_series()
         now = START + (len(closes) - 1) * 60_000
         with tempfile.TemporaryDirectory() as folder:
             engine, store = _engine(folder)
+            engine.ingest(_ticker("AAAUSDT"))
             engine.ingest(_klines("AAAUSDT", closes, volumes))
             opened = engine.scan(now)
             entry = [item for item in opened if item["type"] == "signal"][0]["data"]["entry_price"]
@@ -355,6 +401,7 @@ class EngineTest(unittest.TestCase):
             outcome = [item for item in closed if item["type"] == "signal"][0]["data"]["outcome"]
             self.assertEqual(outcome, "LIQUIDATED")
 
+            engine.ingest(_ticker("BBBUSDT"))
             engine.ingest(_klines("BBBUSDT", closes, volumes))
             opened = engine.scan(now)
             created = [item for item in opened if item["data"].get("symbol") == "BBBUSDT"][0]
