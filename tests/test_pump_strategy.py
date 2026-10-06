@@ -21,20 +21,20 @@ class PumpStrategyTests(unittest.TestCase):
         state.last_price = 18.0
         now = 1_800_000_000_000
         bars = []
-        for i in range(25):
-            ts = now - (25 - i) * 86_400_000
-            if i < 5:
+        for i in range(12):
+            ts = now - (12 - i) * 86_400_000
+            if i < 3:
                 low, high = 10.0, 10.5
-            elif i < 15:
-                low, high = 10.0, 12.0 + i * 0.5
+            elif i < 8:
+                low, high = 10.0, 12.0 + i * 1.5
             else:
-                low, high = 17.0, 19.0
+                low, high = 18.0, 21.0
             bars.append(_bar(ts, low, high))
         state.bars_htf["D"] = bars
         match = detect_long_pump(state, now)
         self.assertIsNotNone(match)
         assert match is not None
-        self.assertGreaterEqual(match.growth_pct, 80.0)
+        self.assertGreaterEqual(match.peak_price / match.valley_price, config.PUMP_STRATEGY_LONG_MIN_MULTIPLIER)
         self.assertEqual(match.kind, "long")
 
     def test_turnover_blocks(self) -> None:

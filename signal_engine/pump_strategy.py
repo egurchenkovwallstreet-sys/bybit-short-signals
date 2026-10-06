@@ -91,8 +91,12 @@ def _match_from_window(
     duration = int(peak_bar.timestamp) - int(valley_bar.timestamp)
     if duration < min_duration_ms or duration > max_duration_ms:
         return None
-    growth_pct = (peak_price - valley_price) / valley_price * 100.0
-    if growth_pct < min_pct:
+    mult = peak_price / valley_price
+    growth_pct = (mult - 1.0) * 100.0
+    if kind == "long":
+        if mult < config.PUMP_STRATEGY_LONG_MIN_MULTIPLIER:
+            return None
+    elif growth_pct < min_pct:
         return None
     return PumpMatch(
         kind=kind,

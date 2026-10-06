@@ -46,7 +46,7 @@ function renderPumpStrategyBoard() {
   const rows = pumpStrategyState.signals;
   if (!rows.length) {
     root.innerHTML =
-      '<p class="quiet pump-strategy-empty">Пока нет монет. Быстрый памп: ≥40% за 1–12 ч. Длинный: ≥80% за 20 д. Оборот ≥300 тыс USDT за сутки.</p>';
+      '<p class="quiet pump-strategy-empty">Пока нет монет. Быстрый памп: ≥40% за 1–12 ч. Длинный: ×2 от дна за 10 д. Оборот ≥300 тыс USDT за сутки.</p>';
     return;
   }
   const shortRows = rows.filter((r) => r.kind === "short");
@@ -56,7 +56,7 @@ function renderPumpStrategyBoard() {
     html += `<h2 class="psc-section-title">Быстрый памп (1–12 ч)</h2><div class="psc-section-grid">${shortRows.map((row) => pumpStrategyCardHtml(row)).join("")}</div>`;
   }
   if (longRows.length) {
-    html += `<h2 class="psc-section-title">Длинный рост (до 20 д)</h2><div class="psc-section-grid">${longRows.map((row) => pumpStrategyCardHtml(row)).join("")}</div>`;
+    html += `<h2 class="psc-section-title">Длинный рост (до 10 д, минимум ×2)</h2><div class="psc-section-grid">${longRows.map((row) => pumpStrategyCardHtml(row)).join("")}</div>`;
   }
   root.innerHTML = html;
   root.querySelectorAll("canvas.mini-strategy").forEach(drawStrategyMini);
