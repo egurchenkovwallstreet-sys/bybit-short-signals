@@ -217,7 +217,7 @@ def _should_exit_watch(state: SymbolState, meta: dict, now_ms: int) -> bool:
     """Откат часто с красным 24h — снимаем, только если памп сдулся к дну."""
     hist = history_pump_metrics(state, now_ms)
     if hist is None:
-        return True
+        return False
     min_low = float(meta.get("min_low") or hist.min_low)
     price = _resolve_last_price(state)
     if price is None or min_low <= 0:
