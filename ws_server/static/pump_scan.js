@@ -22,8 +22,8 @@ const PUMP_CHART = {
   workspace: "pump-scan-workspace",
   tfRow: "pump-scan-tf-row",
   chart: "pump-scan-candle-chart",
-  overlay: "pump-scan-book-overlay",
   info: "pump-scan-info-pane",
+  book: "pump-scan-book-pane",
   walls: "pump-scan-walls",
 };
 
@@ -71,7 +71,7 @@ function openPumpScanChart() {
   );
   document.getElementById(PUMP_CHART.listWrap)?.setAttribute("hidden", "");
   document.getElementById(PUMP_CHART.workspace)?.removeAttribute("hidden");
-  window.boardChart.mount(pumpState.chart, PUMP_CHART.chart, PUMP_CHART.overlay);
+  window.boardChart.mount(pumpState.chart, PUMP_CHART.chart);
   window.boardChart.syncTfButtons(() => pumpState.interval, PUMP_CHART.tfRow);
   renderPumpScanInfo(true);
 }
@@ -141,7 +141,6 @@ function mergePumpLiveDetail(data) {
     funding_rate: data.funding_rate ?? prev.funding_rate,
     taker_ratio: data.taker_ratio ?? prev.taker_ratio,
   };
-  window.boardChart.setBook(pumpState.chart, pumpState.detail.book);
 }
 
 function onPumpScanDetail(symbol, data) {
@@ -186,6 +185,7 @@ function updatePumpScanLive() {
   if (!row) return;
   const priceEl = document.querySelector(`#${PUMP_CHART.info} [data-live='price']`);
   if (priceEl) priceEl.textContent = fmtPrice(row.last_price);
+  window.boardChart.renderBookPane(PUMP_CHART.book, pumpState.detail?.book, row?.last_price);
   window.boardChart.renderWalls(PUMP_CHART.walls, pumpState.detail?.book);
 }
 
@@ -242,9 +242,13 @@ function renderPumpScanInfo(full) {
     <ul class="checklist psc-checklist">${checks}</ul>
     <h3 class="psc-info-subhead">EMA 50 / 100 / 200</h3>
     <div class="psc-ema-block">${renderEmaBlock(row.ema_by_tf)}</div>
+    <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
+    <div class="psc-book-pane" id="pump-scan-book-pane"></div>
+    <h3 class="psc-info-subhead">Крупные стены</h3>
     <div class="psc-walls" id="pump-scan-walls"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="pump_scan" data-symbol="${row.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(pumpState.interval)}</p>`;
+  window.boardChart.renderBookPane(PUMP_CHART.book, detail?.book, row.last_price);
   window.boardChart.renderWalls(PUMP_CHART.walls, detail?.book);
 }
 
@@ -362,7 +366,6 @@ function resizePumpScanChart() {
   const container = document.getElementById(PUMP_CHART.chart);
   if (!container || !pumpState.chart?.chart || container.clientWidth <= 0) return;
   pumpState.chart.chart.resize(container.clientWidth, container.clientHeight || 420);
-  pumpState.chart.overlayDraw?.();
 }
 
 window.pumpScan = {

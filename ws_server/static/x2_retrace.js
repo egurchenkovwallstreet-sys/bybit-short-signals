@@ -13,8 +13,8 @@ const X2_CHART = {
   workspace: "x2-workspace",
   tfRow: "x2-tf-row",
   chart: "x2-candle-chart",
-  overlay: "x2-book-overlay",
   info: "x2-info-pane",
+  book: "x2-book-pane",
   walls: "x2-walls",
 };
 
@@ -58,7 +58,7 @@ function openX2Chart() {
   window.boardChart.bindTfRow(X2_CHART.tfRow, () => x2State.interval, setX2Interval);
   document.getElementById("x2-list-wrap")?.setAttribute("hidden", "");
   document.getElementById(X2_CHART.workspace)?.removeAttribute("hidden");
-  window.boardChart.mount(x2State.chart, X2_CHART.chart, X2_CHART.overlay);
+  window.boardChart.mount(x2State.chart, X2_CHART.chart);
   window.boardChart.syncTfButtons(() => x2State.interval, X2_CHART.tfRow);
   renderX2Info(true);
 }
@@ -127,7 +127,6 @@ function mergeX2LiveDetail(data) {
     book: data.book ?? prev.book,
     funding_rate: data.funding_rate ?? prev.funding_rate,
   };
-  window.boardChart.setBook(x2State.chart, x2State.detail.book);
 }
 
 function onX2Detail(symbol, data) {
@@ -172,6 +171,7 @@ function updateX2Live() {
   if (!s) return;
   const priceEl = document.querySelector(`#${X2_CHART.info} [data-live='price']`);
   if (priceEl) priceEl.textContent = fmtPrice(s.last_price);
+  window.boardChart.renderBookPane(X2_CHART.book, x2State.detail?.book, s.last_price);
   window.boardChart.renderWalls(X2_CHART.walls, x2State.detail?.book);
 }
 
@@ -217,9 +217,13 @@ function renderX2Info(full) {
     </dl>
     <h3 class="psc-info-subhead">EMA 50 / 100 / 200</h3>
     <div class="psc-ema-block">${renderX2EmaBlock(s.ema_by_tf)}</div>
+    <h3 class="psc-info-subhead">Стакан (±10% от цены)</h3>
+    <div class="psc-book-pane" id="x2-book-pane"></div>
+    <h3 class="psc-info-subhead">Крупные стены</h3>
     <div class="psc-walls" id="x2-walls"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="x2_retrace" data-symbol="${s.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(x2State.interval)}</p>`;
+  window.boardChart.renderBookPane(X2_CHART.book, detail?.book, s.last_price);
   window.boardChart.renderWalls(X2_CHART.walls, detail?.book);
 }
 
@@ -354,7 +358,6 @@ function resizeX2Chart() {
   const container = document.getElementById(X2_CHART.chart);
   if (!container || !x2State.chart?.chart || container.clientWidth <= 0) return;
   x2State.chart.chart.resize(container.clientWidth, container.clientHeight || 420);
-  x2State.chart.overlayDraw?.();
 }
 
 window.x2Retrace = {

@@ -14,16 +14,11 @@ window.boardChart = {
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   PREFETCH_CONCURRENCY: 3,
-  /** Горизонтальный объём стакана: Y = цена на графике, от центра влево bid / вправо ask. */
-  BOOK_VIS: {
-    barHeight: 10,
+  /** Стакан в боковой панели: глубина ±10% от текущей цены. */
+  BOOK_DEPTH_PCT: 0.1,
+  BOOK_PANEL: {
     binTicks: 15,
-    centerLineWidth: 2,
-    padX: 12,
-    padY: 10,
-    minBarLen: 4,
-    bandFrac: 0.88,
-    labelMinShare: 0.55,
+    maxRowsPerSide: 22,
   },
 
   normalizeBookSide(side) {
@@ -78,23 +73,66 @@ window.boardChart = {
     return out;
   },
 
-  bookPriceToY(runtime, price, pMin, pMax, height) {
-    if (runtime?.series) {
-      const y = runtime.series.priceToCoordinate(price);
-      if (y != null && !Number.isNaN(y)) return y;
+  prepareBookDepth(book, refPrice, depthPct) {
+    const BC = window.boardChart;
+    const mid = Number(refPrice);
+    const band = depthPct ?? BC.BOOK_DEPTH_PCT;
+    if (!mid || mid <= 0 || Number.isNaN(mid)) {
+      return { mid: 0, lo: 0, hi: 0, asks: [], bids: [], depthPct: band };
     }
-    const pad = window.boardChart.BOOK_VIS.padY ?? 10;
-    const span = pMax - pMin || 1;
-    return height - pad - ((price - pMin) / span) * (height - 2 * pad);
+    const lo = mid * (1 - band);
+    const hi = mid * (1 + band);
+    const binSize = BC.bookBinSize(mid, { binTicks: BC.BOOK_PANEL.binTicks });
+    const inBand = (p) => {
+      const n = Number(p);
+      return n >= lo && n <= hi;
+    };
+    const bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
+    const asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
+    let bids = BC.aggregateBookLevels(bidsRaw, binSize, true);
+    let asks = BC.aggregateBookLevels(asksRaw, binSize, false);
+    const cap = BC.BOOK_PANEL.maxRowsPerSide;
+    bids = bids.slice(0, cap);
+    asks = asks.slice(0, cap);
+    return { mid, lo, hi, asks, bids, depthPct: band };
   },
 
-  filterBookByPriceRange(rows, pMin, pMax) {
-    if (!(pMax > pMin)) return rows;
-    const span = pMax - pMin;
-    const lo = pMin - span * 0.03;
-    const hi = pMax + span * 0.03;
-    const inRange = rows.filter((r) => r.price >= lo && r.price <= hi);
-    return inRange.length ? inRange : rows;
+  bookPaneHtml(data) {
+    const BC = window.boardChart;
+    const { mid, lo, hi, asks, bids, depthPct } = data;
+    const pct = Math.round((depthPct ?? BC.BOOK_DEPTH_PCT) * 100);
+    if (!asks.length && !bids.length) {
+      return `<p class="quiet">Нет уровней в диапазоне ±${pct}% от цены.</p>`;
+    }
+    const maxAsk = Math.max(...asks.map((r) => r.size), 1);
+    const maxBid = Math.max(...bids.map((r) => r.size), 1);
+    const rowHtml = (r, side, max) => {
+      const w = Math.max(4, Math.round((r.size / max) * 100));
+      return `<div class="psc-book-row ${side}">
+        <div class="psc-book-bar" style="width:${w}%"></div>
+        <span class="psc-book-price">${BC.formatBookPrice(r.price)}</span>
+        <span class="psc-book-size">${BC.formatBookSize(r.size)}</span>
+      </div>`;
+    };
+    const askBlock = [...asks].reverse().map((r) => rowHtml(r, "ask", maxAsk)).join("");
+    const bidBlock = bids.map((r) => rowHtml(r, "bid", maxBid)).join("");
+    return `${askBlock}
+      <div class="psc-book-mid">
+        <strong>${BC.formatBookPrice(mid)}</strong>
+        <span class="quiet"> ±${pct}% · ${BC.formatBookPrice(lo)} – ${BC.formatBookPrice(hi)}</span>
+      </div>
+      ${bidBlock}`;
+  },
+
+  renderBookPane(containerId, book, refPrice) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    if (!book?.bids && !book?.asks) {
+      el.innerHTML = '<p class="quiet">Стакан загружается…</p>';
+      return;
+    }
+    const data = window.boardChart.prepareBookDepth(book, refPrice);
+    el.innerHTML = window.boardChart.bookPaneHtml(data);
   },
 
   createRuntime() {
@@ -104,7 +142,6 @@ window.boardChart = {
       volumeSeries: null,
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
-      overlayDraw: null,
     };
   },
 
@@ -285,7 +322,7 @@ window.boardChart = {
     return [];
   },
 
-  mount(runtime, chartElId, overlayElId) {
+  mount(runtime, chartElId) {
     if (runtime.chart) return;
     const container = document.getElementById(chartElId);
     if (!container || !window.LightweightCharts) return;
@@ -308,20 +345,12 @@ window.boardChart = {
       priceScaleId: "vol",
     });
     runtime.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
-    runtime.overlayDraw = () =>
-      window.boardChart.drawBookOverlay(runtime, overlayElId, chartElId, () => runtime._book);
     const resize = () => {
       if (!runtime.chart || container.clientWidth <= 0) return;
       runtime.chart.resize(container.clientWidth, container.clientHeight || 420);
-      runtime.overlayDraw?.();
     };
     new ResizeObserver(resize).observe(container);
-    runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(() => runtime.overlayDraw?.());
     requestAnimationFrame(resize);
-  },
-
-  setBook(runtime, book) {
-    runtime._book = book;
   },
 
   candleTime(raw, interval) {
@@ -383,96 +412,6 @@ window.boardChart = {
       const to = typeof last === "object" ? last : last + step;
       runtime.chart.timeScale().setVisibleRange({ from: bars[0].time, to });
     }
-    runtime.overlayDraw?.();
-  },
-
-  drawBookOverlay(runtime, overlayElId, chartElId, getBook) {
-    const canvas = document.getElementById(overlayElId);
-    const chartEl = document.getElementById(chartElId);
-    if (!canvas || !chartEl) return;
-    const book = typeof getBook === "function" ? getBook() : getBook;
-    const ratio = window.devicePixelRatio || 1;
-    const width = chartEl.clientWidth;
-    const height = chartEl.clientHeight;
-    if (width <= 0 || height <= 0) return;
-    canvas.width = width * ratio;
-    canvas.height = height * ratio;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, width, height);
-
-    const BC = window.boardChart;
-    const vis = BC.BOOK_VIS;
-    const midX = width / 2;
-    const halfW = midX - vis.padX;
-    const bandW = Math.max(vis.minBarLen, halfW * vis.bandFrac);
-    const halfH = vis.barHeight / 2;
-
-    const bidsRaw = BC.normalizeBookSide(book?.bids);
-    const asksRaw = BC.normalizeBookSide(book?.asks);
-    if (!bidsRaw.length && !asksRaw.length) {
-      ctx.fillStyle = "rgba(142, 154, 171, 0.7)";
-      ctx.font = "12px Segoe UI, sans-serif";
-      ctx.fillText("Стакан…", midX + 8, 20);
-      return;
-    }
-
-    const pr = runtime?.priceRange || {};
-    let pLo = Number(pr.min);
-    let pHi = Number(pr.max);
-    if (!(pHi > pLo)) {
-      const prices = [...bidsRaw, ...asksRaw].map(([p]) => Number(p)).filter((p) => p > 0);
-      pLo = Math.min(...prices);
-      pHi = Math.max(...prices);
-    }
-    const refPrice =
-      (pLo > 0 && pHi > 0 ? (pLo + pHi) / 2 : 0) ||
-      Number(bidsRaw[0]?.[0]) ||
-      Number(asksRaw[0]?.[0]) ||
-      1;
-    const binSize = BC.bookBinSize(refPrice, vis);
-    let bids = BC.filterBookByPriceRange(BC.aggregateBookLevels(bidsRaw, binSize, true), pLo, pHi);
-    let asks = BC.filterBookByPriceRange(BC.aggregateBookLevels(asksRaw, binSize, false), pLo, pHi);
-
-    ctx.strokeStyle = "rgba(200, 210, 220, 0.65)";
-    ctx.lineWidth = vis.centerLineWidth;
-    ctx.beginPath();
-    ctx.moveTo(midX, vis.padY);
-    ctx.lineTo(midX, height - vis.padY);
-    ctx.stroke();
-
-    const maxBid = Math.max(...bids.map((r) => r.size), 1);
-    const maxAsk = Math.max(...asks.map((r) => r.size), 1);
-
-    const drawSide = (rows, isBid) => {
-      const maxSize = isBid ? maxBid : maxAsk;
-      for (const row of rows) {
-        const y = BC.bookPriceToY(runtime, row.price, pLo, pHi, height);
-        if (y < vis.padY || y > height - vis.padY) continue;
-        const barLen = vis.minBarLen + (row.size / maxSize) * (bandW - vis.minBarLen);
-        if (isBid) {
-          ctx.fillStyle = "rgba(61, 214, 140, 0.45)";
-          ctx.fillRect(midX - barLen, y - halfH, barLen, vis.barHeight);
-        } else {
-          ctx.fillStyle = "rgba(255, 93, 115, 0.45)";
-          ctx.fillRect(midX + 1, y - halfH, barLen, vis.barHeight);
-        }
-        if (row.size >= maxSize * vis.labelMinShare) {
-          ctx.fillStyle = isBid ? "rgba(200, 255, 220, 0.92)" : "rgba(255, 200, 210, 0.92)";
-          ctx.font = "10px Segoe UI, sans-serif";
-          ctx.textAlign = isBid ? "right" : "left";
-          const label = BC.formatBookSize(row.size);
-          if (isBid) ctx.fillText(label, midX - barLen - 4, y + 3);
-          else ctx.fillText(label, midX + barLen + 4, y + 3);
-        }
-      }
-    };
-
-    drawSide(bids, true);
-    drawSide(asks, false);
   },
 
   renderWalls(containerId, book) {

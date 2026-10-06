@@ -184,11 +184,68 @@ body {
   min-height: min(72vh, 720px);
 }
 
-.psc-book-overlay {
+.psc-book-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  background: rgba(16, 20, 27, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 4px;
+  max-height: min(42vh, 420px);
+  overflow: auto;
+}
+
+.psc-book-mid {
+  text-align: center;
+  padding: 8px 6px;
+  margin: 4px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.psc-book-row {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  min-height: 22px;
+  overflow: hidden;
+}
+
+.psc-book-row .psc-book-bar {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 2;
+  top: 2px;
+  bottom: 2px;
+  z-index: 0;
+  border-radius: 2px;
+  opacity: 0.42;
+}
+
+.psc-book-row.ask .psc-book-bar {
+  right: 0;
+  background: #ff5d73;
+}
+
+.psc-book-row.bid .psc-book-bar {
+  left: 0;
+  background: #3dd68c;
+}
+
+.psc-book-price,
+.psc-book-size {
+  position: relative;
+  z-index: 1;
+}
+
+.psc-book-size {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .psc-chart-hint {
