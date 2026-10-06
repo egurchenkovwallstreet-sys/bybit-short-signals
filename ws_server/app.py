@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -83,12 +82,43 @@ async def tooltips() -> FileResponse:
     return FileResponse(STATIC_DIR / "tooltips.json", media_type="application/json")
 
 
-@app.post("/api/open-bybit/{symbol}")
-async def open_bybit(symbol: str) -> dict[str, str]:
-    """Открывает график только на Bybit, на машине, где запущен сервер."""
-    url = bybit_trade_url(symbol)
-    await asyncio.to_thread(webbrowser.open, url)
-    return {"url": url}
+@app.get("/api/open-bybit/{symbol}")
+async def open_bybit_url(symbol: str) -> dict[str, str]:
+    """Ссылка на график Bybit (открывается в браузере пользователя)."""
+    return {"url": bybit_trade_url(symbol)}
+
+
+@app.get("/api/signals/unprocessed")
+async def signals_unprocessed() -> dict[str, Any]:
+    from ws_server.journal import list_unprocessed
+
+    return {"rows": list_unprocessed(config.SQLITE_PATH)}
+
+
+@app.get("/api/klines/{symbol}")
+async def klines(symbol: str, interval: str = "1") -> dict[str, Any]:
+    if not _SYMBOL.fullmatch(symbol or ""):
+        raise HTTPException(status_code=400, detail="Некорректный тикер")
+    if interval not in {"1", "5", "15", "60", "240", "D"}:
+        raise HTTPException(status_code=400, detail="Некорректный интервал")
+    hub: Hub = app.state.hub
+    key = (symbol, interval)
+    cached = hub.cache.klines.get(key)
+    if cached:
+        return {"symbol": symbol, "interval": interval, "candles": cached}
+    from collector.rest_client import BybitRest
+
+    rest: BybitRest | None = getattr(app.state, "bybit_rest", None)
+    if rest is None:
+        rest = BybitRest()
+        await rest.open()
+        app.state.bybit_rest = rest
+    message = await rest.fetch_klines(symbol, interval)
+    candles = (message.get("data") or {}).get("candles") or [] if message else []
+    if candles:
+        hub.cache.klines[key] = list(candles)
+        hub.cache.market_dirty = True
+    return {"symbol": symbol, "interval": interval, "candles": candles}
 
 
 @app.websocket("/ws")

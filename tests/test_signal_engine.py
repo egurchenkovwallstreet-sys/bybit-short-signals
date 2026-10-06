@@ -99,36 +99,28 @@ class IndicatorTest(unittest.TestCase):
 
 
 class PumpTest(unittest.TestCase):
-    def test_fifteen_minutes_without_five_minute_spike(self) -> None:
-        closes = _pump_closes()
-        volumes = [10.0] * (len(closes) - 1) + [80.0]
+    def test_hour_pump_matches(self) -> None:
+        closes = [100.0]
+        for _ in range(60):
+            closes.append(closes[-1] * 1.005)
+        volumes = [10.0] * (len(closes) - 1) + [40.0]
         reading = detect_pump(closes, volumes)
-        self.assertGreaterEqual(reading.price_change_15m or 0, 5)
-        self.assertLess(reading.price_change_5m or 0, 3)
-        self.assertGreaterEqual(reading.rsi or 0, 60)
-        self.assertLessEqual(reading.rsi or 100, 85)
-        self.assertGreaterEqual(reading.volume_ratio or 0, 5)
+        self.assertGreaterEqual(reading.price_change_1h or 0, 30)
         self.assertTrue(reading.matched)
 
-    def test_rsi_above_zone_rejects(self) -> None:
-        price = 100.0
-        closes: list[float] = []
-        for index in range(40):
-            price *= 1.003 if index % 3 else 0.998
-            closes.append(price)
-        base = closes[24]
-        closes = closes[:25]
-        for index in range(1, 16):
-            closes.append(base * (1 + 0.055 * index / 15))
+    def test_daily_pump_from_htf(self) -> None:
+        closes = [100.0] * 120
+        volumes = [10.0] * len(closes)
+        reading = detect_pump(closes, volumes, daily_closes=[100.0, 160.0])
+        self.assertGreaterEqual(reading.price_change_24h or 0, 50)
+        self.assertTrue(reading.matched)
+
+    def test_small_move_rejects(self) -> None:
+        closes = _pump_closes()
         volumes = [10.0] * (len(closes) - 1) + [80.0]
         reading = detect_pump(closes, volumes)
-        self.assertGreater(reading.rsi or 0, 85)
+        self.assertLess(reading.price_change_1h or 0, 30)
         self.assertFalse(reading.matched)
-
-    def test_quiet_volume_rejects(self) -> None:
-        closes = _pump_closes()
-        volumes = [10.0] * len(closes)
-        self.assertFalse(detect_pump(closes, volumes).matched)
 
     def test_price_change_windows(self) -> None:
         closes = [100.0] * 16

@@ -1,4 +1,4 @@
-"""Шаг 1. Памп: цена, объём и RSI должны совпасть одновременно."""
+"""Шаг 1. Памп: сильный рост за 1 час или за сутки (длинные пампы)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from signal_engine.indicators import rsi, sma
 class PumpReading:
     price_change_5m: float | None
     price_change_15m: float | None
+    price_change_1h: float | None
+    price_change_24h: float | None
     volume_ratio: float | None
     rsi: float | None
     matched: bool
@@ -39,18 +41,52 @@ def volume_ratio(volumes: list[float], period: int) -> float | None:
     return volumes[-1] / baseline
 
 
-def detect_pump(closes: list[float], volumes: list[float]) -> PumpReading:
+def _daily_change_pct(daily_closes: list[float]) -> float | None:
+    if len(daily_closes) < 2:
+        return None
+    past = daily_closes[-2]
+    current = daily_closes[-1]
+    if past <= 0:
+        return None
+    return (current - past) / past * 100.0
+
+
+def detect_pump(
+    closes: list[float],
+    volumes: list[float],
+    *,
+    daily_closes: list[float] | None = None,
+) -> PumpReading:
     change_5m = price_change_pct(closes, 5)
     change_15m = price_change_pct(closes, 15)
+    change_1h = price_change_pct(closes, 60)
+    change_24h = price_change_pct(closes, 24 * 60)
+    daily_change = _daily_change_pct(daily_closes or [])
+    if daily_change is not None:
+        if change_24h is None or daily_change > change_24h:
+            change_24h = daily_change
+
     ratio = volume_ratio(volumes, config.PUMP_VOLUME_MA_PERIOD)
     rsi_value = rsi(closes, config.PUMP_RSI_PERIOD)
-    price_ok = (
-        (change_5m is not None and change_5m >= config.PUMP_PRICE_CHANGE_5M)
-        or (change_15m is not None and change_15m >= config.PUMP_PRICE_CHANGE_15M)
+
+    strong = (
+        (change_1h is not None and change_1h >= config.PUMP_PRICE_CHANGE_1H)
+        or (change_24h is not None and change_24h >= config.PUMP_PRICE_CHANGE_24H)
     )
     volume_ok = ratio is not None and ratio >= config.PUMP_VOLUME_MULTIPLIER
     rsi_ok = (
         rsi_value is not None
         and config.PUMP_RSI_MIN <= rsi_value <= config.PUMP_RSI_MAX
     )
-    return PumpReading(change_5m, change_15m, ratio, rsi_value, price_ok and volume_ok and rsi_ok)
+    # Сильный час/день — без RSI (длинный памп часто перегрет). Слабее порога — не памп.
+    matched = bool(strong and (volume_ok or strong))
+
+    return PumpReading(
+        change_5m,
+        change_15m,
+        change_1h,
+        change_24h,
+        ratio,
+        rsi_value,
+        matched,
+    )

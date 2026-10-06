@@ -11,6 +11,7 @@
     <div class="brand">Сигналы на шорт</div>
     <nav class="tabs">
       <button type="button" class="tab active" data-tab="signals">Сигналы</button>
+      <button type="button" class="tab" data-tab="pending">Не отработанные</button>
       <button type="button" class="tab" data-tab="stats">Статистика</button>
       <button type="button" class="tab" data-tab="btc">BTC · тест</button>
     </nav>
@@ -75,6 +76,26 @@
     </div>
   </section>
 
+  <section id="view-pending" class="stats pending-view" hidden>
+    <p class="quiet">Открытые сигналы и недавно снятые с доски до 5/5 — не пропадают при исчезновении карточки.</p>
+    <div class="table-wrap">
+      <table id="pending-table">
+        <thead>
+          <tr>
+            <th>Тикер</th>
+            <th>Статус</th>
+            <th>Колонка</th>
+            <th>Рост 5m/15m</th>
+            <th>Исход</th>
+            <th>P&amp;L %</th>
+            <th>Обновлено</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
   <section id="view-stats" class="stats" hidden>
     <div id="gauges" class="gauges"></div>
     <div id="equity" class="equity"></div>
@@ -99,6 +120,6 @@
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/btc_test.js?v=20251006b"></script>
-  <script src="/static/app.js?v=20251006c"></script>
+  <script src="/static/app.js?v=20251006d"></script>
 </body>
 </html>

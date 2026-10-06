@@ -201,6 +201,7 @@ function showTab(name) {
     button.classList.toggle("active", button.dataset.tab === name);
   });
   document.getElementById("view-signals").hidden = name !== "signals";
+  document.getElementById("view-pending").hidden = name !== "pending";
   document.getElementById("view-stats").hidden = name !== "stats";
   const btcView = document.getElementById("view-btc");
   if (btcView) btcView.hidden = name !== "btc";
@@ -209,6 +210,9 @@ function showTab(name) {
       window.btcTest.initBtcTab();
       window.btcTest.fetchBtcFallback?.();
     });
+  }
+  if (name === "pending") {
+    renderPending();
   }
   if (name === "stats") {
     renderStats();
@@ -338,12 +342,31 @@ function renderDetail() {
       });
     });
     root.querySelector(".bybit-btn").addEventListener("click", () => openBybit(signal.symbol));
+    const expandBtn = root.querySelector(".chart-expand-btn");
+    const chartRow = root.querySelector(".chart-row");
+    if (expandBtn && chartRow) {
+      expandBtn.addEventListener("click", () => {
+        chartRow.classList.toggle("expanded");
+        expandBtn.textContent = chartRow.classList.contains("expanded")
+          ? "Свернуть график"
+          : "Увеличить график";
+        requestAnimationFrame(() => {
+          if (state.chart) {
+            const box = document.getElementById("candle-chart");
+            const h = chartRow.classList.contains("expanded") ? Math.max(400, box?.clientHeight || 560) : 280;
+            if (box && box.clientWidth > 0) state.chart.resize(box.clientWidth, h);
+          }
+        });
+      });
+    }
     mountCandleChart();
   } else {
     const info = root.querySelector(".signal-info");
     if (info) info.innerHTML = infoHtml(signal);
   }
-  drawCandles(detail.candles || [], signal);
+  void ensureCandles(signal.symbol, detail.interval || state.interval, detail).then((candles) => {
+    drawCandles(candles, signal);
+  });
   drawBook(document.getElementById("book-map"), detail.book || {});
   drawLiquidations(document.getElementById("liq-map"), detail.liquidations || []);
   drawLine("oi-chart", "OI", pointsOf(detail.oi, "open_interest"));
@@ -366,6 +389,9 @@ function detailHtml(signal, interval) {
   ).join("");
   return `<h3>ГРАФИК + КАРТА ЛИКВИДНОСТИ</h3>
     <div class="tf-row">${buttons}</div>
+    <div class="chart-toolbar">
+      <button type="button" class="chart-expand-btn">Увеличить график</button>
+    </div>
     <div class="chart-row">
       <div id="candle-chart"></div>
       <div>
@@ -400,8 +426,11 @@ function infoHtml(signal) {
     })
     .join("");
   const pnl = signal.strength === 5 ? formatPnl(signal.pnl_pct) : "";
+  const ch5 = signal.price_change_5m != null ? `${Number(signal.price_change_5m).toFixed(1)}%` : "—";
+  const ch15 = signal.price_change_15m != null ? `${Number(signal.price_change_15m).toFixed(1)}%` : "—";
   return `    <div class="ticker">${signal.symbol} · ${signal.status}</div>
     <div class="scale" style="color: var(--${signal.color || "gray"})">${scale}</div>
+    <p>Рост: 5m ${ch5} · 15m ${ch15} · порог пампа ≥30%/1ч или ≥50%/сутки</p>
     <p>Вероятность ${Number(signal.probability || 0).toFixed(0)}% ${pnl}</p>
     <ul class="checks">${rows}</ul>`;
 }
@@ -428,6 +457,21 @@ function mountCandleChart() {
   };
   new ResizeObserver(resize).observe(container);
   requestAnimationFrame(resize);
+}
+
+async function ensureCandles(symbol, interval, detail) {
+  const candles = detail.candles || [];
+  if (candles.length >= 5) return candles;
+  try {
+    const res = await fetch(`/api/klines/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}`);
+    if (!res.ok) return candles;
+    const data = await res.json();
+    const loaded = data.candles || [];
+    if (loaded.length) detail.candles = loaded;
+    return loaded.length ? loaded : candles;
+  } catch (_err) {
+    return candles;
+  }
 }
 
 function drawCandles(candles, signal) {
@@ -466,7 +510,14 @@ function drawCandles(candles, signal) {
     );
   });
   const chartBox = document.getElementById("candle-chart");
-  if (chartBox && chartBox.clientWidth > 0) state.chart.resize(chartBox.clientWidth, 280);
+  const chartRow = document.querySelector(".chart-row");
+  const h = chartRow?.classList.contains("expanded") ? Math.max(400, chartBox?.clientHeight || 560) : 280;
+  if (chartBox && chartBox.clientWidth > 0) state.chart.resize(chartBox.clientWidth, h);
+  if (!bars.length && chartBox) {
+    chartBox.dataset.empty = "1";
+    return;
+  }
+  if (chartBox) chartBox.dataset.empty = "0";
   if (bars.length) {
     const markers = (signal.chart_levels || [])
       .filter((level) => level.swept)
@@ -583,11 +634,53 @@ function formatFunding(rate) {
   return `${(Number(rate) * 100).toFixed(3)}%`;
 }
 
-async function openBybit(symbol) {
+function openBybit(symbol) {
   const note = document.getElementById("bybit-note");
-  const response = await fetch(`/api/open-bybit/${symbol}`, { method: "POST" });
-  const data = await response.json();
-  if (note) note.textContent = response.ok ? `Открыт график: ${data.url}` : "Тикер отклонён";
+  const url = `https://www.bybit.com/trade/usdt/${encodeURIComponent(symbol)}`;
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (note) {
+    note.textContent = opened
+      ? `Открыта новая вкладка Bybit: ${url}`
+      : `Разрешите всплывающие окна или откройте вручную: ${url}`;
+  }
+}
+
+function renderPending() {
+  const body = document.querySelector("#pending-table tbody");
+  if (!body) return;
+  fetch("/api/signals/unprocessed")
+    .then((response) => response.json())
+    .then((payload) => {
+      const rows = payload.rows || [];
+      body.innerHTML = rows
+        .map((row) => {
+          const ch5 = row.price_change_5m != null ? Number(row.price_change_5m).toFixed(1) : "—";
+          const ch15 = row.price_change_15m != null ? Number(row.price_change_15m).toFixed(1) : "—";
+          const pnl = row.pnl_pct != null ? Number(row.pnl_pct).toFixed(2) : "—";
+          const ts = new Date(row.updated_at || row.created_at).toLocaleString();
+          return `<tr class="pending-row" data-symbol="${row.symbol}">
+            <td>${row.symbol}</td>
+            <td>${row.status || "—"}</td>
+            <td>${row.label || "—"}</td>
+            <td>${ch5}% / ${ch15}%</td>
+            <td>${row.outcome || "OPEN"}</td>
+            <td>${pnl}</td>
+            <td>${ts}</td>
+          </tr>`;
+        })
+        .join("");
+      body.querySelectorAll(".pending-row").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          const symbol = tr.dataset.symbol;
+          state.selected = symbol;
+          socket.send(JSON.stringify({ type: "select", symbol }));
+          showTab("signals");
+        });
+      });
+    })
+    .catch(() => {
+      body.innerHTML = "<tr><td colspan=\"7\">Не удалось загрузить журнал.</td></tr>";
+    });
 }
 
 function renderStats() {
