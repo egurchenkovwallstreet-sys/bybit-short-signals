@@ -8,34 +8,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import config
 from collector.normalize import kline_message, oi_message, orderbook_from_rest
+from collector.symbol_filter import filter_universe
 
 
 log = logging.getLogger(__name__)
-
-
-def is_tracked_contract(item: dict[str, Any]) -> bool:
-    """USDT-перпетуал в статусе Trading. Срочные фьючерсы и другие котировки — мимо."""
-    return (
-        item.get("quoteCoin") == config.BYBIT_QUOTE
-        and item.get("contractType") == "LinearPerpetual"
-        and item.get("status") == "Trading"
-    )
-
-
-def symbols_from_instruments(payload: dict[str, Any]) -> tuple[list[str], str]:
-    """Достать символы и курсор следующей страницы из ответа instruments-info."""
-    result = _result(payload)
-    symbols = [
-        item["symbol"]
-        for item in result.get("list") or []
-        if isinstance(item, dict) and is_tracked_contract(item) and item.get("symbol")
-    ]
-    cursor = result.get("nextPageCursor") or ""
-    return symbols, str(cursor)
 
 
 def _result(payload: dict[str, Any]) -> dict[str, Any]:
@@ -90,8 +71,26 @@ class BybitRest:
             self._exchange = None
 
     async def list_usdt_perpetuals(self) -> list[str]:
-        """Все торгуемые USDT-перпетуалы, постранично."""
-        found: list[str] = []
+        """USDT-перпетуалы после фильтра universe (объём, возраст, innovation, delist)."""
+        instruments = await self.fetch_linear_instruments()
+        turnover = await self.fetch_turnover_24h_by_symbol()
+        symbols, stats = filter_universe(instruments, turnover, now_ms=int(time.time() * 1000))
+        log.info(
+            "Universe: %s из %s linear записей | innovation=%s delist=%s молодые=%s объём<%s=%s статус=%s",
+            stats.kept,
+            stats.raw,
+            stats.skipped_innovation,
+            stats.skipped_delisting,
+            stats.skipped_too_young,
+            int(config.UNIVERSE_MIN_TURNOVER_24H_USDT),
+            stats.skipped_low_volume,
+            stats.skipped_status,
+        )
+        return symbols
+
+    async def fetch_linear_instruments(self) -> list[dict[str, Any]]:
+        """Все инструменты category=linear, постранично (сырой list из API)."""
+        found: list[dict[str, Any]] = []
         cursor = ""
         seen_cursors: set[str] = set()
         while True:
@@ -103,11 +102,36 @@ class BybitRest:
             if cursor:
                 params["cursor"] = cursor
             payload = await self._call("publicGetV5MarketInstrumentsInfo", params)
-            page, cursor = symbols_from_instruments(payload)
-            found.extend(page)
+            result = _result(payload)
+            batch = result.get("list") or []
+            if isinstance(batch, list):
+                for item in batch:
+                    if isinstance(item, dict):
+                        found.append(item)
+            cursor = str(result.get("nextPageCursor") or "")
             if not cursor:
                 break
-        return sorted(set(found))
+        return found
+
+    async def fetch_turnover_24h_by_symbol(self) -> dict[str, float]:
+        """turnover24h в USDT по всем linear тикерам."""
+        payload = await self._call(
+            "publicGetV5MarketTickers",
+            {"category": config.BYBIT_CATEGORY},
+        )
+        rows = _result(payload).get("list") or []
+        out: dict[str, float] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            symbol = row.get("symbol")
+            if not symbol:
+                continue
+            try:
+                out[str(symbol)] = float(row.get("turnover24h") or 0)
+            except (TypeError, ValueError):
+                out[str(symbol)] = 0.0
+        return out
 
     async def fetch_orderbook_snapshot(self, symbol: str) -> dict[str, Any] | None:
         params = {

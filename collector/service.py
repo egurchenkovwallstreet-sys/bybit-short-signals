@@ -84,7 +84,11 @@ class CollectorService:
     async def _refresh_symbols(self) -> None:
         symbols = await self.rest.list_usdt_perpetuals()
         changed = self.universe.replace(symbols)
-        log.info("USDT-перпетуалов: %s%s", len(symbols), ", список обновлён" if changed else "")
+        log.info(
+            "Пар в мониторинге: %s%s",
+            len(symbols),
+            ", список обновлён" if changed else "",
+        )
 
     async def _refresh_loop(self) -> None:
         while True:

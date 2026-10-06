@@ -116,6 +116,12 @@ WS_PING_INTERVAL_SEC = _env_int("WS_PING_INTERVAL_SEC", 20)
 
 # Как часто заново запрашивать список USDT-перпетуалов.
 INSTRUMENTS_REFRESH_SEC = _env_int("INSTRUMENTS_REFRESH_SEC", 300)
+
+# --- Universe (collector): какие USDT-перпетуалы мониторим -----------------
+# Минимальный оборот за 24h (turnover24h в USDT) по тикеру Bybit v5.
+UNIVERSE_MIN_TURNOVER_24H_USDT = _env_float("UNIVERSE_MIN_TURNOVER_24H_USDT", 100_000.0)
+# Минимальный возраст листинга linear perpetual (дней).
+UNIVERSE_MIN_LISTING_AGE_DAYS = _env_int("UNIVERSE_MIN_LISTING_AGE_DAYS", 90)
 # Пауза после полного круга REST (OI и свечи). Сами запросы ещё тормозит ccxt.
 REST_CYCLE_PAUSE_SEC = _env_int("REST_CYCLE_PAUSE_SEC", 30)
 KLINE_FETCH_LIMIT = _env_int("KLINE_FETCH_LIMIT", 200)

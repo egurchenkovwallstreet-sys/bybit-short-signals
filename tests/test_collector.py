@@ -14,7 +14,8 @@ from collector.normalize import (
     orderbook_from_rest,
 )
 from collector.publisher import RedisPublisher
-from collector.rest_client import is_tracked_contract, symbols_from_instruments
+from collector.instruments import is_tracked_contract, symbols_from_instruments
+from collector.symbol_filter import filter_universe
 from collector.topics import reconnect_delay, shard_symbols, subscribe_requests, topics_for_symbol
 from collector.ws_client import BybitWsClient
 
@@ -192,6 +193,75 @@ class TopicsTest(unittest.TestCase):
         smaller = subscribe_requests(["BTCUSDT"], batch_size=3)
         self.assertEqual(len(smaller), 2)
         self.assertEqual(len(smaller[0]["args"]), 3)
+
+
+class UniverseFilterTest(unittest.TestCase):
+    def test_filters_innovation_volume_age_delist(self) -> None:
+        now_ms = 1_700_000_000_000
+        three_months_ms = 90 * 86400 * 1000
+        instruments = [
+            {
+                "symbol": "GOODUSDT",
+                "quoteCoin": "USDT",
+                "contractType": "LinearPerpetual",
+                "status": "Trading",
+                "symbolType": "",
+                "launchTime": str(now_ms - three_months_ms - 86400000),
+                "deliveryTime": "0",
+            },
+            {
+                "symbol": "INNOUSDT",
+                "quoteCoin": "USDT",
+                "contractType": "LinearPerpetual",
+                "status": "Trading",
+                "symbolType": "innovation",
+                "launchTime": str(now_ms - three_months_ms - 86400000),
+                "deliveryTime": "0",
+            },
+            {
+                "symbol": "YOUNGUSDT",
+                "quoteCoin": "USDT",
+                "contractType": "LinearPerpetual",
+                "status": "Trading",
+                "launchTime": str(now_ms - 30 * 86400000),
+                "deliveryTime": "0",
+            },
+            {
+                "symbol": "DELISTUSDT",
+                "quoteCoin": "USDT",
+                "contractType": "LinearPerpetual",
+                "status": "Trading",
+                "launchTime": str(now_ms - three_months_ms - 86400000),
+                "deliveryTime": str(now_ms + 86400000),
+            },
+            {
+                "symbol": "LOWVOLUSDT",
+                "quoteCoin": "USDT",
+                "contractType": "LinearPerpetual",
+                "status": "Trading",
+                "launchTime": str(now_ms - three_months_ms - 86400000),
+                "deliveryTime": "0",
+            },
+        ]
+        turnover = {
+            "GOODUSDT": 500_000.0,
+            "INNOUSDT": 500_000.0,
+            "YOUNGUSDT": 500_000.0,
+            "DELISTUSDT": 500_000.0,
+            "LOWVOLUSDT": 50_000.0,
+        }
+        symbols, stats = filter_universe(
+            instruments,
+            turnover,
+            now_ms=now_ms,
+            min_turnover_usdt=100_000.0,
+            min_listing_age_ms=three_months_ms,
+        )
+        self.assertEqual(symbols, ["GOODUSDT"])
+        self.assertEqual(stats.skipped_innovation, 1)
+        self.assertEqual(stats.skipped_too_young, 1)
+        self.assertEqual(stats.skipped_delisting, 1)
+        self.assertEqual(stats.skipped_low_volume, 1)
 
 
 class InstrumentsTest(unittest.TestCase):
