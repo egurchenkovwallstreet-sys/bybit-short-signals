@@ -184,7 +184,7 @@ function updatePumpScanLive() {
   if (!row) return;
   const priceEl = document.querySelector(`#${PUMP_CHART.info} [data-live='price']`);
   if (priceEl) priceEl.textContent = fmtPrice(row.last_price);
-  window.boardChart.renderBookPane(PUMP_CHART.book, pumpState.detail?.book, row?.last_price);
+  window.boardChart.renderBookPane(PUMP_CHART.book, pumpState.detail?.book, row?.last_price, row?.symbol);
 }
 
 function renderPumpScanInfo(full) {
@@ -244,7 +244,7 @@ function renderPumpScanInfo(full) {
     <div class="psc-book-pane" id="pump-scan-book-pane"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="pump_scan" data-symbol="${row.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${window.boardChart.tfLabel(pumpState.interval)}</p>`;
-  window.boardChart.renderBookPane(PUMP_CHART.book, detail?.book, row.last_price);
+  window.boardChart.renderBookPane(PUMP_CHART.book, detail?.book, row.last_price, row.symbol);
 }
 
 function renderPumpBoard() {

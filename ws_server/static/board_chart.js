@@ -17,9 +17,9 @@ window.boardChart = {
   /** Стакан в боковой панели: глубина ±10% от текущей цены. */
   BOOK_DEPTH_PCT: 0.1,
   BOOK_PANEL: {
-    binTicks: 15,
-    maxRowsPerSide: 22,
+    maxRowsPerSide: 28,
   },
+  _bookFetch: new Map(),
 
   normalizeBookSide(side) {
     const out = [];
@@ -85,27 +85,15 @@ window.boardChart = {
     return tick * (vis.binTicks ?? 15);
   },
 
-  aggregateBookLevels(levels, binSize, isBid) {
-    if (!levels.length || binSize <= 0) return [];
-    const bins = new Map();
-    for (const [priceRaw, sizeRaw] of levels) {
+  mergeBookLevels(pairs, isBid) {
+    const m = new Map();
+    for (const [priceRaw, sizeRaw] of pairs) {
       const price = Number(priceRaw);
       const size = Number(sizeRaw);
       if (!(price > 0) || !(size > 0)) continue;
-      const key = Math.floor(price / binSize + 1e-12);
-      const slot = bins.get(key) || { size: 0, wPrice: 0 };
-      slot.size += size;
-      slot.wPrice += price * size;
-      bins.set(key, slot);
+      m.set(price, (m.get(price) || 0) + size);
     }
-    const out = [];
-    for (const slot of bins.values()) {
-      out.push({
-        price: slot.wPrice / slot.size,
-        size: slot.size,
-        bid: isBid,
-      });
-    }
+    const out = [...m.entries()].map(([price, size]) => ({ price, size, bid: isBid }));
     if (isBid) out.sort((a, b) => b.price - a.price);
     else out.sort((a, b) => a.price - b.price);
     return out;
@@ -120,20 +108,11 @@ window.boardChart = {
     }
     const lo = mid * (1 - band);
     const hi = mid * (1 + band);
-    const binSize = Math.max(BC.bookBinSize(mid, { binTicks: BC.BOOK_PANEL.binTicks }), mid * 0.00005);
     const inBand = (p) => p >= lo - 1e-12 && p <= hi + 1e-12;
-    let bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
-    let asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
-    for (const w of book?.walls || []) {
-      const p = Number(w.price);
-      const s = Number(w.size);
-      if (!(p > 0) || !(s > 0) || !inBand(p)) continue;
-      const row = [p, s];
-      if (w.side === "ask") asksRaw.push(row);
-      else bidsRaw.push(row);
-    }
-    let bids = BC.aggregateBookLevels(bidsRaw, binSize, true);
-    let asks = BC.aggregateBookLevels(asksRaw, binSize, false);
+    const bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
+    const asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
+    let bids = BC.mergeBookLevels(bidsRaw, true);
+    let asks = BC.mergeBookLevels(asksRaw, false);
     const cap = BC.BOOK_PANEL.maxRowsPerSide;
     const nearMid = (r) => Math.abs(r.price - mid);
     bids = [...bids].sort((a, b) => nearMid(a) - nearMid(b)).slice(0, cap);
@@ -153,48 +132,85 @@ window.boardChart = {
     const { mid, lo, hi, asks, bids, depthPct, walls } = data;
     const pct = Math.round((depthPct ?? BC.BOOK_DEPTH_PCT) * 100);
     if (!asks.length && !bids.length) {
-      return `<p class="quiet">Стакан пуст в диапазоне ±${pct}% от ${BC.formatBookPrice(mid) || "цены"}. Подождите поток данных с биржи.</p>`;
+      return `<p class="quiet">Нет заявок в ±${pct}% от ${BC.formatBookPrice(mid) || "цены"}. Загрузка с биржи…</p>`;
     }
     const maxAsk = Math.max(...asks.map((r) => r.size), 1);
     const maxBid = Math.max(...bids.map((r) => r.size), 1);
     const wallAt = (price) => {
       for (const [p, w] of walls.entries()) {
-        if (Math.abs(p - price) <= Math.max(price, p) * 0.00005) return w;
+        if (Math.abs(p - price) <= Math.max(price, p) * 0.00003) return w;
       }
       return null;
     };
     const rowHtml = (r, side, max) => {
-      const w = Math.max(6, Math.round((r.size / max) * 100));
+      const bar = Math.max(8, Math.round((r.size / max) * 100));
       const tag = BC.wallTag(wallAt(r.price));
-      return `<div class="psc-book-row ${side}">
-        <div class="psc-book-bar" style="width:${w}%"></div>
-        <span class="psc-book-price">${BC.formatBookPrice(r.price)}</span>
-        <span class="psc-book-size">${BC.formatBookSize(r.size)}${tag}</span>
-      </div>`;
+      return `<tr class="psc-book-tr ${side}">
+        <td class="psc-book-price">${BC.formatBookPrice(r.price)}</td>
+        <td class="psc-book-size-cell">
+          <div class="psc-book-bar-track"><div class="psc-book-bar ${side}" style="width:${bar}%"></div></div>
+          <span class="psc-book-size">${BC.formatBookSize(r.size)}${tag}</span>
+        </td>
+      </tr>`;
     };
-    const askBlock = [...asks].reverse().map((r) => rowHtml(r, "ask", maxAsk)).join("");
-    const bidBlock = bids.map((r) => rowHtml(r, "bid", maxBid)).join("");
-    return `${askBlock}
-      <div class="psc-book-mid">
-        <strong>${BC.formatBookPrice(mid)}</strong>
-        <span class="quiet"> ±${pct}% · ${BC.formatBookPrice(lo)} – ${BC.formatBookPrice(hi)}</span>
-      </div>
-      ${bidBlock}
-      <p class="quiet psc-book-legend">Крупная заявка в стакане помечена: «стена», «нарастает», «сняли».</p>`;
+    const askRows = [...asks].reverse().map((r) => rowHtml(r, "ask", maxAsk)).join("");
+    const bidRows = bids.map((r) => rowHtml(r, "bid", maxBid)).join("");
+    return `<table class="psc-book-table">
+      <thead><tr><th>Цена</th><th>Объём · продажа</th></tr></thead>
+      <tbody class="psc-book-asks">${askRows || `<tr><td colspan="2" class="quiet">нет ask в диапазоне</td></tr>`}</tbody>
+      <tbody class="psc-book-mid-body"><tr class="psc-book-mid-row">
+        <td colspan="2"><strong>${BC.formatBookPrice(mid)}</strong>
+        <span class="quiet"> ±${pct}% (${BC.formatBookPrice(lo)} – ${BC.formatBookPrice(hi)})</span></td>
+      </tr></tbody>
+      <thead><tr><th>Цена</th><th>Объём · покупка</th></tr></thead>
+      <tbody class="psc-book-bids">${bidRows || `<tr><td colspan="2" class="quiet">нет bid в диапазоне</td></tr>`}</tbody>
+    </table>
+    <p class="quiet psc-book-legend">Каждая строка — цена и суммарный объём лимиток на этом уровне. Крупные: «стена», «нарастает», «сняли».</p>`;
   },
 
-  renderBookPane(containerId, book, refPrice) {
+  bookLevelCount(book) {
+    const BC = window.boardChart;
+    return BC.normalizeBookSide(book?.bids).length + BC.normalizeBookSide(book?.asks).length;
+  },
+
+  async fetchBookFromApi(symbol) {
+    try {
+      const res = await fetch(`/api/orderbook/${encodeURIComponent(symbol)}?refresh=1`);
+      if (!res.ok) return null;
+      const payload = await res.json();
+      return payload.book || null;
+    } catch (_e) {
+      return null;
+    }
+  },
+
+  renderBookPane(containerId, book, refPrice, symbol) {
     const el = document.getElementById(containerId);
     if (!el) return;
-    if (!book) {
-      el.innerHTML = '<p class="quiet">Стакан загружается…</p>';
+    const sym = symbol || "";
+    const paint = (b) => {
+      const data = window.boardChart.prepareBookDepth(b, refPrice);
+      el.innerHTML = window.boardChart.bookPaneHtml(data);
+    };
+    if (book && window.boardChart.bookLevelCount(book) >= 3) {
+      paint(book);
       return;
     }
-    const data = window.boardChart.prepareBookDepth(book, refPrice);
-    const sig = `${Math.round(data.mid * 1e6)}|${data.asks.length}|${data.bids.length}|${data.asks[0]?.size ?? 0}|${data.bids[0]?.size ?? 0}`;
-    if (el.dataset.bookSig === sig) return;
-    el.dataset.bookSig = sig;
-    el.innerHTML = window.boardChart.bookPaneHtml(data);
+    el.innerHTML = '<p class="quiet">Загрузка стакана с биржи…</p>';
+    if (!sym) return;
+    const pending = window.boardChart._bookFetch.get(sym);
+    if (pending) {
+      void pending.then((b) => b && paint(b));
+      return;
+    }
+    const job = window.boardChart.fetchBookFromApi(sym).finally(() => {
+      window.boardChart._bookFetch.delete(sym);
+    });
+    window.boardChart._bookFetch.set(sym, job);
+    void job.then((b) => {
+      if (b) paint(b);
+      else el.innerHTML = '<p class="quiet">Не удалось получить стакан. Повтор через несколько секунд.</p>';
+    });
   },
 
   createRuntime() {

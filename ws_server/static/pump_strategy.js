@@ -346,7 +346,7 @@ function renderPumpStrategyInfo() {
     <div class="psc-book-pane" id="psc-book-pane"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="pump_strategy" data-symbol="${row.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${PSC_TF.find(([c]) => c === pumpStrategyState.interval)?.[1] || pumpStrategyState.interval}. Данные по списку подгружаются в фоне.</p>`;
-  window.boardChart.renderBookPane("psc-book-pane", detail?.book, row.last_price);
+  window.boardChart.renderBookPane("psc-book-pane", detail?.book, row.last_price, row.symbol);
 }
 
 function mountPumpStrategyChart() {
@@ -401,7 +401,7 @@ function updatePumpStrategyLiveFields() {
   if (!row) return;
   const priceEl = document.querySelector("#psc-info-pane [data-psc-live='price']");
   if (priceEl) priceEl.textContent = fmtPrice(row.last_price);
-  window.boardChart.renderBookPane("psc-book-pane", detail?.book, row.last_price);
+  window.boardChart.renderBookPane("psc-book-pane", detail?.book, row.last_price, row.symbol);
 }
 
 function candleTimeForPsc(raw, interval) {

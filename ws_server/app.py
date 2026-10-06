@@ -202,6 +202,30 @@ async def open_interest(
     return {"symbol": symbol, "interval": interval, "window_days": window_days, "points": points}
 
 
+@app.get("/api/orderbook/{symbol}")
+async def orderbook(symbol: str, refresh: bool = False) -> dict[str, Any]:
+    if not _SYMBOL.fullmatch(symbol or ""):
+        raise HTTPException(status_code=400, detail="Некорректный тикер")
+    hub: Hub = app.state.hub
+    view = hub.cache.book_view(symbol)
+    levels = len(view.get("bids") or []) + len(view.get("asks") or [])
+    if levels >= 8 and not refresh:
+        return {"symbol": symbol, "book": view}
+    from collector.rest_client import BybitRest
+
+    rest: BybitRest | None = getattr(app.state, "bybit_rest", None)
+    if rest is None:
+        rest = BybitRest()
+        await rest.open()
+        app.state.bybit_rest = rest
+    message = await rest.fetch_orderbook_snapshot(symbol)
+    if message:
+        hub.cache._market(message)
+        hub.cache.market_dirty = True
+        view = hub.cache.book_view(symbol)
+    return {"symbol": symbol, "book": view}
+
+
 @app.get("/api/klines/{symbol}")
 async def klines(
     symbol: str,

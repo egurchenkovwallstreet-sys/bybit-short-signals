@@ -170,7 +170,7 @@ function updateX2Live() {
   if (!s) return;
   const priceEl = document.querySelector(`#${X2_CHART.info} [data-live='price']`);
   if (priceEl) priceEl.textContent = fmtPrice(s.last_price);
-  window.boardChart.renderBookPane(X2_CHART.book, x2State.detail?.book, s.last_price);
+  window.boardChart.renderBookPane(X2_CHART.book, x2State.detail?.book, s.last_price, s.symbol);
 }
 
 function renderX2Info(full) {

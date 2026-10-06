@@ -185,17 +185,72 @@ body {
 }
 
 .psc-book-pane {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  background: rgba(16, 20, 27, 0.6);
+  background: rgba(16, 20, 27, 0.85);
   border: 1px solid var(--border);
   border-radius: 8px;
-  padding: 6px 4px;
-  max-height: min(42vh, 420px);
+  padding: 8px 6px;
+  max-height: min(48vh, 480px);
   overflow: auto;
+}
+
+.psc-book-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.psc-book-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.psc-book-tr.ask .psc-book-price {
+  color: #ff8a9a;
+}
+
+.psc-book-tr.bid .psc-book-price {
+  color: #6ee7b7;
+}
+
+.psc-book-tr td {
+  padding: 5px 6px;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.psc-book-size-cell {
+  min-width: 120px;
+}
+
+.psc-book-bar-track {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  margin-bottom: 3px;
+  overflow: hidden;
+}
+
+.psc-book-bar.ask {
+  height: 100%;
+  background: rgba(255, 93, 115, 0.75);
+}
+
+.psc-book-bar.bid {
+  height: 100%;
+  background: rgba(61, 214, 140, 0.75);
+}
+
+.psc-book-mid-row td {
+  text-align: center;
+  padding: 10px 6px !important;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .psc-book-mid {
