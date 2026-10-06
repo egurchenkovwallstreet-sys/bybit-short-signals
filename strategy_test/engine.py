@@ -9,6 +9,7 @@ from typing import Any
 import config
 from strategy_test import indicators as ind
 from strategy_test.fees import net_pnl_pct
+from strategy_test.swing_points import price_near_pivot_high, swings_for_chart
 
 
 @dataclass
@@ -268,6 +269,11 @@ class BtcStrategyEngine:
             chg_4h = (c15[-1] - c15[-17]) / c15[-17] * 100.0
             if chg_4h >= config.BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT:
                 return True
+        price = self.last_price
+        for interval in ("15", "60"):
+            bars = self.bars.get(interval) or []
+            if price_near_pivot_high(bars, price):
+                return True
         return False
 
     def _try_entry(self, mode: str, side: str, now_ms: int) -> dict[str, Any] | None:
@@ -426,6 +432,11 @@ class BtcStrategyEngine:
     def public_state(self, signals: list[dict[str, Any]], analytics: dict[str, Any]) -> dict[str, Any]:
         tfs = ("1", "5", "15", "30", "60", "240", "D")
         candles_by_tf = {tf: self.chart_candles(tf) for tf in tfs}
+        swings_by_tf: dict[str, dict] = {}
+        for tf in tfs:
+            raw = self.bars.get(tf) or []
+            if len(raw) >= config.PIVOT_NEIGHBORS * 2 + 1:
+                swings_by_tf[tf] = swings_for_chart(raw)
         return {
             "symbol": self.symbol,
             "bias": self.bias,
@@ -433,6 +444,7 @@ class BtcStrategyEngine:
             "funding": self.perp.funding,
             "candles": candles_by_tf.get("5", []),
             "candles_by_tf": candles_by_tf,
+            "swings_by_tf": swings_by_tf,
             "markers": self.markers[-120:],
             "signals": signals,
             "analytics": analytics,

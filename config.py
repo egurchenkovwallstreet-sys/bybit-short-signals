@@ -183,6 +183,8 @@ BTC_TEST_LONG_MAX_RSI_5 = _env_float("BTC_TEST_LONG_MAX_RSI_5", 62.0)
 BTC_TEST_LONG_MAX_EMA_EXTENSION_ATR = _env_float("BTC_TEST_LONG_MAX_EMA_EXTENSION_ATR", 1.2)
 # Рост за ~4 часа (15m×16): выше — лонг не открываем (типичный хвост пампа).
 BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT = _env_float("BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT", 6.0)
+# Лонг не открывать, если цена у подтверждённого pivot-high (15m/1h).
+BTC_TEST_LONG_NEAR_SWING_HIGH_PCT = _env_float("BTC_TEST_LONG_NEAR_SWING_HIGH_PCT", 0.35)
 
 
 # --- Telegram (опционально, отправка не входит в Этап 1) --------------------

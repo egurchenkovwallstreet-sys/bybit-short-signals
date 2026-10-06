@@ -54,6 +54,75 @@ function barTimeForMarker(entrySec, candles) {
   return chosen;
 }
 
+function pivotHighsFromCandles(candles, wing = 5) {
+  if (!candles.length || candles.length < wing * 2 + 1) return [];
+  const out = [];
+  for (let i = wing; i < candles.length - wing; i += 1) {
+    const h = Number(candles[i].high);
+    let ok = true;
+    for (let j = i - wing; j <= i + wing; j += 1) {
+      if (j === i) continue;
+      if (Number(candles[j].high) >= h) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) out.push({ time: candles[i].time, price: h });
+  }
+  return out;
+}
+
+function pivotLowsFromCandles(candles, wing = 5) {
+  if (!candles.length || candles.length < wing * 2 + 1) return [];
+  const out = [];
+  for (let i = wing; i < candles.length - wing; i += 1) {
+    const l = Number(candles[i].low);
+    let ok = true;
+    for (let j = i - wing; j <= i + wing; j += 1) {
+      if (j === i) continue;
+      if (Number(candles[j].low) <= l) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) out.push({ time: candles[i].time, price: l });
+  }
+  return out;
+}
+
+function collectSwingMarkers(candles) {
+  const wing = 5;
+  const server = btcState.data?.swings_by_tf?.[btcState.interval];
+  const highs = server?.highs?.length
+    ? server.highs.map((p) => ({ time: p.time, price: p.price }))
+    : pivotHighsFromCandles(candles, wing);
+  const lows = server?.lows?.length
+    ? server.lows.map((p) => ({ time: p.time, price: p.price }))
+    : pivotLowsFromCandles(candles, wing);
+  const markers = [];
+  for (const p of highs.slice(-18)) {
+    markers.push({
+      time: p.time,
+      position: "aboveBar",
+      color: "#f0883e",
+      shape: "circle",
+      text: `MAX ${Number(p.price).toFixed(0)}`,
+      size: 1,
+    });
+  }
+  for (const p of lows.slice(-12)) {
+    markers.push({
+      time: p.time,
+      position: "belowBar",
+      color: "#79c0ff",
+      shape: "circle",
+      text: `MIN ${Number(p.price).toFixed(0)}`,
+      size: 1,
+    });
+  }
+  return markers;
+}
+
 function collectChartMarkers() {
   const candles = currentCandles();
   const raw = btcState.data?.markers?.length
@@ -80,7 +149,8 @@ function collectChartMarkers() {
       size: 2,
     });
   }
-  return markers;
+  const swings = collectSwingMarkers(candles);
+  return [...swings, ...markers].sort((a, b) => a.time - b.time);
 }
 
 function updateBtcPriceLines() {
@@ -93,6 +163,18 @@ function updateBtcPriceLines() {
     }
   });
   btcState.priceLines = [];
+  const candles = currentCandles();
+  const lastHigh = pivotHighsFromCandles(candles).slice(-1)[0];
+  if (lastHigh) {
+    const line = btcState.candleSeries.createPriceLine({
+      price: lastHigh.price,
+      color: "#f0883e",
+      lineWidth: 1,
+      lineStyle: 2,
+      title: "Посл. MAX",
+    });
+    btcState.priceLines.push(line);
+  }
   const signals = btcState.data?.signals || [];
   const show = signals.filter((s) => !s.exit_ts || String(s.id) === String(btcState.selectedSignalId)).slice(0, 12);
   for (const s of show) {
@@ -352,7 +434,9 @@ function renderBtcHeader() {
     ? ` · Сделки OPEN: ${opens.map((s) => `${s.side.toUpperCase()} (${s.mode})`).join(", ")}`
     : " · Сделок OPEN нет (bias ≠ вход; ждём grade A/B/C)";
   const sym = d.symbol || btcState.activeSymbol || "BTCUSDT";
-  el.textContent = `Актив: ${sym} · Режим: ${d.bias || "—"} · Финансирование: ${fr} · Цена: ${d.last_price ?? "—"} · TF: ${btcState.interval}${openHint}`;
+  const piv = pivotHighsFromCandles(currentCandles()).slice(-1)[0];
+  const maxHint = piv ? ` · Посл. MAX: ${Number(piv.price).toFixed(1)}` : "";
+  el.textContent = `Актив: ${sym} · Режим: ${d.bias || "—"} · Финансирование: ${fr} · Цена: ${d.last_price ?? "—"} · TF: ${btcState.interval}${maxHint}${openHint} · 🟠 MAX / 🔵 MIN на графике`;
 }
 
 function renderBtcChart(forceTf) {
