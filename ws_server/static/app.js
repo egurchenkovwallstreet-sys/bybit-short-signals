@@ -86,17 +86,24 @@ fetch("/api/tooltips")
   })
   .catch(() => {});
 
-const socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
+let socket = null;
+let wsBackoffMs = 800;
 
-socket.addEventListener("open", () => {
-  document.getElementById("link-state").textContent = "канал открыт";
-});
+function connectSocket() {
+  socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
 
-socket.addEventListener("close", () => {
-  document.getElementById("link-state").textContent = "нет связи";
-});
+  socket.addEventListener("open", () => {
+    wsBackoffMs = 800;
+    document.getElementById("link-state").textContent = "канал открыт";
+  });
 
-socket.addEventListener("message", (event) => {
+  socket.addEventListener("close", () => {
+    document.getElementById("link-state").textContent = "переподключение…";
+    setTimeout(connectSocket, wsBackoffMs);
+    wsBackoffMs = Math.min(wsBackoffMs * 1.6, 12000);
+  });
+
+  socket.addEventListener("message", (event) => {
   const message = JSON.parse(event.data);
   if (message.type === "snapshot") {
     setDemo(message.demo);
@@ -126,7 +133,10 @@ socket.addEventListener("message", (event) => {
     state.stats = message.data;
     renderStats();
   }
-});
+  });
+}
+
+connectSocket();
 
 function setDemo(demo) {
   document.getElementById("demo-banner").hidden = !demo;
@@ -143,7 +153,10 @@ function showTab(name) {
   const btcView = document.getElementById("view-btc");
   if (btcView) btcView.hidden = name !== "btc";
   if (name === "btc" && window.btcTest) {
-    requestAnimationFrame(() => window.btcTest.initBtcTab());
+    requestAnimationFrame(() => {
+      window.btcTest.initBtcTab();
+      window.btcTest.fetchBtcFallback?.();
+    });
   }
   if (name === "stats") {
     renderStats();

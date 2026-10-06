@@ -13,6 +13,7 @@ from typing import Any
 
 import config
 from ws_server.btc_cache import BtcTestCache
+from ws_server.btc_hydrate import btc_snapshot_from_db
 from ws_server.cache import MarketCache
 from ws_server.demo import demo_board, demo_market, demo_stats
 from ws_server.stats import compute_stats
@@ -41,6 +42,9 @@ class Hub:
         self._stopped = False
         self._stats_cache: dict[str, Any] | None = None
         self._stats_at = 0.0
+        cached = btc_snapshot_from_db()
+        if cached is not None:
+            self.btc.payload = cached
 
     def load_demo(self) -> None:
         columns = demo_board()

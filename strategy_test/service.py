@@ -13,6 +13,7 @@ from collector.publisher import RedisPublisher, open_redis
 from collector.rest_client import BybitRest
 from strategy_test.analytics import compute_analytics
 from strategy_test.engine import BtcStrategyEngine, OpenTrade
+from strategy_test.markers import markers_from_signals
 from strategy_test.store import BtcStrategyStore
 
 
@@ -40,6 +41,8 @@ class BtcStrategyService:
         )
         await self._pub.start()
         self._restore_open()
+        self._restore_markers()
+        await self._publish()
         await asyncio.gather(
             self._kline_loop(),
             self._market_loop(),
@@ -62,11 +65,16 @@ class BtcStrategyService:
                 max_hold_sec=8 * 3600,
             )
 
+    def _restore_markers(self) -> None:
+        rows = self.store.list_signals(120)
+        self.engine.markers = markers_from_signals(rows)
+
     async def _kline_loop(self) -> None:
         while True:
             try:
                 for interval in _INTERVALS:
                     msg = await self.rest.fetch_klines(self.engine.SYMBOL, interval)
+                    await asyncio.sleep(0.35)
                     if not msg:
                         continue
                     candles = (msg.get("data") or {}).get("candles") or []

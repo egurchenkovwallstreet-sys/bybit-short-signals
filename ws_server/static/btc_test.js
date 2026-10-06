@@ -39,7 +39,83 @@ const btcState = {
   followLive: true,
   selectedSignalId: null,
   userAtLiveEdge: true,
+  priceLines: [],
 };
+
+function barTimeForMarker(entrySec, candles) {
+  if (!candles.length) return entrySec;
+  let chosen = candles[0].time;
+  for (const c of candles) {
+    if (c.time <= entrySec) chosen = c.time;
+    else break;
+  }
+  return chosen;
+}
+
+function collectChartMarkers() {
+  const candles = currentCandles();
+  const raw = btcState.data?.markers?.length
+    ? btcState.data.markers
+    : (btcState.data?.signals || []).map((s) => ({
+        time: Math.floor(Number(s.entry_ts) / 1000),
+        side: s.side,
+        grade: s.grade,
+        mode: s.mode,
+        open: !s.exit_ts,
+        signal_id: s.id,
+      }));
+  const markers = [];
+  for (const m of raw.slice(0, 100)) {
+    const entrySec = Number(m.time);
+    const isLong = m.side === "long";
+    const time = barTimeForMarker(entrySec, candles);
+    markers.push({
+      time,
+      position: isLong ? "belowBar" : "aboveBar",
+      color: isLong ? "#3fb950" : "#f85149",
+      shape: isLong ? "arrowUp" : "arrowDown",
+      text: `${isLong ? "LONG" : "SHORT"} ${m.grade || ""}${m.open ? " OPEN" : ""}`.trim(),
+      size: 2,
+    });
+  }
+  return markers;
+}
+
+function updateBtcPriceLines() {
+  if (!btcState.candleSeries) return;
+  btcState.priceLines.forEach((line) => {
+    try {
+      btcState.candleSeries.removePriceLine(line);
+    } catch (_e) {
+      /* ignore */
+    }
+  });
+  btcState.priceLines = [];
+  const signals = btcState.data?.signals || [];
+  const show = signals.filter((s) => !s.exit_ts || String(s.id) === String(btcState.selectedSignalId)).slice(0, 12);
+  for (const s of show) {
+    const isLong = s.side === "long";
+    const line = btcState.candleSeries.createPriceLine({
+      price: Number(s.entry_price),
+      color: isLong ? "#3fb950" : "#f85149",
+      lineWidth: s.exit_ts ? 1 : 2,
+      lineStyle: s.exit_ts ? 2 : 0,
+      title: `${isLong ? "LONG" : "SHORT"} #${s.id}`,
+    });
+    btcState.priceLines.push(line);
+  }
+}
+
+async function fetchBtcFallback() {
+  try {
+    const res = await fetch("/api/btc-test/snapshot");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && (data.signals?.length || data.candles_by_tf)) onBtcMessage(data);
+  } catch (_err) {
+    /* offline */
+  }
+}
 
 function resizeBtcChart() {
   const box = document.getElementById("btc-chart");
@@ -118,6 +194,7 @@ function initBtcTab() {
   requestAnimationFrame(() => {
     resizeBtcChart();
     if (btcState.data) renderBtcChart(true);
+    else fetchBtcFallback();
   });
 }
 
@@ -159,7 +236,21 @@ function scrollLive() {
   }
 }
 
-function onBtcMessage(data) {
+function onBtcMessage(incoming) {
+  let data = incoming;
+  if (btcState.data && data) {
+    const noCandles = !data.candles_by_tf || !Object.keys(data.candles_by_tf).length;
+    if (noCandles && btcState.data.candles_by_tf) {
+      data = {
+        ...data,
+        candles_by_tf: btcState.data.candles_by_tf,
+        candles: btcState.data.candles,
+        last_price: data.last_price ?? btcState.data.last_price,
+        bias: data.bias ?? btcState.data.bias,
+        funding: data.funding ?? btcState.data.funding,
+      };
+    }
+  }
   btcState.data = data;
   const btcView = document.getElementById("view-btc");
   if (btcView && !btcView.hidden) initBtcTab();
@@ -167,6 +258,7 @@ function onBtcMessage(data) {
   renderBtcChart(false);
   renderBtcJournal();
   renderBtcAnalytics();
+  renderBtcExtendedStats();
   if (btcState.selectedSignalId) renderBtcDecode(findSignal(btcState.selectedSignalId));
 }
 
@@ -176,7 +268,11 @@ function renderBtcHeader() {
   const el = document.getElementById("btc-meta");
   if (!el) return;
   const fr = d.funding != null ? (Number(d.funding) * 100).toFixed(4) + "%" : "—";
-  el.textContent = `Bias: ${d.bias || "—"} · Funding: ${fr} · Цена: ${d.last_price ?? "—"} · TF: ${btcState.interval}`;
+  const opens = (d.signals || []).filter((s) => !s.exit_ts);
+  const openHint = opens.length
+    ? ` · Сделки OPEN: ${opens.map((s) => `${s.side.toUpperCase()} (${s.mode})`).join(", ")}`
+    : " · Сделок OPEN нет (bias ≠ вход; ждём grade A/B/C)";
+  el.textContent = `Bias: ${d.bias || "—"} · Funding: ${fr} · Цена: ${d.last_price ?? "—"} · TF: ${btcState.interval}${openHint}`;
 }
 
 function renderBtcChart(forceTf) {
@@ -202,14 +298,8 @@ function renderBtcChart(forceTf) {
   btcState.ema50Series.setData(emaLine(withVol, 50));
   btcState.volumeSeries.setData(volumeBars(withVol));
 
-  const markers = (btcState.data.markers || []).map((m) => ({
-    time: m.time,
-    position: m.side === "long" ? "belowBar" : "aboveBar",
-    color: m.side === "long" ? "#3fb950" : "#f85149",
-    shape: m.side === "long" ? "arrowUp" : "arrowDown",
-    text: `${m.grade} ${m.mode === "scalp" ? "S" : "D"}`,
-  }));
-  btcState.candleSeries.setMarkers(markers);
+  btcState.candleSeries.setMarkers(collectChartMarkers());
+  updateBtcPriceLines();
 
   if (forceTf || (btcState.followLive && btcState.userAtLiveEdge)) scrollLive();
 }
@@ -311,4 +401,55 @@ function renderBtcAnalytics() {
   root.innerHTML = html;
 }
 
-window.btcTest = { initBtcTab, onBtcMessage };
+function renderBtcExtendedStats() {
+  const root = document.getElementById("btc-stats-extended");
+  if (!root || !btcState.data) return;
+  const a = btcState.data.analytics || {};
+  const byMode = a.by_mode || {};
+  const bySide = a.by_side || {};
+  const reasons = a.exit_reasons || {};
+  const equity = a.equity || [];
+
+  let html = `<div class="btc-stats-grid">
+    <div><span class="label">Всего в журнале</span><b>${a.total ?? 0}</b></div>
+    <div><span class="label">Открыто сейчас</span><b>${a.open ?? 0}</b></div>
+    <div><span class="label">Ср. WIN</span><b class="win">${a.avg_win_pnl ?? 0}%</b></div>
+    <div><span class="label">Ср. LOSS</span><b class="loss">${a.avg_loss_pnl ?? 0}%</b></div>
+  </div>`;
+
+  html += "<h4>Режим и сторона (закрытые)</h4><table class=\"btc-mini-table\"><tr><th></th><th>Сделок</th><th>Win%</th><th>Ср.PnL%</th></tr>";
+  for (const [label, block] of [
+    ["Intraday", byMode.intraday],
+    ["Scalp", byMode.scalp],
+    ["Long", bySide.long],
+    ["Short", bySide.short],
+  ]) {
+    if (!block) continue;
+    html += `<tr><td>${label}</td><td>${block.trades}</td><td>${block.win_rate}%</td><td>${block.avg_pnl}%</td></tr>`;
+  }
+  html += "</table>";
+
+  if (Object.keys(reasons).length) {
+    html += `<h4>Выходы</h4><p>${Object.entries(reasons)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(" · ")}</p>`;
+  }
+
+  if (equity.length) {
+    html += `<h4>Кривая PnL (последние ${equity.length} закрытий, % с плечом из config)</h4>`;
+    html += `<div class="btc-equity-scroll"><table class="btc-mini-table"><tr><th>#</th><th>PnL%</th><th>Кум.</th></tr>`;
+    html += equity
+      .slice()
+      .reverse()
+      .map(
+        (e) =>
+          `<tr><td>${e.id}</td><td class="${e.pnl_pct >= 0 ? "win" : "loss"}">${e.pnl_pct}</td><td>${e.cum_pnl_pct}</td></tr>`
+      )
+      .join("");
+    html += "</table></div>";
+  }
+
+  root.innerHTML = html;
+}
+
+window.btcTest = { initBtcTab, onBtcMessage, fetchBtcFallback };

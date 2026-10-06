@@ -367,7 +367,7 @@ class BtcStrategyEngine:
             "funding": self.perp.funding,
             "candles": candles_by_tf.get("5", []),
             "candles_by_tf": candles_by_tf,
-            "markers": self.markers[-80:],
+            "markers": self.markers[-120:],
             "signals": signals,
             "analytics": analytics,
             "open": {

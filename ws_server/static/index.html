@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20251006">
+  <link rel="stylesheet" href="/static/styles.css?v=20251006b">
 </head>
 <body>
   <header class="topbar">
@@ -51,6 +51,10 @@
       <div id="btc-decode-body"></div>
     </section>
     <div id="btc-analytics" class="btc-analytics"></div>
+    <section id="btc-stats-extended" class="btc-stats-extended">
+      <h3>Расширенная статистика стратегии BTC</h3>
+      <p class="quiet">Журнал хранится в SQLite на сервере; обновление страницы не должно очищать историю.</p>
+    </section>
     <div class="table-wrap">
       <table id="btc-signal-table">
         <thead>
@@ -94,7 +98,7 @@
 
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
-  <script src="/static/btc_test.js?v=20251006"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/btc_test.js?v=20251006b"></script>
+  <script src="/static/app.js?v=20251006b"></script>
 </body>
 </html>

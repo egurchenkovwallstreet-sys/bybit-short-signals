@@ -57,8 +57,25 @@ async def stats() -> dict[str, Any]:
 async def btc_analytics() -> dict[str, Any]:
     data = app.state.hub.btc.view()
     if not data:
+        from ws_server.btc_hydrate import btc_snapshot_from_db
+
+        data = btc_snapshot_from_db()
+    if not data:
         return {"closed": 0, "wins": 0, "losses": 0, "win_rate": 0, "by_grade": {}, "factors_wins": {}, "factors_losses": {}}
     return data.get("analytics") or {}
+
+
+@app.get("/api/btc-test/snapshot")
+async def btc_snapshot() -> dict[str, Any]:
+    data = app.state.hub.btc.view()
+    if data:
+        return data
+    from ws_server.btc_hydrate import btc_snapshot_from_db
+
+    snap = btc_snapshot_from_db()
+    if snap:
+        return snap
+    return {"signals": [], "markers": [], "analytics": {}, "candles_by_tf": {}}
 
 
 @app.get("/api/tooltips")
