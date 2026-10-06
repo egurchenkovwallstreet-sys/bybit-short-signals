@@ -26,6 +26,7 @@ const INTERVALS = [
 ];
 
 const state = {
+  demo: false,
   board: [],
   selected: null,
   interval: "1",
@@ -88,19 +89,69 @@ fetch("/api/tooltips")
 
 let socket = null;
 let wsBackoffMs = 800;
+let wsReconnectTimer = null;
+let wsPingTimer = null;
+let wsOpen = false;
+
+function updateLinkState() {
+  const el = document.getElementById("link-state");
+  if (!el) return;
+  if (!wsOpen) {
+    el.textContent = "переподключение…";
+    return;
+  }
+  el.textContent = state.demo ? "пример, Redis недоступен" : "живой поток";
+}
 
 function connectSocket() {
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+  if (socket) {
+    socket.onclose = null;
+    socket.onerror = null;
+    try {
+      socket.close();
+    } catch (_err) {
+      /* ignore */
+    }
+  }
+  if (wsPingTimer) {
+    clearInterval(wsPingTimer);
+    wsPingTimer = null;
+  }
+
   socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
 
   socket.addEventListener("open", () => {
     wsBackoffMs = 800;
-    document.getElementById("link-state").textContent = "канал открыт";
+    wsOpen = true;
+    updateLinkState();
+    wsPingTimer = setInterval(() => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 25000);
   });
 
   socket.addEventListener("close", () => {
-    document.getElementById("link-state").textContent = "переподключение…";
-    setTimeout(connectSocket, wsBackoffMs);
+    wsOpen = false;
+    if (wsPingTimer) {
+      clearInterval(wsPingTimer);
+      wsPingTimer = null;
+    }
+    updateLinkState();
+    wsReconnectTimer = setTimeout(connectSocket, wsBackoffMs);
     wsBackoffMs = Math.min(wsBackoffMs * 1.6, 12000);
+  });
+
+  socket.addEventListener("error", () => {
+    wsOpen = false;
+    updateLinkState();
   });
 
   socket.addEventListener("message", (event) => {
@@ -139,8 +190,9 @@ function connectSocket() {
 connectSocket();
 
 function setDemo(demo) {
+  state.demo = !!demo;
   document.getElementById("demo-banner").hidden = !demo;
-  document.getElementById("link-state").textContent = demo ? "пример, Redis недоступен" : "живой поток";
+  updateLinkState();
 }
 
 function showTab(name) {

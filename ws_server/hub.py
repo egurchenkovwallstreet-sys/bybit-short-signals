@@ -88,6 +88,8 @@ class Hub:
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
         kind = message.get("type")
+        if kind == "ping":
+            return
         if kind == "select":
             symbol = str(message.get("symbol") or "")
             if symbol in self.cache.signals:
