@@ -213,7 +213,13 @@ class BtcStrategyEngine:
             if e9 and rs[-1] is not None and rs[-2] is not None:
                 cross_up = rs[-2] < 50 <= rs[-1]
                 cross_dn = rs[-2] > 50 >= rs[-1]
-                if side == "long" and c5[-1] > e9 and cross_up:
+                rsi5 = float(rs[-1])
+                if (
+                    side == "long"
+                    and c5[-1] > e9
+                    and cross_up
+                    and rsi5 <= config.BTC_TEST_LONG_MAX_RSI_5
+                ):
                     checks["m5_trigger"] = True
                 if side == "short" and c5[-1] < e9 and cross_dn:
                     checks["m5_trigger"] = True
@@ -240,6 +246,30 @@ class BtcStrategyEngine:
             return "B"
         return "C"
 
+    def _long_chase_blocked(self) -> bool:
+        """Лонг на вертикальном хвосте: перегретый RSI и цена далеко от EMA20."""
+        c15 = self._closes("15")
+        if len(c15) < 30:
+            return False
+        rs15 = ind.rsi(c15, 14)
+        if rs15[-1] is not None and float(rs15[-1]) > config.BTC_TEST_LONG_MAX_RSI_15:
+            return True
+        e20 = ind.ema(c15, 20)[-1]
+        if e20 is None:
+            return False
+        highs = [float(x["h"]) for x in self.bars.get("15") or []]
+        lows = [float(x["l"]) for x in self.bars.get("15") or []]
+        atr_v = ind.atr(highs, lows, c15, 14)[-1]
+        if atr_v and atr_v > 0:
+            extension = (c15[-1] - e20) / atr_v
+            if extension > config.BTC_TEST_LONG_MAX_EMA_EXTENSION_ATR:
+                return True
+        if len(c15) >= 17 and c15[-17] > 0:
+            chg_4h = (c15[-1] - c15[-17]) / c15[-17] * 100.0
+            if chg_4h >= config.BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT:
+                return True
+        return False
+
     def _try_entry(self, mode: str, side: str, now_ms: int) -> dict[str, Any] | None:
         if self.open.get(mode):
             return None
@@ -250,6 +280,8 @@ class BtcStrategyEngine:
         if self.bias == "LONG" and side == "short":
             return None
         if self.bias == "SHORT" and side == "long":
+            return None
+        if side == "long" and self._long_chase_blocked():
             return None
         mtf, mtf_score = self._mtf_checks(side, mode)
         if not mtf.get("d_veto_ok"):

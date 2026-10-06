@@ -177,6 +177,12 @@ BTC_TEST_MIN_MTF_SCORE_SCALP = _env_int("BTC_TEST_MIN_MTF_SCORE_SCALP", 5)
 BTC_TEST_MIN_PERP_SCORE = _env_int("BTC_TEST_MIN_PERP_SCORE", 2)
 BTC_TEST_MIN_ENTRY_SCORE = _env_int("BTC_TEST_MIN_ENTRY_SCORE", 8)
 BTC_TEST_ENTRY_COOLDOWN_SEC = _env_int("BTC_TEST_ENTRY_COOLDOWN_SEC", 300)
+# Лонг: не догонять памп — RSI и отрыв от EMA20 на 15m.
+BTC_TEST_LONG_MAX_RSI_15 = _env_float("BTC_TEST_LONG_MAX_RSI_15", 68.0)
+BTC_TEST_LONG_MAX_RSI_5 = _env_float("BTC_TEST_LONG_MAX_RSI_5", 62.0)
+BTC_TEST_LONG_MAX_EMA_EXTENSION_ATR = _env_float("BTC_TEST_LONG_MAX_EMA_EXTENSION_ATR", 1.2)
+# Рост за ~4 часа (15m×16): выше — лонг не открываем (типичный хвост пампа).
+BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT = _env_float("BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT", 6.0)
 
 
 # --- Telegram (опционально, отправка не входит в Этап 1) --------------------
