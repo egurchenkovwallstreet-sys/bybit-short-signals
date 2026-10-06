@@ -41,6 +41,7 @@ const pumpState = {
   layoutSymbol: null,
   volLoadKey: "",
   oiLoadKey: "",
+  chartGen: 0,
 };
 
 function initPumpScanTab() {
@@ -67,18 +68,33 @@ function onPumpScanSnapshot(board, detail) {
   if (detail?.signal) {
     pumpState.selected = detail.signal.symbol;
     pumpState.detail = detail;
-    if (detail.interval) pumpState.interval = detail.interval;
   }
   renderPumpBoard();
   renderPumpDetail();
 }
 
+/** WS обновляет стакан/сигнал; TF и свечи — только с REST по pumpState.interval. */
+function mergePumpLiveDetail(data) {
+  if (!data) return;
+  const prev = pumpState.detail || {};
+  pumpState.detail = {
+    ...prev,
+    signal: data.signal ?? prev.signal,
+    book: data.book ?? prev.book,
+    funding_rate: data.funding_rate ?? prev.funding_rate,
+    taker_ratio: data.taker_ratio ?? prev.taker_ratio,
+    liquidations: data.liquidations ?? prev.liquidations,
+    cvd: data.cvd ?? prev.cvd,
+  };
+}
+
 function onPumpScanDetail(symbol, data) {
   if (pumpState.selected && pumpState.selected !== symbol) return;
   pumpState.selected = symbol;
-  pumpState.detail = data;
-  if (data?.interval) pumpState.interval = data.interval;
-  renderPumpDetail();
+  mergePumpLiveDetail(data);
+  syncPumpTfButtons();
+  updatePumpMeta(pumpState.detail?.signal, pumpState.detail);
+  drawPumpBookLadder(document.getElementById("pump-book-map"), pumpState.detail?.book || {});
 }
 
 function oiIntervalForTf(tf) {
@@ -122,19 +138,23 @@ function selectPumpSymbol(symbol) {
   }
 }
 
+function syncPumpTfButtons() {
+  document.querySelectorAll("[data-pump-interval]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.pumpInterval === pumpState.interval);
+  });
+}
+
 function setPumpInterval(interval) {
   if (!interval || pumpState.interval === interval) return;
   pumpState.interval = interval;
   pumpState.volLoadKey = "";
   pumpState.oiLoadKey = "";
+  pumpState.chartGen += 1;
+  syncPumpTfButtons();
   if (window.signalSocket && window.signalSocket.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "pump_scan_interval", interval }));
   }
   void refreshPumpCharts();
-  const root = document.getElementById("pump-detail");
-  root?.querySelectorAll("[data-pump-interval]").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.pumpInterval === interval);
-  });
 }
 
 function renderPumpBoard() {
@@ -187,6 +207,7 @@ function renderPumpDetail() {
     root.innerHTML = pumpDetailShell(s);
   }
   updatePumpMeta(s, detail);
+  syncPumpTfButtons();
   void refreshPumpCharts();
 }
 
@@ -317,13 +338,17 @@ async function ensurePumpOi(symbol, chartInterval) {
 async function refreshPumpCharts() {
   const detail = pumpState.detail;
   if (!detail?.signal) return;
+  const gen = ++pumpState.chartGen;
   const symbol = detail.signal.symbol;
   const interval = pumpState.interval;
   const candles = await ensurePumpCandles(symbol, interval);
+  if (gen !== pumpState.chartGen) return;
   const oiRows = await ensurePumpOi(symbol, interval);
+  if (gen !== pumpState.chartGen) return;
   drawPumpVolumeChart(candles, interval);
   drawPumpOiChart(oiRows, interval);
   drawPumpBookLadder(document.getElementById("pump-book-map"), detail.book || {});
+  syncPumpTfButtons();
 }
 
 function candleVolumePoints(candles) {
@@ -373,10 +398,7 @@ function drawPumpVolumeChart(candles, interval) {
     yAxis: {
       type: "value",
       scale: true,
-      axisLabel: {
-        color: "#8e9aab",
-        formatter: (v) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : v),
-      },
+      axisLabel: { color: "#8e9aab", formatter: formatAxisNumber },
       splitLine: { lineStyle: { color: "#2c3544" } },
     },
     series: [
@@ -418,7 +440,12 @@ function drawPumpOiChart(oiRows, chartInterval) {
       type: "time",
       axisLabel: { color: "#8e9aab" },
     },
-    yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
+    yAxis: {
+      type: "value",
+      scale: true,
+      axisLabel: { color: "#8e9aab", formatter: formatAxisNumber },
+      splitLine: { lineStyle: { color: "#2c3544" } },
+    },
     series: [
       {
         type: "line",
@@ -523,6 +550,15 @@ function drawPumpBookLadder(canvas, book) {
       })
       .join("");
   }
+}
+
+function formatAxisNumber(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "";
+  if (Math.abs(n) >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (Math.abs(n) >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (Math.abs(n) >= 1e3) return `${(n / 1e3).toFixed(0)}K`;
+  return n.toFixed(n >= 10 ? 0 : 2);
 }
 
 function formatBookPrice(p) {
