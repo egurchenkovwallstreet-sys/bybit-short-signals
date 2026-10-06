@@ -30,7 +30,25 @@ const pumpStrategyState = {
   tfBound: false,
 };
 
+function bindPumpStrategyInfoPane() {
+  if (window.__pscInfoPaneBound) return;
+  window.__pscInfoPaneBound = true;
+  document.getElementById("psc-info-pane")?.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".psc-close-chart")) {
+      event.preventDefault();
+      closePumpStrategyChart();
+      return;
+    }
+    const dismiss = target?.closest("[data-dismiss-board]");
+    if (dismiss?.dataset.dismissBoard && dismiss.dataset.symbol) {
+      void dismissPumpStrategy(dismiss.dataset.dismissBoard, dismiss.dataset.symbol);
+    }
+  });
+}
+
 function initPumpStrategyTab() {
+  bindPumpStrategyInfoPane();
   if (window.__pumpStrategyBound) return;
   window.__pumpStrategyBound = true;
   bindPumpStrategyTfRow();
@@ -39,13 +57,6 @@ function initPumpStrategyTab() {
     if (target?.closest(".dismiss-watch")) return;
     const card = target?.closest(".pump-strategy-card");
     if (card?.dataset.symbol) togglePumpStrategySymbol(card.dataset.symbol);
-  });
-  document.getElementById("psc-info-pane")?.addEventListener("click", (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    const dismiss = target?.closest("[data-dismiss-board]");
-    if (dismiss?.dataset.dismissBoard && dismiss.dataset.symbol) {
-      void dismissPumpStrategy(dismiss.dataset.dismissBoard, dismiss.dataset.symbol);
-    }
   });
 }
 
@@ -89,6 +100,7 @@ function closePumpStrategyChart() {
 }
 
 function openPumpStrategyChart() {
+  bindPumpStrategyInfoPane();
   document.getElementById("pump-strategy-list-wrap")?.setAttribute("hidden", "");
   document.getElementById("pump-strategy-workspace")?.removeAttribute("hidden");
   bindPumpStrategyTfRow();
@@ -322,7 +334,7 @@ function renderPumpStrategyInfo() {
     <div class="psc-growth psc-growth-side">+${fmt(row.growth_pct)}%</div>
     <dl class="psc-info-fields">
       <div class="psc-row"><dt>Период</dt><dd>${row.period_label || "—"}</dd></div>
-      <div class="psc-row"><dt>Цена</dt><dd>${fmtPrice(row.last_price)}</dd></div>
+      <div class="psc-row"><dt>Цена</dt><dd data-psc-live="price">${fmtPrice(row.last_price)}</dd></div>
       <div class="psc-row"><dt>Дно / пик (окно)</dt><dd>${fmtPrice(row.valley_price)} → ${fmtPrice(row.peak_price)}</dd></div>
       <div class="psc-row"><dt>Оборот 24 ч</dt><dd>${formatTurnover(row.turnover_24h_usdt)}</dd></div>
       <div class="psc-row"><dt>OI · 1 ч</dt><dd class="${oi1.cls}">${oi1.text}</dd></div>
@@ -333,7 +345,6 @@ function renderPumpStrategyInfo() {
     <div class="psc-walls" id="psc-walls"></div>
     <button type="button" class="dismiss-watch" data-dismiss-board="pump_strategy" data-symbol="${row.symbol}">Снять с отслеживания</button>
     <p class="quiet psc-info-hint">Таймфрейм: ${PSC_TF.find(([c]) => c === pumpStrategyState.interval)?.[1] || pumpStrategyState.interval}. Данные по списку подгружаются в фоне.</p>`;
-  pane.querySelector(".psc-close-chart")?.addEventListener("click", () => closePumpStrategyChart(), { once: true });
   updatePumpStrategyWalls(detail?.book);
 }
 
@@ -399,8 +410,18 @@ async function refreshPumpStrategyChart(resetScale) {
   if (pumpStrategyState.detail) pumpStrategyState.detail.candles = candles;
   if (pumpStrategyState.detail) pumpStrategyState.detail.interval = interval;
   drawPumpStrategyCandles(candles, interval, resetScale);
-  renderPumpStrategyInfo();
+  if (resetScale) renderPumpStrategyInfo();
+  else updatePumpStrategyLiveFields();
   drawPumpStrategyBookOverlay();
+}
+
+function updatePumpStrategyLiveFields() {
+  const row = pumpStrategyState.selected ? findPumpStrategyRow(pumpStrategyState.selected) : null;
+  const detail = pumpStrategyState.detail;
+  if (!row) return;
+  const priceEl = document.querySelector("#psc-info-pane [data-psc-live='price']");
+  if (priceEl) priceEl.textContent = fmtPrice(row.last_price);
+  updatePumpStrategyWalls(detail?.book);
 }
 
 function candleTimeForPsc(raw, interval) {
