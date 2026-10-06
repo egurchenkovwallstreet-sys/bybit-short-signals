@@ -107,6 +107,9 @@ socket.addEventListener("message", (event) => {
     renderBoard();
     renderDetail();
     renderStats();
+    if (message.btc_test && window.btcTest) window.btcTest.onBtcMessage(message.btc_test);
+  } else if (message.type === "btc_test" && window.btcTest) {
+    window.btcTest.onBtcMessage(message.data);
   } else if (message.type === "board") {
     setDemo(message.demo);
     state.board = message.data || [];
@@ -137,6 +140,11 @@ function showTab(name) {
   });
   document.getElementById("view-signals").hidden = name !== "signals";
   document.getElementById("view-stats").hidden = name !== "stats";
+  const btcView = document.getElementById("view-btc");
+  if (btcView) btcView.hidden = name !== "btc";
+  if (name === "btc" && window.btcTest) {
+    window.btcTest.initBtcTab();
+  }
   if (name === "stats") {
     renderStats();
     requestAnimationFrame(() => {

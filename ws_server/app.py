@@ -53,6 +53,14 @@ async def stats() -> dict[str, Any]:
     return app.state.hub.stats()
 
 
+@app.get("/api/btc-test/analytics")
+async def btc_analytics() -> dict[str, Any]:
+    data = app.state.hub.btc.view()
+    if not data:
+        return {"closed": 0, "wins": 0, "losses": 0, "win_rate": 0, "by_grade": {}, "factors_wins": {}, "factors_losses": {}}
+    return data.get("analytics") or {}
+
+
 @app.get("/api/tooltips")
 async def tooltips() -> FileResponse:
     return FileResponse(STATIC_DIR / "tooltips.json", media_type="application/json")

@@ -154,6 +154,14 @@ WEB_PORT = _env_int("WEB_PORT", 8787)
 DATA_DIR = BASE_DIR / "data"
 SQLITE_PATH = Path(_env("SQLITE_PATH", str(DATA_DIR / "signals.db")))
 
+# --- Тест: BTC стратегия (вне основного ТЗ) ---------------------------------
+
+BTC_TEST_SYMBOL = _env("BTC_TEST_SYMBOL", "BTCUSDT")
+BTC_TEST_SQLITE_PATH = Path(_env("BTC_TEST_SQLITE_PATH", str(DATA_DIR / "btc_strategy.db")))
+REDIS_CHANNEL_BTC_TEST = _env("REDIS_CHANNEL_BTC_TEST", "btc:strategy:updates")
+BTC_TEST_SCAN_SEC = _env_float("BTC_TEST_SCAN_SEC", 3.0)
+BTC_TEST_KLINE_REFRESH_SEC = _env_int("BTC_TEST_KLINE_REFRESH_SEC", 45)
+
 
 # --- Telegram (опционально, отправка не входит в Этап 1) --------------------
 
