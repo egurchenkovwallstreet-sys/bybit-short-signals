@@ -19,7 +19,7 @@ window.boardChart = {
   BOOK_PANEL: {
     maxRowsPerSide: 96,
     /** Объединение уровней: N тиков цены в одну строку (сумма объёма). */
-    binTicks: 10,
+    binTicks: 20,
   },
   _bookFetch: new Map(),
 
@@ -160,12 +160,10 @@ window.boardChart = {
     const BC = window.boardChart;
     const { mid, lo, hi, asks, bids, depthPct, walls, binTicks } = data;
     const pct = Math.round((depthPct ?? BC.BOOK_DEPTH_PCT) * 100);
-    const bin = Number(binTicks ?? BC.BOOK_PANEL.binTicks) || 10;
+    const bin = Number(binTicks ?? BC.BOOK_PANEL.binTicks) || 20;
     if (!asks.length && !bids.length) {
       return `<p class="quiet">Нет заявок в ±${pct}% от ${BC.formatBookPrice(mid) || "цены"}. Загрузка с биржи…</p>`;
     }
-    const maxAsk = Math.max(...asks.map((r) => r.size), 1);
-    const maxBid = Math.max(...bids.map((r) => r.size), 1);
     const step = asks[0]?.step || bids[0]?.step || BC.bookBinSize(mid, bin);
     const wallAt = (price) => {
       const hiP = price + (bin > 1 ? step : 0);
@@ -176,41 +174,65 @@ window.boardChart = {
       }
       return null;
     };
-    const rowHtml = (r, side, max) => {
-      const bar = Math.max(4, Math.round((r.size / max) * 100));
+    const rowHtml = (r, side) => {
       const tag = BC.wallTag(wallAt(r.price));
       const priceLabel =
-        bin > 1 && r.step
-          ? `${BC.formatBookPrice(r.price)}–${BC.formatBookPrice(r.price + r.step)}`
-          : BC.formatBookPrice(r.price);
+        bin > 1 && r.step ? BC.formatBookPrice(r.price) : BC.formatBookPrice(r.price);
       return `<tr class="psc-book-tr ${side}">
         <td class="psc-book-price">${priceLabel}</td>
-        <td class="psc-book-size-cell">
-          <span class="psc-book-inline">
-            <span class="psc-book-bar-inline ${side}" style="width:${bar}%"></span>
-            <span class="psc-book-size">${BC.formatBookSize(r.size)}${tag}</span>
-          </span>
-        </td>
+        <td class="psc-book-size">${BC.formatBookSize(r.size)}${tag}</td>
       </tr>`;
     };
-    const askRows = [...asks].reverse().map((r) => rowHtml(r, "ask", maxAsk)).join("");
-    const bidRows = bids.map((r) => rowHtml(r, "bid", maxBid)).join("");
-    const binOpts = [1, 5, 10, 20]
+    const askRows = [...asks].reverse().map((r) => rowHtml(r, "ask")).join("");
+    const bidRows = bids.map((r) => rowHtml(r, "bid")).join("");
+    const binOpts = [1, 5, 10, 20, 50]
       .map((t) => `<option value="${t}"${t === bin ? " selected" : ""}>${t} тик${t === 1 ? "" : "ов"}</option>`)
       .join("");
     return `<div class="psc-book-toolbar">
       <label class="quiet">Объединение</label>
       <select class="psc-book-bin" title="Сумма объёма за N шагов цены">${binOpts}</select>
-      <span class="quiet psc-book-toolbar-hint">строки сжаты · ±${pct}%</span>
+      <span class="quiet psc-book-toolbar-hint">±${pct}% · прокрутка от mid</span>
     </div>
-    <table class="psc-book-table psc-book-table--dense">
-      <thead><tr><th>Цена</th><th>Объём</th></tr></thead>
-      <tbody class="psc-book-asks">${askRows || `<tr><td colspan="2" class="quiet">нет ask</td></tr>`}</tbody>
-      <tbody class="psc-book-mid-body"><tr class="psc-book-mid-row">
-        <td colspan="2"><strong>${BC.formatBookPrice(mid)}</strong></td>
-      </tr></tbody>
-      <tbody class="psc-book-bids">${bidRows || `<tr><td colspan="2" class="quiet">нет bid</td></tr>`}</tbody>
-    </table>`;
+    <div class="psc-book-scroll">
+      <table class="psc-book-table psc-book-table--dense">
+        <thead><tr><th>Цена</th><th>Vol</th></tr></thead>
+        <tbody class="psc-book-asks">${askRows || `<tr><td colspan="2" class="quiet">нет ask</td></tr>`}</tbody>
+        <tbody class="psc-book-mid-body"><tr class="psc-book-mid-row" data-book-mid="1">
+          <td colspan="2"><span class="psc-book-mid-tag">MID</span> <strong>${BC.formatBookPrice(mid)}</strong></td>
+        </tr></tbody>
+        <tbody class="psc-book-bids">${bidRows || `<tr><td colspan="2" class="quiet">нет bid</td></tr>`}</tbody>
+      </table>
+    </div>`;
+  },
+
+  bookScrollEl(paneEl) {
+    return paneEl?.querySelector(".psc-book-scroll") || paneEl;
+  },
+
+  ensureBookPaneScroll(paneEl) {
+    if (!paneEl || paneEl._bookScrollHook) return;
+    paneEl._bookScrollHook = true;
+    paneEl.addEventListener(
+      "scroll",
+      (e) => {
+        if (e.target.classList?.contains("psc-book-scroll")) paneEl._bookUserScrolled = true;
+      },
+      true,
+    );
+  },
+
+  scrollBookToMid(paneEl) {
+    const scrollEl = window.boardChart.bookScrollEl(paneEl);
+    const midRow = scrollEl?.querySelector(".psc-book-mid-row");
+    if (!scrollEl || !midRow) return;
+    const apply = () => {
+      const elRect = scrollEl.getBoundingClientRect();
+      const rowRect = midRow.getBoundingClientRect();
+      const rowCenter = rowRect.top - elRect.top + scrollEl.scrollTop + rowRect.height / 2;
+      const top = rowCenter - scrollEl.clientHeight / 2;
+      scrollEl.scrollTop = Math.max(0, Math.min(top, scrollEl.scrollHeight - scrollEl.clientHeight));
+    };
+    requestAnimationFrame(() => requestAnimationFrame(apply));
   },
 
   bookLevelCount(book) {
@@ -229,14 +251,27 @@ window.boardChart = {
     }
   },
 
-  renderBookPane(containerId, book, refPrice, symbol) {
+  renderBookPane(containerId, book, refPrice, symbol, options) {
     const el = document.getElementById(containerId);
     if (!el) return;
     const sym = symbol || "";
+    const BC = window.boardChart;
     const paint = (b) => {
-      const data = window.boardChart.prepareBookDepth(b, refPrice);
-      el.innerHTML = window.boardChart.bookPaneHtml(data);
+      const scrollEl = BC.bookScrollEl(el);
+      const prevScroll = scrollEl.scrollTop;
+      const centerKey = `${sym}|${containerId}`;
+      const isNewOpen = Boolean(sym) && el._bookCenterKey !== centerKey;
+      if (isNewOpen) {
+        el._bookCenterKey = centerKey;
+        el._bookUserScrolled = false;
+      }
+      const data = BC.prepareBookDepth(b, refPrice);
+      el.innerHTML = BC.bookPaneHtml(data);
       el._bookCtx = { book: b, refPrice, symbol: sym };
+      BC.ensureBookPaneScroll(el);
+      const sc = BC.bookScrollEl(el);
+      if (options?.centerMid || isNewOpen) BC.scrollBookToMid(el);
+      else if (el._bookUserScrolled) sc.scrollTop = prevScroll;
     };
     if (book && window.boardChart.bookLevelCount(book) >= 3) {
       paint(book);
@@ -576,7 +611,7 @@ window.boardChart = {
     const BC = window.boardChart;
     try {
       const saved = Number(localStorage.getItem("psc-book-bin"));
-      if ([1, 5, 10, 20].includes(saved)) BC.BOOK_PANEL.binTicks = saved;
+      if ([1, 5, 10, 20, 50].includes(saved)) BC.BOOK_PANEL.binTicks = saved;
     } catch (_e) {
       /* ignore */
     }
@@ -594,7 +629,10 @@ window.boardChart = {
       }
       const pane = sel.closest(".psc-book-pane");
       const ctx = pane?._bookCtx;
-      if (pane?.id && ctx?.book) BC.renderBookPane(pane.id, ctx.book, ctx.refPrice, ctx.symbol);
+      if (pane?.id && ctx?.book) {
+        pane._bookUserScrolled = false;
+        BC.renderBookPane(pane.id, ctx.book, ctx.refPrice, ctx.symbol, { centerMid: true });
+      }
     });
     document.addEventListener("click", (e) => {
       const btn = e.target.closest(".psc-toggle-meta");
