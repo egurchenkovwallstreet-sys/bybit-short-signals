@@ -35,6 +35,10 @@ const state = {
   tips: {},
   chart: null,
   series: null,
+  volumeSeries: null,
+  oiSeries: null,
+  cvdSeries: null,
+  obvSeries: null,
   priceLines: [],
   gauges: {},
   equity: null,
@@ -325,6 +329,10 @@ function renderDetail() {
   if (!signal) {
     root.innerHTML = '<p class="empty">Выберите сигнал слева.</p>';
     state.chart = null;
+    state.volumeSeries = null;
+    state.oiSeries = null;
+    state.cvdSeries = null;
+    state.obvSeries = null;
     return;
   }
   const same =
@@ -365,7 +373,7 @@ function renderDetail() {
     if (info) info.innerHTML = infoHtml(signal);
   }
   void ensureCandles(signal.symbol, detail.interval || state.interval, detail).then((candles) => {
-    drawCandles(candles, signal);
+    drawCandles(candles, signal, detail);
   });
   drawBook(document.getElementById("book-map"), detail.book || {});
   drawLiquidations(document.getElementById("liq-map"), detail.liquidations || []);
@@ -393,7 +401,10 @@ function detailHtml(signal, interval) {
       <button type="button" class="chart-expand-btn">Увеличить график</button>
     </div>
     <div class="chart-row">
-      <div id="candle-chart"></div>
+      <div class="candle-chart-wrap">
+        <div id="chart-legend" class="chart-legend" aria-hidden="true"></div>
+        <div id="candle-chart"></div>
+      </div>
       <div>
         <canvas id="book-map"></canvas>
         <div class="walls" id="walls"></div>
@@ -441,7 +452,13 @@ function mountCandleChart() {
   state.chart = LightweightCharts.createChart(container, {
     layout: { background: { color: "#10141b" }, textColor: "#c5d0de" },
     grid: { vertLines: { color: "#222a36" }, horzLines: { color: "#222a36" } },
-    timeScale: { timeVisible: true, secondsVisible: false },
+    timeScale: {
+      timeVisible: true,
+      secondsVisible: false,
+      rightOffset: 28,
+      barSpacing: 7,
+      fixRightEdge: false,
+    },
     rightPriceScale: { borderColor: "#2c3544" },
   });
   state.series = state.chart.addCandlestickSeries({
@@ -451,6 +468,34 @@ function mountCandleChart() {
     wickUpColor: "#3dd68c",
     wickDownColor: "#ff5d73",
   });
+  state.series.priceScale().applyOptions({ scaleMargins: { top: 0.06, bottom: 0.34 } });
+  state.volumeSeries = state.chart.addHistogramSeries({
+    priceFormat: { type: "volume" },
+    priceScaleId: "vol",
+    title: "Объём",
+  });
+  state.oiSeries = state.chart.addLineSeries({
+    color: "#58a6ff",
+    lineWidth: 2,
+    title: "OI",
+    priceScaleId: "oi",
+  });
+  state.cvdSeries = state.chart.addLineSeries({
+    color: "#ffb86c",
+    lineWidth: 2,
+    title: "CVD",
+    priceScaleId: "cvd",
+  });
+  state.obvSeries = state.chart.addLineSeries({
+    color: "#bd93f9",
+    lineWidth: 1,
+    title: "OBV",
+    priceScaleId: "obv",
+  });
+  state.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+  state.chart.priceScale("oi").applyOptions({ scaleMargins: { top: 0.52, bottom: 0.4 } });
+  state.chart.priceScale("cvd").applyOptions({ scaleMargins: { top: 0.38, bottom: 0.52 } });
+  state.chart.priceScale("obv").applyOptions({ scaleMargins: { top: 0.24, bottom: 0.66 } });
   state.priceLines = [];
   const resize = () => {
     if (state.chart && container.clientWidth > 0) state.chart.resize(container.clientWidth, 280);
@@ -474,7 +519,35 @@ async function ensureCandles(symbol, interval, detail) {
   }
 }
 
-function drawCandles(candles, signal) {
+function linePointsFromRows(rows, valueKey) {
+  const out = [];
+  const seen = new Set();
+  for (const row of rows || []) {
+    const t = Math.floor(Number(row.timestamp ?? row.time) / 1000);
+    const v = Number(row[valueKey] ?? row.value ?? row.open_interest);
+    if (!t || Number.isNaN(v)) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    out.push({ time: t, value: v });
+  }
+  out.sort((a, b) => a.time - b.time);
+  return out;
+}
+
+function updateChartLegend(detail) {
+  const el = document.getElementById("chart-legend");
+  if (!el) return;
+  const fr = detail?.funding_rate != null ? `${(Number(detail.funding_rate) * 100).toFixed(3)}%` : "—";
+  const tk = detail?.taker_ratio != null ? Number(detail.taker_ratio).toFixed(2) : "—";
+  el.innerHTML = `
+    <span class="lg-vol">■ Объём</span>
+    <span class="lg-oi">— OI (открытый интерес)</span>
+    <span class="lg-cvd">— CVD</span>
+    <span class="lg-obv">— OBV</span>
+    <span class="lg-meta">Funding ${fr} · Taker ${tk}</span>`;
+}
+
+function drawCandles(candles, signal, detail) {
   if (!state.series) return;
   const bars = (candles || [])
     .map((candle) => ({
@@ -483,9 +556,25 @@ function drawCandles(candles, signal) {
       high: Number(candle.high),
       low: Number(candle.low),
       close: Number(candle.close),
+      volume: Number(candle.volume ?? 0),
     }))
     .filter((bar) => bar.time && !Number.isNaN(bar.close));
   state.series.setData(bars);
+  if (state.volumeSeries) {
+    state.volumeSeries.setData(
+      bars.map((b) => ({
+        time: b.time,
+        value: b.volume,
+        color: b.close >= b.open ? "rgba(61, 214, 140, 0.45)" : "rgba(255, 93, 115, 0.45)",
+      })),
+    );
+  }
+  if (detail && state.oiSeries) {
+    state.oiSeries.setData(linePointsFromRows(detail.oi, "open_interest"));
+    state.cvdSeries?.setData(linePointsFromRows(detail.cvd, "value"));
+    state.obvSeries?.setData(linePointsFromRows(detail.obv, "value"));
+    updateChartLegend(detail);
+  }
   state.priceLines.forEach((line) => state.series.removePriceLine(line));
   state.priceLines = [];
   (signal.chart_levels || []).forEach((level) => {
@@ -529,7 +618,13 @@ function drawCandles(candles, signal) {
         text: `свуп ${level.timeframe}`,
       }));
     state.series.setMarkers(markers);
-    state.chart.timeScale().fitContent();
+    const ts = state.chart.timeScale();
+    ts.fitContent();
+    ts.applyOptions({ rightOffset: 28, fixRightEdge: false });
+    const lr = ts.getVisibleLogicalRange();
+    if (lr) {
+      ts.setVisibleLogicalRange({ from: lr.from, to: lr.to + 18 });
+    }
   }
 }
 

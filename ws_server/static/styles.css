@@ -172,6 +172,26 @@ body {
   cursor: pointer;
 }
 #candle-chart, #book-map, #liq-map { width: 100%; height: 280px; background: #10141b; border-radius: 12px; }
+.candle-chart-wrap { position: relative; min-width: 0; }
+.chart-legend {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  pointer-events: none;
+  background: rgba(16, 20, 27, 0.75);
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.chart-legend .lg-vol { color: #8e9aab; }
+.chart-legend .lg-oi { color: #58a6ff; }
+.chart-legend .lg-cvd { color: #ffb86c; }
+.chart-legend .lg-obv { color: #bd93f9; }
 #candle-chart { position: relative; }
 #candle-chart[data-empty="1"]::after {
   content: "Загрузка свечей…";
