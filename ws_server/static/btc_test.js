@@ -45,7 +45,7 @@ function resizeBtcChart() {
   const box = document.getElementById("btc-chart");
   if (!box || !btcState.chart) return;
   const w = box.clientWidth;
-  const h = box.clientHeight || 420;
+  const h = box.clientHeight || 560;
   if (w > 0) btcState.chart.resize(w, h);
 }
 
