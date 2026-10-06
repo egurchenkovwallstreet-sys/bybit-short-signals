@@ -16,6 +16,8 @@ const EXTRAS = [
   ["round_level", "Круглый уровень"],
 ];
 
+const CHART_MIN_CANDLES = 100;
+
 const INTERVALS = [
   ["1", "1m"],
   ["5", "5m"],
@@ -505,16 +507,36 @@ function mountCandleChart() {
   requestAnimationFrame(resize);
 }
 
+function candleTimeSec(raw) {
+  const n = Number(raw);
+  if (!n || Number.isNaN(n)) return 0;
+  return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+}
+
+function candleTimeForChart(raw, interval) {
+  const sec = candleTimeSec(raw);
+  if (!sec) return 0;
+  if (interval === "D") {
+    const d = new Date(sec * 1000);
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+  }
+  return sec;
+}
+
 async function ensureCandles(symbol, interval, detail) {
-  const candles = detail.candles || [];
-  if (candles.length >= 5) return candles;
+  let candles = detail.candles || [];
+  const needFetch = candles.length < CHART_MIN_CANDLES;
   try {
-    const res = await fetch(`/api/klines/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}`);
+    const url = `/api/klines/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}${needFetch ? "&refresh=1" : ""}`;
+    const res = await fetch(url);
     if (!res.ok) return candles;
     const data = await res.json();
     const loaded = data.candles || [];
-    if (loaded.length) detail.candles = loaded;
-    return loaded.length ? loaded : candles;
+    if (loaded.length >= candles.length) {
+      detail.candles = loaded;
+      candles = loaded;
+    }
+    return candles;
   } catch (_err) {
     return candles;
   }
@@ -524,7 +546,7 @@ function linePointsFromRows(rows, valueKey) {
   const out = [];
   const seen = new Set();
   for (const row of rows || []) {
-    const t = Math.floor(Number(row.timestamp ?? row.time) / 1000);
+    const t = candleTimeSec(row.timestamp ?? row.time);
     const v = Number(row[valueKey] ?? row.value ?? row.open_interest);
     if (!t || Number.isNaN(v)) continue;
     if (seen.has(t)) continue;
@@ -550,16 +572,27 @@ function updateChartLegend(detail) {
 
 function drawCandles(candles, signal, detail, resetChartScale) {
   if (!state.series) return;
-  const bars = (candles || [])
-    .map((candle) => ({
-      time: Math.floor(Number(candle.timestamp) / 1000),
+  const interval = detail?.interval || state.interval || "1";
+  const byTime = new Map();
+  for (const candle of candles || []) {
+    const time = candleTimeForChart(candle.timestamp ?? candle.time, interval);
+    if (!time) continue;
+    const close = Number(candle.close);
+    if (Number.isNaN(close)) continue;
+    byTime.set(typeof time === "object" ? JSON.stringify(time) : String(time), {
+      time,
       open: Number(candle.open),
       high: Number(candle.high),
       low: Number(candle.low),
-      close: Number(candle.close),
+      close,
       volume: Number(candle.volume ?? 0),
-    }))
-    .filter((bar) => bar.time && !Number.isNaN(bar.close));
+    });
+  }
+  const bars = [...byTime.values()].sort((a, b) => {
+    const ta = typeof a.time === "object" ? Date.UTC(a.time.year, a.time.month - 1, a.time.day) : a.time;
+    const tb = typeof b.time === "object" ? Date.UTC(b.time.year, b.time.month - 1, b.time.day) : b.time;
+    return ta - tb;
+  });
   state.series.setData(bars);
   if (state.volumeSeries) {
     state.volumeSeries.setData(

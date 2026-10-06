@@ -159,7 +159,17 @@ class MarketCache:
             interval = str(data.get("interval") or "")
             candles = data.get("candles") or []
             if interval and candles:
-                self.klines[(symbol, interval)] = list(candles)
+                key = (symbol, interval)
+                prev = self.klines.get(key) or []
+                if len(candles) >= len(prev):
+                    self.klines[key] = list(candles)
+                elif len(prev) >= 100 and len(candles) <= 3:
+                    merged = {int(c["timestamp"]): c for c in prev if c.get("timestamp")}
+                    for c in candles:
+                        ts = c.get("timestamp")
+                        if ts is not None:
+                            merged[int(ts)] = c
+                    self.klines[key] = sorted(merged.values(), key=lambda item: item["timestamp"])
         elif kind == "orderbook":
             self._book(symbol, data)
         elif kind == "liquidation" and data.get("side") == "Sell":

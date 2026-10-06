@@ -96,15 +96,16 @@ async def signals_unprocessed() -> dict[str, Any]:
 
 
 @app.get("/api/klines/{symbol}")
-async def klines(symbol: str, interval: str = "1") -> dict[str, Any]:
+async def klines(symbol: str, interval: str = "1", refresh: bool = False) -> dict[str, Any]:
     if not _SYMBOL.fullmatch(symbol or ""):
         raise HTTPException(status_code=400, detail="Некорректный тикер")
     if interval not in {"1", "5", "15", "60", "240", "D"}:
         raise HTTPException(status_code=400, detail="Некорректный интервал")
     hub: Hub = app.state.hub
     key = (symbol, interval)
+    min_bars = max(100, config.KLINE_FETCH_LIMIT // 2)
     cached = hub.cache.klines.get(key)
-    if cached:
+    if cached and len(cached) >= min_bars and not refresh:
         return {"symbol": symbol, "interval": interval, "candles": cached}
     from collector.rest_client import BybitRest
 
@@ -118,6 +119,8 @@ async def klines(symbol: str, interval: str = "1") -> dict[str, Any]:
     if candles:
         hub.cache.klines[key] = list(candles)
         hub.cache.market_dirty = True
+    elif cached:
+        candles = cached
     return {"symbol": symbol, "interval": interval, "candles": candles}
 
 
