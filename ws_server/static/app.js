@@ -817,6 +817,9 @@ function renderStats() {
   gauge("count", stats.count, 0, Math.max(20, stats.count), [
     [1, "#5dade2"],
   ], "{value}");
+  requestAnimationFrame(() => {
+    Object.values(state.gauges).forEach((c) => c.resize());
+  });
   const equityNode = document.getElementById("equity");
   state.equity = echarts.getInstanceByDom(equityNode) || echarts.init(equityNode);
   state.equity.setOption({
@@ -830,29 +833,69 @@ function renderStats() {
   renderTable();
 }
 
+function gaugeLabel(value, max) {
+  const n = Number(value);
+  if (Number.isNaN(n)) return "";
+  if (max <= 5 && minNegativeScale(max)) return n.toFixed(1);
+  if (n >= 100) return String(Math.round(n));
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(1);
+}
+
+function minNegativeScale(max) {
+  return max <= 10;
+}
+
 function gauge(key, value, min, max, colors, formatter) {
   const node = document.querySelector(`[data-gauge="${key}"]`);
   if (!node) return;
   const chart = state.gauges[key] || echarts.init(node);
   state.gauges[key] = chart;
-  chart.setOption({
-    series: [
-      {
-        type: "gauge",
-        min,
-        max,
-        animationDuration: 800,
-        progress: { show: false },
-        axisLine: { lineStyle: { width: 14, color: colors } },
-        pointer: { itemStyle: { color: "#e8eef6" } },
-        axisTick: { show: false },
-        splitLine: { show: false },
-        axisLabel: { color: "#8e9aab", distance: 14 },
-        detail: { valueAnimation: true, formatter, color: "#e8eef6", fontSize: 16 },
-        data: [{ value: Number(value) || 0 }],
-      },
-    ],
-  });
+  const splitNumber = max <= 5 ? 4 : 5;
+  chart.setOption(
+    {
+      series: [
+        {
+          type: "gauge",
+          min,
+          max,
+          center: ["50%", "56%"],
+          radius: "92%",
+          startAngle: 210,
+          endAngle: -30,
+          splitNumber,
+          animationDuration: 800,
+          progress: { show: false },
+          axisLine: { lineStyle: { width: 12, color: colors } },
+          pointer: {
+            length: "58%",
+            width: 5,
+            itemStyle: { color: "#e8eef6" },
+          },
+          anchor: { show: true, size: 8, itemStyle: { color: "#e8eef6" } },
+          axisTick: { show: false },
+          splitLine: { length: 10, distance: -12, lineStyle: { width: 2, color: "#3a4558" } },
+          axisLabel: {
+            color: "#8e9aab",
+            distance: 22,
+            fontSize: 10,
+            hideOverlap: true,
+            formatter: (v) => gaugeLabel(v, max),
+          },
+          detail: {
+            valueAnimation: true,
+            formatter,
+            color: "#e8eef6",
+            fontSize: 18,
+            offsetCenter: [0, "24%"],
+          },
+          data: [{ value: Number(value) || 0 }],
+        },
+      ],
+    },
+    true,
+  );
+  chart.resize();
 }
 
 function renderTable() {

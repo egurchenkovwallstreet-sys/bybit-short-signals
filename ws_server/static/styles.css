@@ -252,17 +252,16 @@ body {
 .stats { flex: 1; overflow: auto; padding: 12px 16px 24px; }
 .gauges {
   display: grid;
-  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
   gap: 12px;
 }
 .gauge-card {
   background: radial-gradient(circle at 50% 20%, #2a3548, #12171f 72%);
   border-radius: 18px;
-  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  transform: perspective(700px) rotateX(6deg);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   padding: 8px 8px 0;
 }
-.gauge-card .plot { height: 168px; }
+.gauge-card .plot { height: 190px; min-width: 0; }
 .gauge-title { text-align: center; color: var(--muted); font-size: 12px; margin-top: -8px; padding-bottom: 8px; }
 .equity { height: 240px; margin-top: 16px; }
 .table-wrap { overflow: auto; margin-top: 8px; }
