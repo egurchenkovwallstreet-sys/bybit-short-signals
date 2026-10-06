@@ -129,6 +129,38 @@ async def signals_unprocessed() -> dict[str, Any]:
     return {"rows": list_unprocessed(config.SQLITE_PATH)}
 
 
+_OI_INTERVALS = {"5min", "15min", "30min", "1h", "4h", "1d"}
+
+
+@app.get("/api/open-interest/{symbol}")
+async def open_interest(symbol: str, interval: str = "5min", refresh: bool = False) -> dict[str, Any]:
+    if not _SYMBOL.fullmatch(symbol or ""):
+        raise HTTPException(status_code=400, detail="Некорректный тикер")
+    interval = interval.lower()
+    if interval not in _OI_INTERVALS:
+        raise HTTPException(status_code=400, detail="Некорректный интервал OI")
+    hub: Hub = app.state.hub
+    cached = hub.cache.oi.get(symbol)
+    if cached and len(cached) >= 10 and not refresh and hub.cache.oi_interval.get(symbol) == interval:
+        return {"symbol": symbol, "interval": interval, "points": cached}
+    from collector.rest_client import BybitRest
+
+    rest: BybitRest | None = getattr(app.state, "bybit_rest", None)
+    if rest is None:
+        rest = BybitRest()
+        await rest.open()
+        app.state.bybit_rest = rest
+    message = await rest.fetch_open_interest(symbol, interval)
+    points = (message.get("data") or {}).get("points") or [] if message else []
+    if points:
+        hub.cache.oi[symbol] = list(points)
+        hub.cache.oi_interval[symbol] = interval
+        hub.cache.market_dirty = True
+    elif cached:
+        points = cached
+    return {"symbol": symbol, "interval": interval, "points": points}
+
+
 @app.get("/api/klines/{symbol}")
 async def klines(symbol: str, interval: str = "1", refresh: bool = False) -> dict[str, Any]:
     if not _SYMBOL.fullmatch(symbol or ""):

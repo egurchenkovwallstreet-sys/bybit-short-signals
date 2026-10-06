@@ -744,6 +744,14 @@ function pointsOf(rows, valueKey, windowHours = DETAIL_CHART_WINDOW_HOURS) {
     if (t >= cutoff) out.push([t, v]);
   }
   out.sort((a, b) => a[0] - b[0]);
+  if (!out.length && rows.length) {
+    for (const row of rows.slice(-120)) {
+      const t = pointTimeMs(row.time ?? row.timestamp);
+      const v = Number(row[valueKey] ?? row.value ?? row.open_interest);
+      if (t == null || Number.isNaN(v)) continue;
+      out.push([t, v]);
+    }
+  }
   return out;
 }
 
@@ -775,7 +783,15 @@ function drawLine(id, name, points, color = "#5dade2") {
   if (!node || !window.echarts) return;
   const chart = echarts.getInstanceByDom(node) || echarts.init(node);
   const now = Date.now();
-  const xmin = now - DETAIL_CHART_WINDOW_HOURS * 3600 * 1000;
+  const windowMs = DETAIL_CHART_WINDOW_HOURS * 3600 * 1000;
+  let xmin = now - windowMs;
+  let xmax = now + 60000;
+  if (points.length) {
+    const t0 = Math.min(...points.map((p) => p[0]));
+    const t1 = Math.max(...points.map((p) => p[0]));
+    xmin = Math.min(xmin, t0);
+    xmax = Math.max(xmax, t1);
+  }
   chart.setOption({
     backgroundColor: "transparent",
     title: { text: name, textStyle: { color: "#c5d0de", fontSize: 13, fontWeight: 500 } },
@@ -783,14 +799,31 @@ function drawLine(id, name, points, color = "#5dade2") {
     xAxis: {
       type: "time",
       min: xmin,
-      max: now + 60000,
+      max: xmax,
       axisLabel: { color: "#8e9aab", hideOverlap: true, formatter: (v) => {
         const d = new Date(v);
         return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
       } },
     },
     yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
-    series: [{ type: "line", showSymbol: false, data: points, lineStyle: { color, width: 2 } }],
+    series: [
+      {
+        type: "line",
+        showSymbol: points.length <= 30,
+        data: points,
+        lineStyle: { color, width: 2 },
+      },
+    ],
+    graphic: points.length
+      ? []
+      : [
+          {
+            type: "text",
+            left: "center",
+            top: "middle",
+            style: { text: "Нет данных OI — загрузка с биржи…", fill: "#8e9aab", fontSize: 13 },
+          },
+        ],
   });
   requestAnimationFrame(() => chart.resize());
 }

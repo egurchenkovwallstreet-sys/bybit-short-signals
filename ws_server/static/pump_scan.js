@@ -230,14 +230,34 @@ async function ensurePumpCandles(symbol, interval) {
   }
 }
 
+async function ensurePumpOi(symbol) {
+  const detail = pumpState.detail;
+  if (!detail) return [];
+  let rows = detail.oi || [];
+  if (rows.length >= 10) return rows;
+  try {
+    const res = await fetch(
+      `/api/open-interest/${encodeURIComponent(symbol)}?interval=5min&refresh=1`,
+    );
+    if (!res.ok) return rows;
+    const payload = await res.json();
+    rows = payload.points || [];
+    detail.oi = rows;
+    return rows;
+  } catch (_e) {
+    return rows;
+  }
+}
+
 async function refreshPumpCharts() {
   const detail = pumpState.detail;
   if (!detail?.signal) return;
   const symbol = detail.signal.symbol;
   const interval = pumpState.interval;
   const candles = await ensurePumpCandles(symbol, interval);
+  const oiRows = await ensurePumpOi(symbol);
   drawPumpVolumeChart(candles, interval);
-  drawPumpOiChart(detail.oi || []);
+  drawPumpOiChart(oiRows);
   drawPumpBookLadder(document.getElementById("pump-book-map"), detail.book || {});
 }
 

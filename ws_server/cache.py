@@ -51,6 +51,7 @@ class MarketCache:
         self.cvd: dict[str, list[dict[str, float]]] = {}
         self._cvd_value: dict[str, float] = {}
         self.oi: dict[str, list[dict[str, Any]]] = {}
+        self.oi_interval: dict[str, str] = {}
         self.funding: dict[str, float] = {}
         self.taker_buy: dict[str, float] = {}
         self.taker_sell: dict[str, float] = {}
@@ -290,8 +291,14 @@ class MarketCache:
                 self._touch_price(symbol, price)
         elif kind == "open_interest":
             points = data.get("points") or []
-            if points:
+            if not points:
+                return
+            interval = str(data.get("interval") or "5min").lower()
+            rank = {"5min": 0, "15min": 1, "30min": 2, "1h": 3, "4h": 4, "1d": 5}
+            prev = self.oi_interval.get(symbol)
+            if prev is None or rank.get(interval, 9) <= rank.get(prev, 9):
                 self.oi[symbol] = list(points)
+                self.oi_interval[symbol] = interval
 
     def _trade(self, symbol: str, timestamp: int, data: dict[str, Any]) -> None:
         price = _num(data.get("price"))

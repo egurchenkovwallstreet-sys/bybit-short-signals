@@ -283,10 +283,14 @@ def kline_message(symbol: str, interval: str, rows: list[Any]) -> dict[str, Any]
 def parse_oi_rows(rows: list[Any]) -> list[dict[str, Any]]:
     points: list[dict[str, Any]] = []
     for row in rows or []:
-        if not isinstance(row, dict):
-            continue
-        timestamp = _to_int(row.get("timestamp"))
-        value = _to_float(row.get("openInterest"))
+        timestamp: int | None = None
+        value: float | None = None
+        if isinstance(row, (list, tuple)) and len(row) >= 2:
+            timestamp = _to_int(row[0])
+            value = _to_float(row[1])
+        elif isinstance(row, dict):
+            timestamp = _to_int(row.get("timestamp") or row.get("time"))
+            value = _to_float(row.get("openInterest") or row.get("open_interest"))
         if timestamp is None or value is None:
             continue
         points.append({"timestamp": timestamp, "open_interest": value})
