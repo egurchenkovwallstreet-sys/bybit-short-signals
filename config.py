@@ -303,6 +303,9 @@ X2_RETRACE_MIN_BARS = _env_int("X2_RETRACE_MIN_BARS", 12)
 # Откат от абсолютного max 1H: пик 1–24 ч назад, падение не меньше этого %.
 X2_RETRACE_MIN_PULLBACK_PCT = _env_float("X2_RETRACE_MIN_PULLBACK_PCT", 3.0)
 X2_RETRACE_PIVOT_WING = _env_int("X2_RETRACE_PIVOT_WING", 3)
+# Две вершины: минимум свечей между барами pivot-high; «один уровень» — допуск %.
+X2_RETRACE_MIN_BARS_BETWEEN_PEAKS = _env_int("X2_RETRACE_MIN_BARS_BETWEEN_PEAKS", 5)
+X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT = _env_float("X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT", 1.0)
 # Подтверждение смены колонки на досках и вкладке «Сигналы» (секунды).
 WATCH_STAGE_CONFIRM_SEC = _env_int("WATCH_STAGE_CONFIRM_SEC", 900)
 WATCH_STAGE_DOWN_CONFIRM_SEC = _env_int("WATCH_STAGE_DOWN_CONFIRM_SEC", 1200)

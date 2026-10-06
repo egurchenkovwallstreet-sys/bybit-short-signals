@@ -150,7 +150,13 @@ function renderX2Board() {
 function x2CardHtml(row, color, active) {
   const peak = row.peak_mult != null ? Number(row.peak_mult).toFixed(2) : null;
   const mult = peak ? `пик ×${peak}` : row.multiplier != null ? `×${Number(row.multiplier).toFixed(2)}` : "×2+";
-  const lh = `LH 1H:${row.lh_1h ?? 0} · 4H:${row.lh_4h ?? 0}`;
+  const peakHint =
+    row.two_peak_kind === "double_top"
+      ? `двойная вершина ${row.two_peak_tf || ""}`
+      : row.two_peak_kind === "lower_high"
+        ? `LH ${row.two_peak_tf || ""} (между ${row.two_peak_bars_between ?? "?"} св.)`
+        : "вершины —";
+  const lh = `LH 1H:${row.lh_1h ?? 0} · 4H:${row.lh_4h ?? 0} · ${peakHint}`;
   const pb = row.pullback_pct != null ? `откат ${row.pullback_pct}%` : "—";
   return `<article class="card x2-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
     <header><strong>${row.symbol}</strong> <span class="tag">${mult} от min 5d</span></header>
@@ -212,6 +218,7 @@ function updateX2Meta(s) {
     <div><dt>Min low 5d</dt><dd>${s.min_low_5d ?? "—"}</dd></div>
     <div><dt>Откат от max 1H</dt><dd>${s.pullback_pct != null ? s.pullback_pct + "%" : "—"}</dd></div>
     <div><dt>LH (1H / 4H)</dt><dd>${s.lh_1h ?? 0} / ${s.lh_4h ?? 0}</dd></div>
+    <div><dt>Две вершины</dt><dd>${formatTwoPeak(s)}</dd></div>
     <div><dt>OI</dt><dd>${s.oi_drop ? "снижается" : "—"} ${s.oi_change_pct != null ? s.oi_change_pct.toFixed(2) + "%" : ""}</dd></div>
     <div><dt>Цена</dt><dd>${s.last_price}</dd></div>`;
   if (emaEl) emaEl.innerHTML = renderX2EmaBlock(s.ema_by_tf);
@@ -410,6 +417,12 @@ function findX2Row(symbol) {
 function fmt(n) {
   if (n == null || Number.isNaN(n)) return "—";
   return Number(n).toFixed(2);
+}
+
+function formatTwoPeak(s) {
+  if (!s.two_peak_kind) return "—";
+  const label = s.two_peak_kind === "double_top" ? "double top" : "LH";
+  return `${label} · ${s.two_peak_tf || "?"} · между ${s.two_peak_bars_between ?? "?"} св.`;
 }
 
 window.x2Retrace = {

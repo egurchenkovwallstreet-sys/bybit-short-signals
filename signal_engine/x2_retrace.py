@@ -11,7 +11,12 @@ from signal_engine.pump_history import HistoryPump, history_pump_metrics
 from signal_engine.pump_scan import price_24h_pct
 from signal_engine.stage_debounce import resolve_stage
 from signal_engine.state import Bar, SymbolState
-from signal_engine.swing_highs import absolute_high_since, lower_high_chain_count
+from signal_engine.swing_highs import (
+    TwoPeakMatch,
+    absolute_high_since,
+    find_two_peak_htf,
+    lower_high_chain_count,
+)
 from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
 
 BOARD_ID = "x2_retrace"
@@ -66,6 +71,7 @@ def candidate_stage(
     *,
     peak_mult: float,
     pullback_ok: bool,
+    two_peak: TwoPeakMatch | None,
     lh_1h: int,
     lh_4h: int,
     oi_drop: bool,
@@ -73,9 +79,11 @@ def candidate_stage(
 ) -> int:
     if peak_mult < config.X2_RETRACE_MIN_MULTIPLIER:
         return 0
+    if two_peak is None:
+        return 1
     if not pullback_ok:
         return 1
-    lh_ok = lh_1h >= 2 or lh_4h >= 2 or (lh_1h >= 1 and lh_4h >= 1)
+    lh_ok = two_peak is not None or lh_1h >= 1 or lh_4h >= 1
     if not lh_ok:
         return 2
     if oi_drop and ema_depth >= 2:
@@ -102,6 +110,9 @@ class X2RetraceItem:
     oi_drop: bool
     oi_change_pct: float | None
     ema_depth: int
+    two_peak_kind: str | None = None
+    two_peak_tf: str | None = None
+    two_peak_bars_between: int | None = None
     pending_stage: int | None = None
     ema_by_tf: dict[str, dict] = field(default_factory=dict)
     updated_at: int = 0
@@ -127,6 +138,9 @@ class X2RetraceItem:
             "oi_drop": self.oi_drop,
             "oi_change_pct": self.oi_change_pct,
             "ema_depth": self.ema_depth,
+            "two_peak_kind": self.two_peak_kind,
+            "two_peak_tf": self.two_peak_tf,
+            "two_peak_bars_between": self.two_peak_bars_between,
             "pending_stage": self.pending_stage,
             "ema_by_tf": self.ema_by_tf,
             "updated_at": self.updated_at,
@@ -151,6 +165,7 @@ def _metrics_for_state(state: SymbolState, now_ms: int, meta: dict) -> tuple[X2R
     bars_4h = state.bars_htf.get("240") or []
     lh_1h = lower_high_chain_count(bars_1h, pump_start, "60", now_ms, config.X2_RETRACE_PIVOT_WING)
     lh_4h = lower_high_chain_count(bars_4h, pump_start, "240", now_ms, config.X2_RETRACE_PIVOT_WING)
+    two_peak = find_two_peak_htf(bars_1h, bars_4h, pump_start, now_ms)
     pullback_ok, pullback_pct = _pullback_pct(bars_1h, pump_start, now_ms, float(state.last_price))
     reading: Reading = evaluate(state, now_ms)
     ema_map = ema_breakdown_by_interval(state.bars_htf)
@@ -172,10 +187,17 @@ def _metrics_for_state(state: SymbolState, now_ms: int, meta: dict) -> tuple[X2R
         oi_drop=reading.oi_drop,
         oi_change_pct=reading.oi_change_pct,
         ema_depth=ema_depth,
+        two_peak_kind=two_peak.kind if two_peak else None,
+        two_peak_tf=_interval_label(two_peak.interval) if two_peak else None,
+        two_peak_bars_between=two_peak.bars_between if two_peak else None,
         ema_by_tf=ema_map,
         updated_at=now_ms,
     )
-    return item, pullback_ok
+    return item, pullback_ok, two_peak
+
+
+def _interval_label(code: str) -> str:
+    return {"60": "1H", "240": "4H", "D": "1D"}.get(code, code)
 
 
 def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches: WatchStore) -> dict:
@@ -190,6 +212,11 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
             continue
         hist = history_pump_metrics(state, now_ms)
         if hist is None:
+            continue
+        pump_start = hist.valley_ts
+        bars_1h = state.bars_htf.get("60") or []
+        bars_4h = state.bars_htf.get("240") or []
+        if find_two_peak_htf(bars_1h, bars_4h, pump_start, now_ms) is None:
             continue
         watch = WatchRow(
             board=BOARD_ID,
@@ -220,13 +247,14 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
         measured = _metrics_for_state(state, now_ms, watch.meta)
         if measured is None:
             continue
-        row, pullback_ok = measured
+        row, pullback_ok, two_peak = measured
         watch.meta["peak_mult"] = max(float(watch.meta.get("peak_mult") or 0), row.peak_mult)
         watch.meta["min_low"] = row.min_low_5d
         watch.meta["valley_ts"] = row.pump_start_ts
         cand = candidate_stage(
             peak_mult=row.peak_mult,
             pullback_ok=pullback_ok,
+            two_peak=two_peak,
             lh_1h=row.lh_1h,
             lh_4h=row.lh_4h,
             oi_drop=row.oi_drop,

@@ -8,7 +8,7 @@ import config
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import lower_high_chain_count, pivot_highs
 from signal_engine.pump_history import history_pump_metrics
-from signal_engine.x2_retrace import stage_for
+from signal_engine.x2_retrace import candidate_stage as stage_for
 
 
 def _bar(ts: int, o: float, h: float, l: float, c: float) -> Bar:
@@ -52,11 +52,50 @@ class X2RetraceTests(unittest.TestCase):
         self.assertGreaterEqual(count, 1)
 
     def test_stage_progression(self) -> None:
-        self.assertEqual(stage_for(multiplier=2.1, pullback_ok=False, lh_1h=0, lh_4h=0, oi_drop=False, ema_depth=0), 1)
-        self.assertEqual(stage_for(multiplier=2.1, pullback_ok=True, lh_1h=0, lh_4h=0, oi_drop=False, ema_depth=0), 2)
-        self.assertEqual(stage_for(multiplier=2.1, pullback_ok=True, lh_1h=2, lh_4h=0, oi_drop=False, ema_depth=0), 2)
-        self.assertEqual(stage_for(multiplier=2.1, pullback_ok=True, lh_1h=2, lh_4h=0, oi_drop=True, ema_depth=1), 3)
-        self.assertEqual(stage_for(multiplier=2.1, pullback_ok=True, lh_1h=2, lh_4h=1, oi_drop=True, ema_depth=2), 4)
+        from signal_engine.swing_highs import TwoPeakMatch
+
+        self.assertEqual(
+            stage_for(peak_mult=2.1, pullback_ok=False, two_peak=None, lh_1h=0, lh_4h=0, oi_drop=False, ema_depth=0),
+            1,
+        )
+
+        peak = TwoPeakMatch("lower_high", "60", 10.0, 9.0, 6, 1, 2)
+        self.assertEqual(
+            stage_for(
+                peak_mult=2.1,
+                pullback_ok=True,
+                two_peak=peak,
+                lh_1h=0,
+                lh_4h=0,
+                oi_drop=False,
+                ema_depth=0,
+            ),
+            2,
+        )
+        self.assertEqual(
+            stage_for(
+                peak_mult=2.1,
+                pullback_ok=True,
+                two_peak=peak,
+                lh_1h=2,
+                lh_4h=0,
+                oi_drop=True,
+                ema_depth=1,
+            ),
+            3,
+        )
+        self.assertEqual(
+            stage_for(
+                peak_mult=2.1,
+                pullback_ok=True,
+                two_peak=peak,
+                lh_1h=2,
+                lh_4h=1,
+                oi_drop=True,
+                ema_depth=2,
+            ),
+            4,
+        )
 
 
 if __name__ == "__main__":
