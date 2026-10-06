@@ -28,6 +28,12 @@ class TwoPeakTests(unittest.TestCase):
         self.assertIn(match.kind, ("lower_high", "double_top"))
         self.assertGreaterEqual(match.bars_between, config.X2_RETRACE_MIN_BARS_BETWEEN_PEAKS)
 
+    def test_marginal_higher_second_allowed(self) -> None:
+        from signal_engine.swing_highs import _peak_pair_kind
+
+        self.assertEqual(_peak_pair_kind(100.0, 108.0), "marginal_hh")
+        self.assertIsNone(_peak_pair_kind(100.0, 120.0))
+
     def test_second_higher_rejected(self) -> None:
         bars: list[Bar] = []
         for i in range(30):

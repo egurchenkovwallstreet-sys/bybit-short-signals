@@ -298,14 +298,16 @@ def chart_tf_to_oi_interval(chart_tf: str) -> str:
 # --- Вкладка «2× откат» (рост от min 5d, LH 1H/4H, OI↓, EMA) ----------------
 
 X2_RETRACE_MIN_MULTIPLIER = _env_float("X2_RETRACE_MIN_MULTIPLIER", 2.0)
-X2_RETRACE_LOOKBACK_DAYS = _env_int("X2_RETRACE_LOOKBACK_DAYS", 7)
-X2_RETRACE_MIN_BARS = _env_int("X2_RETRACE_MIN_BARS", 12)
+X2_RETRACE_LOOKBACK_DAYS = _env_int("X2_RETRACE_LOOKBACK_DAYS", 21)
+X2_RETRACE_MIN_BARS = _env_int("X2_RETRACE_MIN_BARS", 8)
 # Откат от абсолютного max 1H: пик 1–24 ч назад, падение не меньше этого %.
 X2_RETRACE_MIN_PULLBACK_PCT = _env_float("X2_RETRACE_MIN_PULLBACK_PCT", 3.0)
-X2_RETRACE_PIVOT_WING = _env_int("X2_RETRACE_PIVOT_WING", 3)
+X2_RETRACE_PIVOT_WING = _env_int("X2_RETRACE_PIVOT_WING", 2)
 # Две вершины: минимум свечей между барами pivot-high; «один уровень» — допуск %.
-X2_RETRACE_MIN_BARS_BETWEEN_PEAKS = _env_int("X2_RETRACE_MIN_BARS_BETWEEN_PEAKS", 5)
-X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT = _env_float("X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT", 1.0)
+X2_RETRACE_MIN_BARS_BETWEEN_PEAKS = _env_int("X2_RETRACE_MIN_BARS_BETWEEN_PEAKS", 4)
+X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT = _env_float("X2_RETRACE_PEAK_EQUAL_TOLERANCE_PCT", 2.5)
+# Вторая вершина чуть выше первой (failed breakout) — всё ещё «две вершины».
+X2_RETRACE_MAX_SECOND_PEAK_ABOVE_PCT = _env_float("X2_RETRACE_MAX_SECOND_PEAK_ABOVE_PCT", 15.0)
 # Подтверждение смены колонки на досках и вкладке «Сигналы» (секунды).
 WATCH_STAGE_CONFIRM_SEC = _env_int("WATCH_STAGE_CONFIRM_SEC", 900)
 WATCH_STAGE_DOWN_CONFIRM_SEC = _env_int("WATCH_STAGE_DOWN_CONFIRM_SEC", 1200)
