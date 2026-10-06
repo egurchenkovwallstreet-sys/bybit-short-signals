@@ -352,17 +352,21 @@ class BtcStrategyEngine:
                     "high": r["h"],
                     "low": r["l"],
                     "close": r["c"],
+                    "volume": r.get("v", 0),
                 }
             )
         return out
 
     def public_state(self, signals: list[dict[str, Any]], analytics: dict[str, Any]) -> dict[str, Any]:
+        tfs = ("1", "5", "15", "30", "60", "240", "D")
+        candles_by_tf = {tf: self.chart_candles(tf) for tf in tfs}
         return {
             "symbol": self.SYMBOL,
             "bias": self.bias,
             "last_price": self.last_price,
             "funding": self.perp.funding,
-            "candles": self.chart_candles("5"),
+            "candles": candles_by_tf.get("5", []),
+            "candles_by_tf": candles_by_tf,
             "markers": self.markers[-80:],
             "signals": signals,
             "analytics": analytics,

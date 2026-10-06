@@ -32,9 +32,24 @@
       <div id="btc-meta" class="btc-meta">загрузка…</div>
       <div class="btc-modes">
         <span class="quiet">Intraday + Scalp · журнал и аналитика по каждому сигналу</span>
+        <label class="btc-follow-label"><input type="checkbox" id="btc-follow" checked> Следовать за ценой</label>
+      </div>
+      <div class="btc-tf-bar" role="tablist">
+        <button type="button" class="btc-tf active" data-btc-interval="1">1m</button>
+        <button type="button" class="btc-tf" data-btc-interval="5">5m</button>
+        <button type="button" class="btc-tf" data-btc-interval="15">15m</button>
+        <button type="button" class="btc-tf" data-btc-interval="30">30m</button>
+        <button type="button" class="btc-tf" data-btc-interval="60">1H</button>
+        <button type="button" class="btc-tf" data-btc-interval="240">4H</button>
+        <button type="button" class="btc-tf" data-btc-interval="D">1D</button>
       </div>
     </header>
     <div id="btc-chart" class="btc-chart"></div>
+    <section id="btc-decode" class="btc-decode">
+      <h3>Расшифровка сигнала</h3>
+      <p class="quiet">Выберите строку в таблице или маркер на графике.</p>
+      <div id="btc-decode-body"></div>
+    </section>
     <div id="btc-analytics" class="btc-analytics"></div>
     <div class="table-wrap">
       <table id="btc-signal-table">
