@@ -298,9 +298,16 @@ def chart_tf_to_oi_interval(chart_tf: str) -> str:
 # --- Вкладка «2× откат» (рост от min 5d, LH 1H/4H, OI↓, EMA) ----------------
 
 X2_RETRACE_MIN_MULTIPLIER = _env_float("X2_RETRACE_MIN_MULTIPLIER", 2.0)
+X2_RETRACE_LOOKBACK_DAYS = _env_int("X2_RETRACE_LOOKBACK_DAYS", 7)
+X2_RETRACE_MIN_BARS = _env_int("X2_RETRACE_MIN_BARS", 12)
 # Откат от абсолютного max 1H: пик 1–24 ч назад, падение не меньше этого %.
 X2_RETRACE_MIN_PULLBACK_PCT = _env_float("X2_RETRACE_MIN_PULLBACK_PCT", 3.0)
 X2_RETRACE_PIVOT_WING = _env_int("X2_RETRACE_PIVOT_WING", 3)
+# Подтверждение смены колонки на досках и вкладке «Сигналы» (секунды).
+WATCH_STAGE_CONFIRM_SEC = _env_int("WATCH_STAGE_CONFIRM_SEC", 900)
+WATCH_STAGE_DOWN_CONFIRM_SEC = _env_int("WATCH_STAGE_DOWN_CONFIRM_SEC", 1200)
+WATCH_STAGE_CONFIRM_MS = WATCH_STAGE_CONFIRM_SEC * 1000
+WATCH_STAGE_DOWN_CONFIRM_MS = WATCH_STAGE_DOWN_CONFIRM_SEC * 1000
 X2_RETRACE_COLUMNS = {
     4: {"color": "green", "status": "К ШОРТУ", "label": "4/4"},
     3: {"color": "orange", "status": "OI + EMA", "label": "3/4"},

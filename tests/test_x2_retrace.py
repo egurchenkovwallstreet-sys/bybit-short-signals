@@ -7,7 +7,8 @@ import unittest
 import config
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import lower_high_chain_count, pivot_highs
-from signal_engine.x2_retrace import _pump_from_5d_min, stage_for
+from signal_engine.pump_history import history_pump_metrics
+from signal_engine.x2_retrace import stage_for
 
 
 def _bar(ts: int, o: float, h: float, l: float, c: float) -> Bar:
@@ -15,7 +16,7 @@ def _bar(ts: int, o: float, h: float, l: float, c: float) -> Bar:
 
 
 class X2RetraceTests(unittest.TestCase):
-    def test_pump_from_5d_min(self) -> None:
+    def test_history_pump_7d(self) -> None:
         state = SymbolState("TESTUSDT")
         state.last_price = 20.0
         state.turnover_24h_usdt = config.UNIVERSE_MIN_TURNOVER_24H_USDT
@@ -24,13 +25,14 @@ class X2RetraceTests(unittest.TestCase):
         for i in range(120):
             ts = now - (120 - i) * 3_600_000
             low = 8.0 if i < 60 else 10.0
-            bars.append(_bar(ts, low, low + 1, low, low + 0.5))
+            high = 22.0 if 50 <= i < 70 else low + 1
+            bars.append(_bar(ts, low, high, low, low + 0.5))
         state.bars_htf["60"] = bars
-        pump = _pump_from_5d_min(state, now)
-        self.assertIsNotNone(pump)
-        mult, min_low, _ = pump  # type: ignore[misc]
-        self.assertGreaterEqual(mult, 2.0)
-        self.assertAlmostEqual(min_low, 8.0)
+        hist = history_pump_metrics(state, now)
+        self.assertIsNotNone(hist)
+        assert hist is not None
+        self.assertGreaterEqual(hist.peak_mult, 2.0)
+        self.assertAlmostEqual(hist.min_low, 8.0)
 
     def test_lower_high_chain(self) -> None:
         now = 2_000_000_000_000

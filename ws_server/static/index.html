@@ -31,7 +31,7 @@
   </section>
 
   <section id="view-x2-retrace" class="pump-scan-view" hidden>
-    <p class="quiet pump-scan-intro">Рост ≥2× от минимума за 5 дней (оборот ≥1M USDT). Колонки — откат, понижающиеся max на 1H/4H, OI↓ и пробой EMA.</p>
+    <p class="quiet pump-scan-intro">История до 7 дней: пик/min ≥2×. В списке монета остаётся после входа (пока 24h не уйдёт в минус или «Снять»). Смена колонки — после ~15 мин подтверждения.</p>
     <div class="pump-scan-body workspace">
       <div id="x2-columns" class="columns pump-columns"></div>
       <aside id="x2-detail" class="detail">
@@ -41,7 +41,7 @@
   </section>
 
   <section id="view-pump-scan" class="pump-scan-view" hidden>
-    <p class="quiet pump-scan-intro">Монеты с ростом ≥35% за 24ч и оборотом ≥1M USDT. Колонки — стадии ослабления пампа перед шортом.</p>
+    <p class="quiet pump-scan-intro">Вход при ≥35% / 24h; дальше монета не пропадает при падении % (выход: 24h &lt; 0 или «Снять»). Колонка меняется после ~15 мин подтверждения.</p>
     <div class="pump-scan-body workspace">
       <div id="pump-columns" class="columns pump-columns"></div>
       <aside id="pump-detail" class="detail">
@@ -155,7 +155,7 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/btc_test.js?v=20251006e"></script>
   <script src="/static/app.js?v=20251006o"></script>
-  <script src="/static/pump_scan.js?v=20251006f"></script>
-  <script src="/static/x2_retrace.js?v=20251007a"></script>
+  <script src="/static/pump_scan.js?v=20251007b"></script>
+  <script src="/static/x2_retrace.js?v=20251007b"></script>
 </body>
 </html>

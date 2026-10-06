@@ -18,18 +18,22 @@ from signal_engine.state import SymbolState
 from signal_engine.pump_scan import build_pump_scan_board
 from signal_engine.x2_retrace import build_x2_retrace_board
 from signal_engine.store import SignalStore
+from signal_engine.watch_store import WatchStore
 
 
 log = logging.getLogger(__name__)
 
 
 class Engine:
-    def __init__(self, store: SignalStore) -> None:
+    def __init__(self, store: SignalStore, watches: WatchStore | None = None) -> None:
         self.store = store
+        self.watches = watches or WatchStore(config.SQLITE_PATH)
         self.symbols: dict[str, SymbolState] = {}
         self.open_signals: dict[str, Signal] = {}
+        self._signal_column_pending: dict[str, tuple[int, int]] = {}
 
     def restore(self) -> None:
+        self.watches.open()
         for signal in self.store.load_open():
             self.open_signals[signal.symbol] = signal
             self.symbols.setdefault(signal.symbol, SymbolState(signal.symbol))
@@ -76,8 +80,8 @@ class Engine:
         return [
             *changed,
             self._board(now_ms),
-            build_pump_scan_board(self.symbols, now_ms),
-            build_x2_retrace_board(self.symbols, now_ms),
+            build_pump_scan_board(self.symbols, now_ms, self.watches),
+            build_x2_retrace_board(self.symbols, now_ms, self.watches),
         ]
 
     def _try_open(self, state: SymbolState, now_ms: int, wins: int, total: int) -> Signal | None:
@@ -147,6 +151,9 @@ class Engine:
     ) -> None:
         strength = reading.strength(pump_latched)
         extra = reading.extra_count()
+        candidate_level = min(5, max(1, strength))
+        confirmed_level = self._confirmed_signal_strength(signal.symbol, candidate_level, now_ms)
+        strength = confirmed_level
         probability = probability_pct(
             sweep=reading.sweep,
             liquidations_faded=reading.liquidations_faded,
@@ -187,6 +194,28 @@ class Engine:
         signal.chart_levels = list(reading.chart_levels)
         signal.round_prices = list(reading.round_prices)
         signal.pnl_pct = short_pnl_pct(signal.entry_price, signal.last_price)
+
+    def _confirmed_signal_strength(self, symbol: str, candidate: int, now_ms: int) -> int:
+        current = self.open_signals.get(symbol)
+        if current is None:
+            return candidate
+        confirmed = int(current.strength)
+        if candidate == confirmed:
+            self._signal_column_pending.pop(symbol, None)
+            return confirmed
+        pending = self._signal_column_pending.get(symbol)
+        if pending is None or pending[0] != candidate:
+            self._signal_column_pending[symbol] = (candidate, now_ms)
+            return confirmed
+        need = (
+            config.WATCH_STAGE_CONFIRM_MS
+            if candidate > confirmed
+            else config.WATCH_STAGE_DOWN_CONFIRM_MS
+        )
+        if now_ms - pending[1] >= need:
+            self._signal_column_pending.pop(symbol, None)
+            return candidate
+        return confirmed
 
     def _board(self, now_ms: int) -> dict:
         grouped: dict[int, list[Signal]] = {level: [] for level in (5, 4, 3, 2, 1)}

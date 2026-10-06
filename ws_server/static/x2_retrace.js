@@ -38,10 +38,32 @@ function initX2RetraceTab() {
     if (card?.dataset.symbol) selectX2Symbol(card.dataset.symbol);
   });
   document.getElementById("x2-detail")?.addEventListener("click", (event) => {
-    const btn = event.target instanceof Element ? event.target.closest("[data-x2-interval]") : null;
+    const target = event.target instanceof Element ? event.target : null;
+    const dismiss = target?.closest("[data-dismiss-board]");
+    if (dismiss?.dataset.dismissBoard && x2State.selected) {
+      void dismissX2Watch(dismiss.dataset.dismissBoard, x2State.selected);
+      return;
+    }
+    const btn = target?.closest("[data-x2-interval]");
     if (!btn) return;
     setX2Interval(btn.dataset.x2Interval);
   });
+}
+
+async function dismissX2Watch(board, symbol) {
+  try {
+    await fetch("/api/watch/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ board, symbol }),
+    });
+    x2State.selected = null;
+    x2State.detail = null;
+    renderX2Detail();
+    renderX2Board();
+  } catch (_e) {
+    /* ignore */
+  }
 }
 
 function onX2Board(data) {
@@ -126,12 +148,13 @@ function renderX2Board() {
 }
 
 function x2CardHtml(row, color, active) {
-  const mult = row.multiplier != null ? `×${Number(row.multiplier).toFixed(2)}` : "×2+";
+  const peak = row.peak_mult != null ? Number(row.peak_mult).toFixed(2) : null;
+  const mult = peak ? `пик ×${peak}` : row.multiplier != null ? `×${Number(row.multiplier).toFixed(2)}` : "×2+";
   const lh = `LH 1H:${row.lh_1h ?? 0} · 4H:${row.lh_4h ?? 0}`;
   const pb = row.pullback_pct != null ? `откат ${row.pullback_pct}%` : "—";
   return `<article class="card x2-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
     <header><strong>${row.symbol}</strong> <span class="tag">${mult} от min 5d</span></header>
-    <div class="meta">${lh} · ${pb} · EMA ${row.ema_depth ?? 0}/3</div>
+    <div class="meta">${lh} · ${pb} · EMA ${row.ema_depth ?? 0}/3${row.pending_stage ? ` · →${row.pending_stage}?` : ""}</div>
     <canvas class="mini" width="120" height="36" data-symbol="${row.symbol}"></canvas>
     <p class="quiet">${row.oi_drop ? "OI ↓" : "OI —"} · 24h ${row.price_24h_pct != null ? "+" + fmt(row.price_24h_pct) + "%" : "—"}</p>
   </article>`;
@@ -166,6 +189,7 @@ function x2DetailShell(s) {
       <h2>${s.symbol}</h2>
       <span class="tag">${s.status} ${s.label}</span>
       <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${s.symbol}" target="_blank" rel="noopener">Bybit</a>
+      <button type="button" class="dismiss-watch" data-dismiss-board="x2_retrace">Снять с отслеживания</button>
     </header>
     <dl class="detail-stats" id="x2-stats"></dl>
     <h3>EMA 50 / 100 / 200</h3>

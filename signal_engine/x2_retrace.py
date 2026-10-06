@@ -1,4 +1,4 @@
-"""Доска «2× откат»: рост ≥2× от min за 5d, LH на 1H/4H, OI↓, пробой EMA."""
+"""Доска «2× откат»: история до 7d, липкий список, LH, OI↓, EMA."""
 
 from __future__ import annotations
 
@@ -7,11 +7,15 @@ from dataclasses import dataclass, field
 import config
 from signal_engine.ema_breakdown import ema_breakdown_by_interval
 from signal_engine.evaluate import Reading, evaluate
+from signal_engine.pump_history import HistoryPump, history_pump_metrics
 from signal_engine.pump_scan import price_24h_pct
+from signal_engine.stage_debounce import resolve_stage
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import absolute_high_since, lower_high_chain_count
+from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
 
-_MS_5D = 5 * 24 * 3600 * 1000
+BOARD_ID = "x2_retrace"
+
 _MS_24H = 24 * 3600 * 1000
 _MS_1H = 3600 * 1000
 
@@ -23,25 +27,6 @@ def _eligible(state: SymbolState) -> bool:
     if state.last_price is None or state.last_price <= 0:
         return False
     return True
-
-
-def _pump_from_5d_min(state: SymbolState, now_ms: int) -> tuple[float, float, int] | None:
-    """Множитель, min_low, timestamp дна (последний бар с этим low)."""
-    bars = state.bars_htf.get("60") or []
-    if len(bars) < 12:
-        return None
-    window_start = now_ms - _MS_5D
-    in_window = [b for b in bars if b.timestamp >= window_start]
-    if not in_window:
-        return None
-    min_low = min(b.low for b in in_window)
-    if min_low <= 0:
-        return None
-    mult = float(state.last_price) / min_low
-    if mult < config.X2_RETRACE_MIN_MULTIPLIER:
-        return None
-    valley_ts = max(b.timestamp for b in in_window if b.low == min_low)
-    return mult, min_low, valley_ts
 
 
 def _pullback_pct(
@@ -68,11 +53,6 @@ def _pullback_pct(
     high_24h = max(b.high for b in recent)
     if last_price >= high_24h * 0.998:
         return False, drop
-    oldest = recent[0].close
-    if now_ms - recent[0].timestamp < _MS_1H and drop < config.X2_RETRACE_MIN_PULLBACK_PCT * 2:
-        return False, drop
-    if oldest > 0 and last_price >= oldest and drop < config.X2_RETRACE_MIN_PULLBACK_PCT:
-        return False, drop
     return True, drop
 
 
@@ -82,16 +62,16 @@ def _ema_depth_max(ema_map: dict[str, dict]) -> int:
     return max(int(item.get("depth") or 0) for item in ema_map.values())
 
 
-def stage_for(
+def candidate_stage(
     *,
-    multiplier: float,
+    peak_mult: float,
     pullback_ok: bool,
     lh_1h: int,
     lh_4h: int,
     oi_drop: bool,
     ema_depth: int,
 ) -> int:
-    if multiplier < config.X2_RETRACE_MIN_MULTIPLIER:
+    if peak_mult < config.X2_RETRACE_MIN_MULTIPLIER:
         return 0
     if not pullback_ok:
         return 1
@@ -110,6 +90,7 @@ class X2RetraceItem:
     symbol: str
     stage: int
     multiplier: float
+    peak_mult: float
     min_low_5d: float
     pump_start_ts: int
     pullback_pct: float
@@ -121,6 +102,7 @@ class X2RetraceItem:
     oi_drop: bool
     oi_change_pct: float | None
     ema_depth: int
+    pending_stage: int | None = None
     ema_by_tf: dict[str, dict] = field(default_factory=dict)
     updated_at: int = 0
 
@@ -133,6 +115,7 @@ class X2RetraceItem:
             "status": col["status"],
             "label": col["label"],
             "multiplier": round(self.multiplier, 2),
+            "peak_mult": round(self.peak_mult, 2),
             "min_low_5d": self.min_low_5d,
             "pump_start_ts": self.pump_start_ts,
             "pullback_pct": round(self.pullback_pct, 2),
@@ -144,59 +127,128 @@ class X2RetraceItem:
             "oi_drop": self.oi_drop,
             "oi_change_pct": self.oi_change_pct,
             "ema_depth": self.ema_depth,
+            "pending_stage": self.pending_stage,
             "ema_by_tf": self.ema_by_tf,
             "updated_at": self.updated_at,
         }
 
 
-def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int) -> dict:
-    items: list[X2RetraceItem] = []
+def _continued_pump(meta: dict, hist: HistoryPump | None) -> bool:
+    if hist is None:
+        return False
+    latched = float(meta.get("peak_mult") or 0)
+    return latched > 0 and hist.peak_mult >= latched * 1.08
+
+
+def _metrics_for_state(state: SymbolState, now_ms: int, meta: dict) -> tuple[X2RetraceItem, bool] | None:
+    hist = history_pump_metrics(state, now_ms)
+    if hist is None:
+        return None
+    pump_start = int(meta.get("valley_ts") or hist.valley_ts)
+    min_low = float(meta.get("min_low") or hist.min_low)
+    peak_mult = max(float(meta.get("peak_mult") or 0), hist.peak_mult)
+    bars_1h = state.bars_htf.get("60") or []
+    bars_4h = state.bars_htf.get("240") or []
+    lh_1h = lower_high_chain_count(bars_1h, pump_start, "60", now_ms, config.X2_RETRACE_PIVOT_WING)
+    lh_4h = lower_high_chain_count(bars_4h, pump_start, "240", now_ms, config.X2_RETRACE_PIVOT_WING)
+    pullback_ok, pullback_pct = _pullback_pct(bars_1h, pump_start, now_ms, float(state.last_price))
+    reading: Reading = evaluate(state, now_ms)
+    ema_map = ema_breakdown_by_interval(state.bars_htf)
+    ema_depth = _ema_depth_max(ema_map)
+    pct24 = price_24h_pct(state.price_24h_change)
+    item = X2RetraceItem(
+        symbol=state.symbol,
+        stage=1,
+        multiplier=hist.current_mult,
+        peak_mult=peak_mult,
+        min_low_5d=min_low,
+        pump_start_ts=pump_start,
+        pullback_pct=pullback_pct,
+        lh_1h=lh_1h,
+        lh_4h=lh_4h,
+        last_price=float(state.last_price),
+        price_24h_pct=pct24,
+        turnover_24h_usdt=float(state.turnover_24h_usdt or 0),
+        oi_drop=reading.oi_drop,
+        oi_change_pct=reading.oi_change_pct,
+        ema_depth=ema_depth,
+        ema_by_tf=ema_map,
+        updated_at=now_ms,
+    )
+    return item, pullback_ok
+
+
+def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches: WatchStore) -> dict:
+    active = watches.active(BOARD_ID)
     for symbol, state in states.items():
         if not _eligible(state):
             continue
-        pump = _pump_from_5d_min(state, now_ms)
-        if pump is None:
+        if symbol in active:
             continue
-        mult, min_low, pump_start = pump
-        bars_1h = state.bars_htf.get("60") or []
-        bars_4h = state.bars_htf.get("240") or []
-        lh_1h = lower_high_chain_count(bars_1h, pump_start, "60", now_ms, config.X2_RETRACE_PIVOT_WING)
-        lh_4h = lower_high_chain_count(bars_4h, pump_start, "240", now_ms, config.X2_RETRACE_PIVOT_WING)
-        pullback_ok, pullback_pct = _pullback_pct(bars_1h, pump_start, now_ms, float(state.last_price))
-        reading: Reading = evaluate(state, now_ms)
-        ema_map = ema_breakdown_by_interval(state.bars_htf)
-        ema_depth = _ema_depth_max(ema_map)
-        stage = stage_for(
-            multiplier=mult,
+        prior = watches.get(BOARD_ID, symbol)
+        if prior is not None and prior.dismissed:
+            continue
+        hist = history_pump_metrics(state, now_ms)
+        if hist is None:
+            continue
+        watch = WatchRow(
+            board=BOARD_ID,
+            symbol=symbol,
+            entered_at=now_ms,
+            dismissed=False,
+            confirmed_stage=1,
+            pending_stage=None,
+            pending_since=None,
+            meta={
+                "min_low": hist.min_low,
+                "peak_mult": hist.peak_mult,
+                "valley_ts": hist.valley_ts,
+                "interval": hist.interval,
+            },
+        )
+        watches.upsert(watch)
+        active[symbol] = watch
+
+    items: list[X2RetraceItem] = []
+    for symbol, watch in list(active.items()):
+        state = states.get(symbol)
+        if state is None or not state.last_price:
+            continue
+        if growth_pct_negative(state):
+            watches.remove(BOARD_ID, symbol)
+            continue
+        measured = _metrics_for_state(state, now_ms, watch.meta)
+        if measured is None:
+            continue
+        row, pullback_ok = measured
+        watch.meta["peak_mult"] = max(float(watch.meta.get("peak_mult") or 0), row.peak_mult)
+        watch.meta["min_low"] = row.min_low_5d
+        watch.meta["valley_ts"] = row.pump_start_ts
+        cand = candidate_stage(
+            peak_mult=row.peak_mult,
             pullback_ok=pullback_ok,
-            lh_1h=lh_1h,
-            lh_4h=lh_4h,
-            oi_drop=reading.oi_drop,
-            ema_depth=ema_depth,
+            lh_1h=row.lh_1h,
+            lh_4h=row.lh_4h,
+            oi_drop=row.oi_drop,
+            ema_depth=row.ema_depth,
         )
-        if stage < 1:
-            continue
-        pct24 = price_24h_pct(state.price_24h_change)
-        items.append(
-            X2RetraceItem(
-                symbol=symbol,
-                stage=stage,
-                multiplier=mult,
-                min_low_5d=min_low,
-                pump_start_ts=pump_start,
-                pullback_pct=pullback_pct if pullback_ok else pullback_pct,
-                lh_1h=lh_1h,
-                lh_4h=lh_4h,
-                last_price=float(state.last_price),
-                price_24h_pct=pct24,
-                turnover_24h_usdt=float(state.turnover_24h_usdt or 0),
-                oi_drop=reading.oi_drop,
-                oi_change_pct=reading.oi_change_pct,
-                ema_depth=ema_depth,
-                ema_by_tf=ema_map,
-                updated_at=now_ms,
-            )
+        hist = history_pump_metrics(state, now_ms)
+        confirmed, pending, pending_since = resolve_stage(
+            confirmed=watch.confirmed_stage,
+            candidate=cand,
+            pending_stage=watch.pending_stage,
+            pending_since=watch.pending_since,
+            now_ms=now_ms,
+            continued_pump=_continued_pump(watch.meta, hist),
         )
+        watch.confirmed_stage = confirmed
+        watch.pending_stage = pending
+        watch.pending_since = pending_since
+        watches.upsert(watch)
+        row.stage = confirmed
+        row.pending_stage = pending
+        items.append(row)
+
     grouped: dict[int, list[X2RetraceItem]] = {s: [] for s in (1, 2, 3, 4)}
     for item in items:
         grouped[item.stage].append(item)
@@ -205,7 +257,7 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int) -> dict:
         col = config.X2_RETRACE_COLUMNS[stage]
         ordered = sorted(
             grouped[stage],
-            key=lambda row: (row.multiplier, row.lh_1h + row.lh_4h, row.ema_depth, row.pullback_pct),
+            key=lambda row: (row.peak_mult, row.lh_1h + row.lh_4h, row.ema_depth),
             reverse=True,
         )
         columns.append({**col, "stage": stage, "signals": [row.to_data() for row in ordered]})

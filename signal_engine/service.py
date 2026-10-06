@@ -70,6 +70,7 @@ class SignalService:
                     if asyncio.iscoroutine(result):
                         await result
             self.engine.store.close()
+            self.engine.watches.close()
 
     def _ingest_raw(self, raw: object) -> None:
         if isinstance(raw, bytes):

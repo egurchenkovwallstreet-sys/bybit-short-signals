@@ -52,10 +52,32 @@ function initPumpScanTab() {
     if (card?.dataset.symbol) selectPumpSymbol(card.dataset.symbol);
   });
   document.getElementById("pump-detail")?.addEventListener("click", (event) => {
-    const btn = event.target instanceof Element ? event.target.closest("[data-pump-interval]") : null;
+    const target = event.target instanceof Element ? event.target : null;
+    const dismiss = target?.closest("[data-dismiss-board]");
+    if (dismiss?.dataset.dismissBoard && pumpState.selected) {
+      void dismissBoardWatch(dismiss.dataset.dismissBoard, pumpState.selected);
+      return;
+    }
+    const btn = target?.closest("[data-pump-interval]");
     if (!btn) return;
     setPumpInterval(btn.dataset.pumpInterval);
   });
+}
+
+async function dismissBoardWatch(board, symbol) {
+  try {
+    await fetch("/api/watch/dismiss", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ board, symbol }),
+    });
+    pumpState.selected = null;
+    pumpState.detail = null;
+    renderPumpDetail();
+    renderPumpBoard();
+  } catch (_e) {
+    /* ignore */
+  }
 }
 
 function onPumpScanBoard(data) {
@@ -178,7 +200,7 @@ function pumpCardHtml(row, color, active) {
   const emaHint = emaHintText(row.ema_by_tf);
   return `<article class="card pump-card ${color}${active ? " active" : ""}" data-symbol="${row.symbol}">
     <header><strong>${row.symbol}</strong> <span class="tag">+${fmt(row.price_24h_pct)}% / 24h</span></header>
-    <div class="meta">ослабление ${row.weaken_score} · EMA ${row.ema_depth}/3</div>
+    <div class="meta">ослабление ${row.weaken_score} · EMA ${row.ema_depth}/3${row.pending_stage ? ` · →${row.pending_stage}?` : ""}</div>
     <canvas class="mini" width="120" height="36" data-symbol="${row.symbol}"></canvas>
     <p class="quiet ema-hint">${emaHint}</p>
   </article>`;
@@ -221,6 +243,7 @@ function pumpDetailShell(s) {
       <h2>${s.symbol}</h2>
       <span class="tag">${s.status} ${s.label}</span>
       <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${s.symbol}" target="_blank" rel="noopener">Bybit</a>
+      <button type="button" class="dismiss-watch" data-dismiss-board="pump_scan">Снять с отслеживания</button>
     </header>
     <dl class="detail-stats" id="pump-stats"></dl>
     <h3>Признаки ослабления</h3>

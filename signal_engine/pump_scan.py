@@ -1,4 +1,4 @@
-"""Доска «Памп-скан»: лидеры роста за 24ч и стадии ослабления перед шортом."""
+"""Доска «Памп-скан»: лидеры +24h, липкий список, стадии ослабления."""
 
 from __future__ import annotations
 
@@ -8,7 +8,11 @@ import config
 from signal_engine.ema_breakdown import ema_breakdown_by_interval
 from signal_engine.evaluate import Reading, evaluate
 from signal_engine.flow import funding_extreme, taker_sellers_control
+from signal_engine.stage_debounce import resolve_stage
 from signal_engine.state import SymbolState
+from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
+
+BOARD_ID = "pump_scan"
 
 
 def price_24h_pct(raw: float | None) -> float | None:
@@ -69,6 +73,7 @@ class PumpScanItem:
     weaken_score: int
     ema_depth: int
     reading: Reading
+    pending_stage: int | None = None
     ema_by_tf: dict[str, dict] = field(default_factory=dict)
     updated_at: int = 0
 
@@ -86,6 +91,7 @@ class PumpScanItem:
             "turnover_24h_usdt": self.turnover_24h_usdt,
             "weaken_score": self.weaken_score,
             "ema_depth": self.ema_depth,
+            "pending_stage": self.pending_stage,
             "updated_at": self.updated_at,
             "liquidations_faded": r.liquidations_faded,
             "oi_drop": r.oi_drop,
@@ -101,35 +107,79 @@ class PumpScanItem:
         }
 
 
-def build_pump_scan_board(states: dict[str, SymbolState], now_ms: int) -> dict:
-    items: list[PumpScanItem] = []
+def build_pump_scan_board(states: dict[str, SymbolState], now_ms: int, watches: WatchStore) -> dict:
+    active = watches.active(BOARD_ID)
     for symbol, state in states.items():
-        if not is_gainer_candidate(state):
+        if symbol in active:
             continue
-        if state.last_price is None or state.last_price <= 0:
+        prior = watches.get(BOARD_ID, symbol)
+        if prior is not None and prior.dismissed:
+            continue
+        if not is_gainer_candidate(state):
             continue
         pct = price_24h_pct(state.price_24h_change)
         if pct is None:
             continue
+        watch = WatchRow(
+            board=BOARD_ID,
+            symbol=symbol,
+            entered_at=now_ms,
+            dismissed=False,
+            confirmed_stage=1,
+            pending_stage=None,
+            pending_since=None,
+            meta={"entry_pct": pct},
+        )
+        watches.upsert(watch)
+        active[symbol] = watch
+
+    items: list[PumpScanItem] = []
+    for symbol, watch in list(active.items()):
+        state = states.get(symbol)
+        if state is None or state.last_price is None or state.last_price <= 0:
+            continue
+        if growth_pct_negative(state):
+            watches.remove(BOARD_ID, symbol)
+            continue
+        pct = price_24h_pct(state.price_24h_change)
+        if pct is None:
+            pct = float(watch.meta.get("entry_pct") or 0)
         reading = evaluate(state, now_ms)
         ema_map = ema_breakdown_by_interval(state.bars_htf)
         weaken = _weakening_score(reading, now_ms, state)
         ema_depth = _ema_depth_max(ema_map)
-        stage = stage_for(reading, state, now_ms, ema_map)
+        candidate = stage_for(reading, state, now_ms, ema_map)
+        entry_pct = float(watch.meta.get("entry_pct") or pct)
+        continued = pct >= entry_pct + 12.0
+        confirmed, pending, pending_since = resolve_stage(
+            confirmed=watch.confirmed_stage,
+            candidate=candidate,
+            pending_stage=watch.pending_stage,
+            pending_since=watch.pending_since,
+            now_ms=now_ms,
+            continued_pump=continued,
+        )
+        watch.confirmed_stage = confirmed
+        watch.pending_stage = pending
+        watch.pending_since = pending_since
+        watch.meta["entry_pct"] = max(entry_pct, pct)
+        watches.upsert(watch)
         items.append(
             PumpScanItem(
                 symbol=symbol,
-                stage=stage,
+                stage=confirmed,
                 last_price=state.last_price,
                 price_24h_pct=pct,
                 turnover_24h_usdt=float(state.turnover_24h_usdt or 0),
                 weaken_score=weaken,
                 ema_depth=ema_depth,
                 reading=reading,
+                pending_stage=pending,
                 ema_by_tf=ema_map,
                 updated_at=now_ms,
             )
         )
+
     grouped: dict[int, list[PumpScanItem]] = {s: [] for s in (1, 2, 3, 4)}
     for item in items:
         grouped[item.stage].append(item)
