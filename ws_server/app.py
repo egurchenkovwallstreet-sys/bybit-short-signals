@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import config
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -22,8 +22,11 @@ _SYMBOL = re.compile(r"^[A-Z0-9]{2,20}$")
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    from collector.publisher import open_redis
+
     hub = Hub()
     app.state.hub = hub
+    app.state.redis = await open_redis(config.REDIS_URL)
     import asyncio
 
     task = asyncio.create_task(hub.run())
@@ -36,6 +39,11 @@ async def _lifespan(app: FastAPI):
             await task
         except asyncio.CancelledError:
             pass
+        redis = getattr(app.state, "redis", None)
+        if redis is not None:
+            close = getattr(redis, "aclose", None)
+            if close is not None:
+                await close()
 
 
 app = FastAPI(title="Сигналы шорт", lifespan=_lifespan)
@@ -66,15 +74,41 @@ async def btc_analytics() -> dict[str, Any]:
 
 @app.get("/api/btc-test/snapshot")
 async def btc_snapshot() -> dict[str, Any]:
+    from strategy_test.symbol_state import read_active_symbol
+
     data = app.state.hub.btc.view()
     if data:
         return data
     from ws_server.btc_hydrate import btc_snapshot_from_db
 
-    snap = btc_snapshot_from_db()
+    sym = await read_active_symbol(app.state.redis)
+    snap = btc_snapshot_from_db(sym)
     if snap:
         return snap
-    return {"signals": [], "markers": [], "analytics": {}, "candles_by_tf": {}}
+    return {"symbol": sym, "signals": [], "markers": [], "analytics": {}, "candles_by_tf": {}}
+
+
+@app.get("/api/btc-test/symbols")
+async def btc_test_symbols() -> dict[str, Any]:
+    from strategy_test.symbol_state import read_active_symbol
+    from ws_server.btc_universe import list_symbols_with_volatility
+
+    active = await read_active_symbol(app.state.redis)
+    rows = list_symbols_with_volatility(app.state.hub.cache)
+    return {"active": active, "symbols": rows}
+
+
+@app.post("/api/btc-test/symbol")
+async def btc_test_set_symbol(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    from strategy_test.symbol_state import write_active_symbol
+
+    symbol = str(body.get("symbol") or "").strip().upper()
+    if not _SYMBOL.fullmatch(symbol):
+        raise HTTPException(status_code=400, detail="Некорректный тикер")
+    if not symbol.endswith("USDT"):
+        raise HTTPException(status_code=400, detail="Доступны только USDT-перпы")
+    await write_active_symbol(app.state.redis, symbol)
+    return {"ok": True, "symbol": symbol}
 
 
 @app.get("/api/tooltips")

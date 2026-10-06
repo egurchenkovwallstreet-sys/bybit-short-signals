@@ -10,21 +10,22 @@ from strategy_test.markers import markers_from_signals
 from strategy_test.store import BtcStrategyStore
 
 
-def btc_snapshot_from_db() -> dict[str, Any] | None:
+def btc_snapshot_from_db(symbol: str | None = None) -> dict[str, Any] | None:
     path = config.BTC_TEST_SQLITE_PATH
+    sym = (symbol or config.BTC_TEST_SYMBOL).upper()
     if not path.exists():
         return None
     store = BtcStrategyStore(path)
     store.open()
     try:
-        rows = store.list_signals(150)
+        rows = store.list_signals(150, symbol=sym)
     finally:
         store.close()
     if not rows:
         return None
     analytics = compute_analytics(rows)
     return {
-        "symbol": config.BTC_TEST_SYMBOL,
+        "symbol": sym,
         "bias": None,
         "last_price": None,
         "funding": None,

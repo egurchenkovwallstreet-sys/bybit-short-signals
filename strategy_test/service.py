@@ -15,6 +15,7 @@ from strategy_test.analytics import compute_analytics
 from strategy_test.engine import BtcStrategyEngine, OpenTrade
 from strategy_test.markers import markers_from_signals
 from strategy_test.store import BtcStrategyStore
+from strategy_test.symbol_state import read_active_symbol
 
 
 log = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ _INTERVALS = ("1", "5", "15", "30", "60", "240", "D")
 
 class BtcStrategyService:
     def __init__(self) -> None:
-        self.engine = BtcStrategyEngine()
+        self.engine = BtcStrategyEngine(config.BTC_TEST_SYMBOL)
         self.store = BtcStrategyStore(config.BTC_TEST_SQLITE_PATH)
         self.rest = BybitRest()
         self._pub: RedisPublisher | None = None
@@ -40,6 +41,7 @@ class BtcStrategyService:
             config.REDIS_CHANNEL_BUFFER,
         )
         await self._pub.start()
+        await self._sync_symbol(force=True)
         self._restore_open()
         self._restore_markers()
         await self._publish()
@@ -49,8 +51,35 @@ class BtcStrategyService:
             self._scan_loop(),
         )
 
+    async def _sync_symbol(self, force: bool = False) -> None:
+        assert self._pub_redis is not None
+        sym = await read_active_symbol(self._pub_redis)
+        if sym == self.engine.symbol and not force:
+            return
+        if sym != self.engine.symbol:
+            self._close_open_for_switch()
+            self.engine.reset_for_symbol(sym)
+            log.info("Тест стратегии: актив %s", sym)
+
+    def _close_open_for_switch(self) -> None:
+        now_ms = int(time.time() * 1000)
+        for mode, trade in list(self.engine.open.items()):
+            if not trade:
+                continue
+            px = self.engine.last_price or trade.entry_price
+            closed = self.engine._close_trade(mode, trade, now_ms, px, "symbol_switch")
+            self.store.close_signal(
+                closed["id"],
+                closed["exit_ts"],
+                closed["exit_price"],
+                closed["outcome"],
+                closed["pnl_pct"],
+                closed["r_multiple"],
+                closed["exit_reason"],
+            )
+
     def _restore_open(self) -> None:
-        for row in self.store.open_positions():
+        for row in self.store.open_positions(self.engine.symbol):
             mode = str(row["mode"])
             risk = abs(float(row["entry_price"]) * 0.005) or 1.0
             self.engine.open[mode] = OpenTrade(
@@ -66,14 +95,15 @@ class BtcStrategyService:
             )
 
     def _restore_markers(self) -> None:
-        rows = self.store.list_signals(120)
+        rows = self.store.list_signals(120, symbol=self.engine.symbol)
         self.engine.markers = markers_from_signals(rows)
 
     async def _kline_loop(self) -> None:
         while True:
             try:
+                await self._sync_symbol()
                 for interval in _INTERVALS:
-                    msg = await self.rest.fetch_klines(self.engine.SYMBOL, interval)
+                    msg = await self.rest.fetch_klines(self.engine.symbol, interval)
                     await asyncio.sleep(0.35)
                     if not msg:
                         continue
@@ -91,7 +121,7 @@ class BtcStrategyService:
                             }
                         )
                     self.engine.set_bars(interval, parsed)
-                oi_msg = await self.rest.fetch_open_interest(self.engine.SYMBOL, "15min")
+                oi_msg = await self.rest.fetch_open_interest(self.engine.symbol, "15min")
                 if oi_msg:
                     points = (oi_msg.get("data") or {}).get("points") or []
                     if points:
@@ -119,7 +149,7 @@ class BtcStrategyService:
                     envelope = json.loads(raw)
                 except json.JSONDecodeError:
                     continue
-                if envelope.get("symbol") != config.BTC_TEST_SYMBOL:
+                if envelope.get("symbol") != self.engine.symbol:
                     continue
                 self._ingest(envelope)
         finally:
@@ -152,6 +182,7 @@ class BtcStrategyService:
 
     async def _scan_loop(self) -> None:
         while True:
+            await self._sync_symbol()
             now_ms = int(time.time() * 1000)
             for closed in self.engine.update_exits(now_ms):
                 self.store.close_signal(
@@ -165,6 +196,7 @@ class BtcStrategyService:
                 )
             for sig in self.engine.scan_entries(now_ms):
                 sid = self.store.insert_signal(
+                    self.engine.symbol,
                     sig["mode"],
                     sig["side"],
                     sig["grade"],
@@ -202,7 +234,7 @@ class BtcStrategyService:
     async def _publish(self) -> None:
         if self._pub is None:
             return
-        rows = self.store.list_signals(150)
+        rows = self.store.list_signals(150, symbol=self.engine.symbol)
         analytics = compute_analytics(rows)
         payload = {
             "type": "btc_strategy",

@@ -291,6 +291,33 @@ th { cursor: pointer; color: var(--muted); }
   gap: 12px;
 }
 
+.btc-symbol-panel h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.btc-symbol-wrap {
+  max-height: 220px;
+  overflow: auto;
+}
+
+#btc-symbol-table tbody tr.selected {
+  background: rgba(88, 166, 255, 0.12);
+}
+
+.btc-sym-pick {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.btc-sym-pick:hover {
+  border-color: var(--blue);
+}
+
 .btc-tf-bar {
   display: flex;
   flex-wrap: wrap;

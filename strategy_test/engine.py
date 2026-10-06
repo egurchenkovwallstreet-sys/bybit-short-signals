@@ -35,9 +35,8 @@ class OpenTrade:
 
 
 class BtcStrategyEngine:
-    SYMBOL = config.BTC_TEST_SYMBOL
-
-    def __init__(self) -> None:
+    def __init__(self, symbol: str | None = None) -> None:
+        self.symbol = (symbol or config.BTC_TEST_SYMBOL).upper()
         self.bars: dict[str, list[dict[str, float]]] = {}
         self.last_price: float | None = None
         self.perp = LivePerp()
@@ -45,6 +44,16 @@ class BtcStrategyEngine:
         self._cooldown: dict[str, int] = {}
         self.bias: str = "FLAT"
         self.markers: list[dict[str, Any]] = []
+
+    def reset_for_symbol(self, symbol: str) -> None:
+        self.symbol = symbol.upper()
+        self.bars = {}
+        self.last_price = None
+        self.perp = LivePerp()
+        self.open = {"intraday": None, "scalp": None}
+        self._cooldown = {}
+        self.bias = "FLAT"
+        self.markers = []
 
     def set_bars(self, interval: str, rows: list[dict[str, float]]) -> None:
         self.bars[interval] = rows
@@ -361,7 +370,7 @@ class BtcStrategyEngine:
         tfs = ("1", "5", "15", "30", "60", "240", "D")
         candles_by_tf = {tf: self.chart_candles(tf) for tf in tfs}
         return {
-            "symbol": self.SYMBOL,
+            "symbol": self.symbol,
             "bias": self.bias,
             "last_price": self.last_price,
             "funding": self.perp.funding,

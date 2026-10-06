@@ -40,6 +40,8 @@ const btcState = {
   selectedSignalId: null,
   userAtLiveEdge: true,
   priceLines: [],
+  activeSymbol: null,
+  symbolRows: [],
 };
 
 function barTimeForMarker(entrySec, candles) {
@@ -117,6 +119,72 @@ async function fetchBtcFallback() {
   }
 }
 
+async function fetchBtcSymbols() {
+  try {
+    const res = await fetch("/api/btc-test/symbols");
+    if (!res.ok) return;
+    const payload = await res.json();
+    btcState.activeSymbol = payload.active || btcState.data?.symbol || "BTCUSDT";
+    btcState.symbolRows = payload.symbols || [];
+    renderBtcSymbolTable();
+  } catch (_err) {
+    /* offline */
+  }
+}
+
+function renderBtcSymbolTable() {
+  const body = document.querySelector("#btc-symbol-table tbody");
+  if (!body) return;
+  const rows = btcState.symbolRows || [];
+  const active = btcState.activeSymbol || btcState.data?.symbol || "BTCUSDT";
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="3" class="quiet">Список загружается (нужны часовые свечи с коллектора)…</td></tr>';
+    return;
+  }
+  body.innerHTML = rows
+    .map((row) => {
+      const isActive = row.symbol === active;
+      const sel = isActive ? " selected" : "";
+      const action = isActive
+        ? '<span class="quiet">актив</span>'
+        : '<button type="button" class="btc-sym-pick">Выбрать</button>';
+      return `<tr class="btc-sym-row${sel}" data-symbol="${row.symbol}">
+        <td>${row.symbol}</td>
+        <td>${Number(row.volatility_pct || 0).toFixed(2)}</td>
+        <td>${action}</td>
+      </tr>`;
+    })
+    .join("");
+  body.querySelectorAll(".btc-sym-pick").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      const sym = btn.closest(".btc-sym-row")?.dataset.symbol;
+      if (sym) void pickBtcSymbol(sym);
+    });
+  });
+}
+
+async function pickBtcSymbol(symbol) {
+  const meta = document.getElementById("btc-meta");
+  try {
+    const res = await fetch("/api/btc-test/symbol", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ symbol }),
+    });
+    if (!res.ok) {
+      if (meta) meta.textContent = "Не удалось сменить актив";
+      return;
+    }
+    btcState.activeSymbol = symbol;
+    btcState.selectedSignalId = null;
+    renderBtcSymbolTable();
+    if (meta) meta.textContent = `Переключаем на ${symbol}… (сервис подтянет свечи за несколько секунд)`;
+  } catch (_err) {
+    if (meta) meta.textContent = "Ошибка сети при смене актива";
+  }
+}
+
 function resizeBtcChart() {
   const box = document.getElementById("btc-chart");
   if (!box || !btcState.chart) return;
@@ -129,6 +197,7 @@ function initBtcTab() {
   const box = document.getElementById("btc-chart");
   if (!box) return;
   if (btcState.chart) {
+    void fetchBtcSymbols();
     requestAnimationFrame(() => {
       resizeBtcChart();
       requestAnimationFrame(() => {
@@ -191,6 +260,8 @@ function initBtcTab() {
     btcState.userAtLiveEdge = range.to >= lastIdx - 2;
   });
 
+  void fetchBtcSymbols();
+
   requestAnimationFrame(() => {
     resizeBtcChart();
     if (btcState.data) renderBtcChart(true);
@@ -251,9 +322,17 @@ function onBtcMessage(incoming) {
       };
     }
   }
+  const prevSymbol = btcState.data?.symbol;
   btcState.data = data;
+  if (data?.symbol && data.symbol !== prevSymbol) {
+    btcState.activeSymbol = data.symbol;
+    btcState.selectedSignalId = null;
+  }
   const btcView = document.getElementById("view-btc");
-  if (btcView && !btcView.hidden) initBtcTab();
+  if (btcView && !btcView.hidden) {
+    initBtcTab();
+    void fetchBtcSymbols();
+  }
   renderBtcHeader();
   renderBtcChart(false);
   renderBtcJournal();
@@ -272,7 +351,8 @@ function renderBtcHeader() {
   const openHint = opens.length
     ? ` · Сделки OPEN: ${opens.map((s) => `${s.side.toUpperCase()} (${s.mode})`).join(", ")}`
     : " · Сделок OPEN нет (bias ≠ вход; ждём grade A/B/C)";
-  el.textContent = `Bias: ${d.bias || "—"} · Funding: ${fr} · Цена: ${d.last_price ?? "—"} · TF: ${btcState.interval}${openHint}`;
+  const sym = d.symbol || btcState.activeSymbol || "BTCUSDT";
+  el.textContent = `Актив: ${sym} · Режим: ${d.bias || "—"} · Финансирование: ${fr} · Цена: ${d.last_price ?? "—"} · TF: ${btcState.interval}${openHint}`;
 }
 
 function renderBtcChart(forceTf) {
@@ -452,4 +532,4 @@ function renderBtcExtendedStats() {
   root.innerHTML = html;
 }
 
-window.btcTest = { initBtcTab, onBtcMessage, fetchBtcFallback };
+window.btcTest = { initBtcTab, onBtcMessage, fetchBtcFallback, fetchBtcSymbols };

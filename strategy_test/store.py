@@ -11,6 +11,7 @@ from typing import Any
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS btc_signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL DEFAULT 'BTCUSDT',
     mode TEXT NOT NULL,
     side TEXT NOT NULL,
     grade TEXT NOT NULL,
@@ -40,7 +41,16 @@ class BtcStrategyStore:
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate_symbol_column()
         self._conn.commit()
+
+    def _migrate_symbol_column(self) -> None:
+        assert self._conn is not None
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(btc_signals)")}
+        if "symbol" not in cols:
+            self._conn.execute(
+                "ALTER TABLE btc_signals ADD COLUMN symbol TEXT NOT NULL DEFAULT 'BTCUSDT'"
+            )
 
     def close(self) -> None:
         if self._conn is not None:
@@ -49,6 +59,7 @@ class BtcStrategyStore:
 
     def insert_signal(
         self,
+        symbol: str,
         mode: str,
         side: str,
         grade: str,
@@ -62,10 +73,20 @@ class BtcStrategyStore:
         cur = self._conn.execute(
             """
             INSERT INTO btc_signals
-            (mode, side, grade, score, entry_ts, entry_price, checks_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            (symbol, mode, side, grade, score, entry_ts, entry_price, checks_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (mode, side, grade, score, entry_ts, entry_price, json.dumps(checks, ensure_ascii=False), created_at),
+            (
+                symbol,
+                mode,
+                side,
+                grade,
+                score,
+                entry_ts,
+                entry_price,
+                json.dumps(checks, ensure_ascii=False),
+                created_at,
+            ),
         )
         self._conn.commit()
         return int(cur.lastrowid)
@@ -90,19 +111,26 @@ class BtcStrategyStore:
         )
         self._conn.commit()
 
-    def open_positions(self) -> list[dict[str, Any]]:
+    def open_positions(self, symbol: str) -> list[dict[str, Any]]:
         assert self._conn is not None
         rows = self._conn.execute(
-            "SELECT * FROM btc_signals WHERE exit_ts IS NULL ORDER BY id"
+            "SELECT * FROM btc_signals WHERE exit_ts IS NULL AND symbol = ? ORDER BY id",
+            (symbol,),
         ).fetchall()
         return [dict(r) for r in rows]
 
-    def list_signals(self, limit: int = 200) -> list[dict[str, Any]]:
+    def list_signals(self, limit: int = 200, symbol: str | None = None) -> list[dict[str, Any]]:
         assert self._conn is not None
-        rows = self._conn.execute(
-            "SELECT * FROM btc_signals ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        if symbol:
+            rows = self._conn.execute(
+                "SELECT * FROM btc_signals WHERE symbol = ? ORDER BY id DESC LIMIT ?",
+                (symbol, limit),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM btc_signals ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         out = []
         for r in rows:
             item = dict(r)
