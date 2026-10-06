@@ -61,6 +61,22 @@ Redis должен быть доступен по `REDIS_URL` (по умолча
 python -m unittest tests.test_config
 ```
 
+## VPS (Timeweb): деплой и PM2
+
+После `git pull` на сервере в `/opt/signals`:
+
+```bash
+bash scripts/deploy.sh
+```
+
+Первый раз — установка PM2 и автозапуск после reboot:
+
+```bash
+bash scripts/setup_pm2.sh
+```
+
+Процессы: `collector`, `signal-engine`, `ws-server`, `btc-strategy-test`. Логи: `logs-*.txt` в корне проекта.
+
 ## Чего система не делает
 
 - Не выставляет ордера.
