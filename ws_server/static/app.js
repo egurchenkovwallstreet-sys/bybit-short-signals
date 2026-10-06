@@ -17,6 +17,7 @@ const EXTRAS = [
 ];
 
 const CHART_MIN_CANDLES = 100;
+const DETAIL_CHART_WINDOW_HOURS = 48;
 
 const INTERVALS = [
   ["1", "1m"],
@@ -348,21 +349,14 @@ function renderDetail() {
       });
     });
     root.querySelector(".bybit-btn").addEventListener("click", () => openBybit(signal.symbol));
-    const expandBtn = root.querySelector(".chart-expand-btn");
-    const chartRow = root.querySelector(".chart-row");
-    if (expandBtn && chartRow) {
-      expandBtn.addEventListener("click", () => {
-        chartRow.classList.toggle("expanded");
-        expandBtn.textContent = chartRow.classList.contains("expanded")
-          ? "Свернуть график"
-          : "Увеличить график";
-        requestAnimationFrame(() => {
-          if (state.chart) {
-            const box = document.getElementById("candle-chart");
-            const h = chartRow.classList.contains("expanded") ? Math.max(400, box?.clientHeight || 560) : 280;
-            if (box && box.clientWidth > 0) state.chart.resize(box.clientWidth, h);
-          }
-        });
+    const expandAllBtn = root.querySelector(".detail-expand-all-btn");
+    if (expandAllBtn) {
+      expandAllBtn.addEventListener("click", () => {
+        root.classList.toggle("detail--expanded");
+        expandAllBtn.textContent = root.classList.contains("detail--expanded")
+          ? "Свернуть графики"
+          : "Увеличить графики (80% экрана)";
+        requestAnimationFrame(resizeAllDetailCharts);
       });
     }
     mountCandleChart();
@@ -376,9 +370,10 @@ function renderDetail() {
   });
   drawBook(document.getElementById("book-map"), detail.book || {});
   drawLiquidations(document.getElementById("liq-map"), detail.liquidations || []);
-  drawLine("oi-chart", "Открытый интерес", pointsOf(detail.oi, "open_interest"), "#58a6ff");
-  drawLine("cvd-chart", "Дельта объёма", pointsOf(detail.cvd, "value"), "#ffb86c");
-  drawLine("obv-chart", "Баланс объёма", pointsOf(detail.obv, "value"), "#bd93f9");
+  drawLine("oi-chart", "Открытый интерес (48 ч)", pointsOf(detail.oi, "open_interest"), "#58a6ff");
+  drawLine("cvd-chart", "Дельта объёма (48 ч)", pointsOf(detail.cvd, "value"), "#ffb86c");
+  drawLine("obv-chart", "Баланс объёма (48 ч)", pointsOf(detail.obv, "value"), "#bd93f9");
+  resizeAllDetailCharts();
   const funding = root.querySelector("[data-funding]");
   const taker = root.querySelector("[data-taker]");
   const liq = root.querySelector("[data-liq]");
@@ -394,31 +389,44 @@ function detailHtml(signal, interval) {
     ([code, label]) =>
       `<button type="button" class="tf${code === interval ? " active" : ""}" data-interval="${code}">${label}</button>`,
   ).join("");
-  return `<h3>ГРАФИК + КАРТА ЛИКВИДНОСТИ</h3>
-    <div class="tf-row">${buttons}</div>
-    <div class="chart-toolbar">
-      <button type="button" class="chart-expand-btn">Увеличить график</button>
+  return `<div class="detail-head">
+      <h3>Графики сигнала · ${signal.symbol}</h3>
+      <button type="button" class="detail-expand-all-btn">Увеличить графики (80% экрана)</button>
     </div>
-    <div class="chart-row">
-      <div class="candle-chart-wrap">
-        <div id="chart-legend" class="chart-legend" aria-hidden="true"></div>
-        <div id="candle-chart"></div>
-      </div>
-      <div>
+    <p class="quiet detail-window-hint">Индикаторы ниже — последние ${DETAIL_CHART_WINDOW_HOURS} ч (2 суток), обновление в реальном времени.</p>
+    <div class="tf-row">${buttons}</div>
+    <div class="signal-info">${infoHtml(signal)}</div>
+    <div class="detail-visual-stack">
+      <section class="chart-block">
+        <h4>Свечи и объём</h4>
+        <div class="candle-chart-wrap">
+          <div id="chart-legend" class="chart-legend" aria-hidden="true"></div>
+          <div id="candle-chart"></div>
+        </div>
+      </section>
+      <section class="chart-block">
+        <h4>Карта ликвидности (стакан)</h4>
         <canvas id="book-map"></canvas>
         <div class="walls" id="walls"></div>
+      </section>
+      <section class="chart-block">
+        <h4>Ликвидации шортов (S: Sell)</h4>
+        <canvas id="liq-map"></canvas>
+      </section>
+      <section class="chart-block">
+        <div id="oi-chart" class="plot"></div>
+      </section>
+      <section class="chart-block">
+        <div id="cvd-chart" class="plot"></div>
+      </section>
+      <section class="chart-block">
+        <div id="obv-chart" class="plot"></div>
+      </section>
+      <div class="detail-metrics-row">
+        <div class="metric"><div>Ставка финансирования</div><strong data-funding>—</strong></div>
+        <div class="metric"><div>Доля покупок (тейкеры)</div><strong data-taker>—</strong></div>
+        <div class="metric"><div>Ликвидации</div><strong data-liq>—</strong></div>
       </div>
-    </div>
-    <div class="signal-info">${infoHtml(signal)}</div>
-    <h3>КАРТА ЛИКВИДАЦИЙ (S: Sell — шортисты)</h3>
-    <canvas id="liq-map"></canvas>
-    <div class="market-grid">
-      <div id="oi-chart" class="plot"></div>
-      <div class="metric"><div>Ставка финансирования</div><strong data-funding>—</strong></div>
-      <div id="cvd-chart" class="plot"></div>
-      <div class="metric"><div>Доля покупок (тейкеры)</div><strong data-taker>—</strong></div>
-      <div id="obv-chart" class="plot"></div>
-      <div class="metric"><div>Ликвидации</div><strong data-liq>—</strong></div>
     </div>
     <button type="button" class="bybit-btn">Открыть график на Bybit</button>
     <p class="quiet" id="bybit-note"></p>`;
@@ -475,7 +483,9 @@ function mountCandleChart() {
   state.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
   state.priceLines = [];
   const resize = () => {
-    if (state.chart && container.clientWidth > 0) state.chart.resize(container.clientWidth, 280);
+    if (state.chart && container.clientWidth > 0) {
+      state.chart.resize(container.clientWidth, detailChartHeight(container));
+    }
   };
   new ResizeObserver(resize).observe(container);
   requestAnimationFrame(resize);
@@ -603,8 +613,7 @@ function drawCandles(candles, signal, detail, resetChartScale) {
     );
   });
   const chartBox = document.getElementById("candle-chart");
-  const chartRow = document.querySelector(".chart-row");
-  const h = chartRow?.classList.contains("expanded") ? Math.max(400, chartBox?.clientHeight || 560) : 280;
+  const h = detailChartHeight(chartBox);
   if (chartBox && chartBox.clientWidth > 0) state.chart.resize(chartBox.clientWidth, h);
   if (!bars.length && chartBox) {
     chartBox.dataset.empty = "1";
@@ -674,11 +683,12 @@ function drawLiquidations(canvas, points) {
   if (!canvas) return;
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 640;
+  const height = canvas.clientHeight || 180;
   canvas.width = width * ratio;
-  canvas.height = 180 * ratio;
+  canvas.height = height * ratio;
   const ctx = canvas.getContext("2d");
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, width, 180);
+  ctx.clearRect(0, 0, width, height);
   if (!points.length) {
     ctx.fillStyle = "#8e9aab";
     ctx.fillText("нет ликвидаций шортов", 12, 24);
@@ -694,7 +704,7 @@ function drawLiquidations(canvas, points) {
   const now = t1;
   points.forEach((point) => {
     const x = ((Number(point.time) - t0) / (t1 - t0 || 1)) * (width - 16) + 8;
-    const y = 170 - ((Number(point.price) - p0) / (p1 - p0 || 1)) * 160;
+    const y = height - 10 - ((Number(point.price) - p0) / (p1 - p0 || 1)) * (height - 20);
     const age = (now - Number(point.time)) / (t1 - t0 || 1);
     const alpha = Math.max(0.12, (1 - age) * (0.35 + 0.65 * (Number(point.size) / maxSize)));
     ctx.fillStyle = `rgba(255, 120, 90, ${alpha})`;
@@ -704,24 +714,71 @@ function drawLiquidations(canvas, points) {
   });
 }
 
-function pointsOf(rows, valueKey) {
-  return (rows || [])
-    .map((row) => [row.time || row.timestamp, row[valueKey] ?? row.value ?? row.open_interest])
-    .filter((row) => row[0] != null && row[1] != null);
+function pointTimeMs(raw) {
+  const n = Number(raw);
+  if (!n || Number.isNaN(n)) return null;
+  return n > 1e12 ? n : n * 1000;
+}
+
+function pointsOf(rows, valueKey, windowHours = DETAIL_CHART_WINDOW_HOURS) {
+  const cutoff = Date.now() - windowHours * 3600 * 1000;
+  const out = [];
+  for (const row of rows || []) {
+    const t = pointTimeMs(row.time ?? row.timestamp);
+    const v = Number(row[valueKey] ?? row.value ?? row.open_interest);
+    if (t == null || Number.isNaN(v)) continue;
+    if (t >= cutoff) out.push([t, v]);
+  }
+  out.sort((a, b) => a[0] - b[0]);
+  return out;
+}
+
+function detailChartHeight(el) {
+  if (!el) return 280;
+  const detail = document.getElementById("detail");
+  if (detail?.classList.contains("detail--expanded")) {
+    return Math.max(320, Math.floor(window.innerHeight * 0.8));
+  }
+  const h = el.clientHeight;
+  return h > 40 ? h : el.id === "candle-chart" ? 300 : 200;
+}
+
+function resizeAllDetailCharts() {
+  const candleBox = document.getElementById("candle-chart");
+  if (state.chart && candleBox && candleBox.clientWidth > 0) {
+    state.chart.resize(candleBox.clientWidth, detailChartHeight(candleBox));
+  }
+  for (const id of ["oi-chart", "cvd-chart", "obv-chart"]) {
+    const node = document.getElementById(id);
+    if (!node || !window.echarts) continue;
+    const chart = echarts.getInstanceByDom(node);
+    if (chart) chart.resize();
+  }
 }
 
 function drawLine(id, name, points, color = "#5dade2") {
   const node = document.getElementById(id);
   if (!node || !window.echarts) return;
   const chart = echarts.getInstanceByDom(node) || echarts.init(node);
+  const now = Date.now();
+  const xmin = now - DETAIL_CHART_WINDOW_HOURS * 3600 * 1000;
   chart.setOption({
     backgroundColor: "transparent",
-    title: { text: name, textStyle: { color: "#c5d0de", fontSize: 12, fontWeight: 500 } },
-    grid: { left: 36, right: 8, top: 28, bottom: 20 },
-    xAxis: { type: "time", axisLabel: { color: "#8e9aab", hideOverlap: true } },
+    title: { text: name, textStyle: { color: "#c5d0de", fontSize: 13, fontWeight: 500 } },
+    grid: { left: 44, right: 12, top: 32, bottom: 28 },
+    xAxis: {
+      type: "time",
+      min: xmin,
+      max: now + 60000,
+      axisLabel: { color: "#8e9aab", hideOverlap: true, formatter: (v) => {
+        const d = new Date(v);
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      } },
+    },
     yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
     series: [{ type: "line", showSymbol: false, data: points, lineStyle: { color, width: 2 } }],
   });
+  requestAnimationFrame(() => chart.resize());
 }
 
 function formatFunding(rate) {

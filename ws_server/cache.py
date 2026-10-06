@@ -7,9 +7,37 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
+import config
 from signal_engine.outcomes import short_pnl_pct
+
+
+def _ts_ms(raw: Any) -> int | None:
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return None
+    return n if n > 1_000_000_000_000 else n * 1000
+
+
+def _trim_time_window(rows: list[dict[str, Any]], time_key: str = "timestamp") -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    window_ms = config.DETAIL_CHART_WINDOW_HOURS * 3600 * 1000
+    cutoff = int(time.time() * 1000) - window_ms
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        ts = _ts_ms(row.get(time_key) if time_key in row else row.get("time"))
+        if ts is not None and ts >= cutoff:
+            out.append(row)
+    if out:
+        return out
+    tail = rows[-min(len(rows), 120) :]
+    return list(tail)
 
 
 class MarketCache:
@@ -92,10 +120,10 @@ class MarketCache:
             "interval": interval,
             "candles": self.klines.get((symbol, interval), []),
             "book": self.book_view(symbol),
-            "liquidations": self.liquidations.get(symbol, [])[-400:],
-            "oi": self.oi.get(symbol, []),
-            "cvd": self.cvd.get(symbol, [])[-180:],
-            "obv": self._obv(symbol),
+            "liquidations": _trim_time_window(self.liquidations.get(symbol, [])[-400:], "time"),
+            "oi": _trim_time_window(self.oi.get(symbol, []), "timestamp"),
+            "cvd": _trim_time_window(self.cvd.get(symbol, []), "time"),
+            "obv": _trim_time_window(self._obv(symbol), "time"),
             "funding_rate": self.funding.get(symbol),
             "taker_ratio": ratio,
             "mini": self.mini_closes(symbol),
@@ -262,7 +290,7 @@ class MarketCache:
                 value -= volume
             series.append({"time": candle["timestamp"], "value": value})
             previous = close
-        return series[-180:]
+        return _trim_time_window(series, "time")
 
 
 def _walls(
