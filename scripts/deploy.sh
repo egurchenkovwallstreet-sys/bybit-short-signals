@@ -19,7 +19,12 @@ _stop_orphans() {
 if command -v pm2 >/dev/null 2>&1; then
   _stop_orphans
   sleep 1
-  pm2 startOrReload "$ROOT/scripts/pm2.ecosystem.cjs" --update-env
+  ECOSYSTEM="$ROOT/scripts/pm2.ecosystem.cjs"
+  if pm2 describe collector >/dev/null 2>&1; then
+    pm2 restart "$ECOSYSTEM" --update-env
+  else
+    pm2 start "$ECOSYSTEM"
+  fi
   pm2 save
 else
   bash "$ROOT/scripts/start_manual.sh"
