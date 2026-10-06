@@ -97,10 +97,24 @@ body {
 }
 
 .pump-strategy-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-content: start;
+}
+
+.psc-section-title {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.psc-section-grid,
+.pump-strategy-grid-inner {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
-  align-content: start;
 }
 
 .pump-strategy-empty {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 
 import config
-from signal_engine.pump_strategy import detect_long_pump, format_period_ru
+from signal_engine.pump_strategy import detect_long_pump, detect_short_pump, format_period_ru
 from signal_engine.state import Bar, SymbolState
 
 
@@ -43,6 +43,32 @@ class PumpStrategyTests(unittest.TestCase):
         now = 1_800_000_000_000
         state.bars_htf["D"] = [_bar(now - 86_400_000, 1.0, 5.0)]
         self.assertIsNone(detect_long_pump(state, now))
+
+    def test_detect_short_pump_5m(self) -> None:
+        state = SymbolState("FASTUSDT")
+        state.turnover_24h_usdt = config.PUMP_STRATEGY_MIN_TURNOVER_24H_USDT + 1
+        state.last_price = 14.0
+        now = 2_000_000_000_000
+        bars = []
+        step = 300_000
+        for i in range(80):
+            ts = now - (80 - i) * step
+            if i < 40:
+                low, high = 10.0, 10.2
+            elif i < 55:
+                low, high = 10.0, 10.0 + (i - 40) * 0.35
+            else:
+                low, high = 13.5, 14.5
+            bars.append(_bar(ts, low, high))
+        state.bars_htf["5"] = bars
+        match = detect_short_pump(state, now)
+        self.assertIsNotNone(match)
+        assert match is not None
+        self.assertEqual(match.kind, "short")
+        self.assertGreaterEqual(match.growth_pct, 40.0)
+        hours = (match.peak_ts - match.valley_ts) / 3_600_000
+        self.assertGreaterEqual(hours, config.PUMP_STRATEGY_SHORT_HOURS_MIN)
+        self.assertLessEqual(hours, config.PUMP_STRATEGY_SHORT_HOURS_MAX)
 
     def test_format_period(self) -> None:
         self.assertEqual(format_period_ru(0, 3_600_000), "1 ч")
