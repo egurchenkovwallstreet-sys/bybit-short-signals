@@ -88,6 +88,18 @@ class BookTest(unittest.TestCase):
         self.assertNotIn(100, prices)
         self.assertIn(99, prices)
 
+    def test_bad_timestamp_does_not_crash_market(self) -> None:
+        cache = MarketCache()
+        cache.apply(
+            {
+                "symbol": "BTCUSDT",
+                "timestamp": {},
+                "type": "trade",
+                "data": {"price": 100, "size": 1, "side": "Buy"},
+            }
+        )
+        self.assertIn("BTCUSDT", cache.mini)
+
     def test_trade_updates_short_pnl(self) -> None:
         cache = MarketCache()
         cache.apply(

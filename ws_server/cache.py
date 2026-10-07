@@ -393,7 +393,7 @@ class MarketCache:
             return
         kind = message.get("type")
         data = message.get("data") or {}
-        timestamp = int(message.get("timestamp") or 0)
+        timestamp = _ts_ms(message.get("timestamp")) or 0
         if kind == "trade":
             self._trade(symbol, timestamp, data)
         elif kind == "kline":
@@ -482,7 +482,7 @@ class MarketCache:
         previous = {**book["bids"], **book["asks"]}
         for side_key, store_key in (("bids", "bids"), ("asks", "asks")):
             for row in data.get(side_key) or []:
-                if len(row) < 2:
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
                     continue
                 price = _num(row[0])
                 size = _num(row[1])

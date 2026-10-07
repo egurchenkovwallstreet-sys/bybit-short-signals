@@ -171,7 +171,12 @@ class Hub:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
-                    log.warning("Поток Redis недоступен: %s", type(exc).__name__)
+                    log.warning(
+                        "Поток Redis недоступен: %s: %s",
+                        type(exc).__name__,
+                        exc,
+                        exc_info=True,
+                    )
                     if not self.cache.signals:
                         self.load_demo()
                     await asyncio.sleep(5)
