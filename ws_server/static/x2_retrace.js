@@ -201,7 +201,7 @@ function renderX2Info(full) {
         <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${s.symbol}" target="_blank" rel="noopener">Bybit</a>
       </header>
       <div class="psc-growth psc-growth-side">×${mult}</div>
-      <p class="quiet psc-sub">рост от минимума за 21 д</p>
+      <p class="quiet psc-sub">рост от минимума за 14 д</p>
       <dl class="psc-info-fields">
         <div class="psc-row"><dt>Min low</dt><dd>${s.min_low_5d ?? "—"}</dd></div>
         <div class="psc-row"><dt>Откат от max 1H</dt><dd>${s.pullback_pct != null ? s.pullback_pct + "%" : "—"}</dd></div>
@@ -267,7 +267,7 @@ function x2CardHtml(row, color, active) {
       <span class="psc-kind">${row.status || ""} ${row.label || ""}</span>
     </header>
     <div class="psc-growth">${multLabel}</div>
-    <p class="quiet psc-sub">рост от минимума за 21 д</p>
+    <p class="quiet psc-sub">рост от минимума за 14 д</p>
     <dl class="psc-fields">
       <div class="psc-row"><dt>Две вершины</dt><dd>${peakHint}</dd></div>
       <div class="psc-row"><dt>LH · 1H / 4H</dt><dd>${row.lh_1h ?? 0} / ${row.lh_4h ?? 0}</dd></div>
