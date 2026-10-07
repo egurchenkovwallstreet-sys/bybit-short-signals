@@ -476,6 +476,7 @@ class MarketCache:
 
     def _book(self, symbol: str, data: dict[str, Any]) -> None:
         book = self.books.setdefault(symbol, {"bids": {}, "asks": {}, "walls": []})
+        _ensure_book_side_maps(book)
         if data.get("reset") or data.get("kind") == "snapshot":
             book["bids"] = {}
             book["asks"] = {}
@@ -552,6 +553,24 @@ def _walls(
             # Сторона исчезнувшего уровня неизвестна точно: рисуем как Spoof.
             walls.append({"price": price, "side": side, "kind": "spoof", "size": old})
     return walls[:12]
+
+
+def _ensure_book_side_maps(book: dict[str, Any]) -> None:
+    """Внутренний кэш стакана — dict price→size; demo/API отдают списки [[p,s], …]."""
+    for key in ("bids", "asks"):
+        side = book.get(key)
+        if isinstance(side, dict):
+            continue
+        converted: dict[float, float] = {}
+        if isinstance(side, list):
+            for row in side:
+                if not isinstance(row, (list, tuple)) or len(row) < 2:
+                    continue
+                price = _num(row[0])
+                size = _num(row[1])
+                if price is not None and size is not None and size > 0:
+                    converted[price] = size
+        book[key] = converted
 
 
 def _num(value: object) -> float | None:

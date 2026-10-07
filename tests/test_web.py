@@ -88,6 +88,24 @@ class BookTest(unittest.TestCase):
         self.assertNotIn(100, prices)
         self.assertIn(99, prices)
 
+    def test_orderbook_after_demo_list_book(self) -> None:
+        cache = MarketCache()
+        cache.books["BEAMUSDT"] = {
+            "bids": [[100.0, 50.0]],
+            "asks": [[101.0, 40.0]],
+            "walls": [],
+        }
+        cache.apply(
+            {
+                "symbol": "BEAMUSDT",
+                "timestamp": 1,
+                "type": "orderbook",
+                "data": {"kind": "delta", "bids": [[100.0, 60.0]], "asks": []},
+            }
+        )
+        view = cache.book_view("BEAMUSDT")
+        self.assertEqual(view["bids"][0][1], 60.0)
+
     def test_bad_timestamp_does_not_crash_market(self) -> None:
         cache = MarketCache()
         cache.apply(

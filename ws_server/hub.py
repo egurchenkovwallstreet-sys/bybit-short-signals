@@ -64,7 +64,11 @@ class Hub:
         self.cache._reindex()
         market = demo_market(columns)
         self.cache.klines = market["klines"]
-        self.cache.books["BEAMUSDT"] = market["book"]
+        from ws_server.cache import _ensure_book_side_maps
+
+        demo_book = dict(market["book"])
+        _ensure_book_side_maps(demo_book)
+        self.cache.books["BEAMUSDT"] = demo_book
         self.cache.liquidations["BEAMUSDT"] = market["liquidations"]
         self.cache.oi["BEAMUSDT"] = market["oi"]
         self.cache.cvd["BEAMUSDT"] = market["cvd"]
