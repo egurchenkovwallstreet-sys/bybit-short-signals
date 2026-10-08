@@ -11,12 +11,29 @@ import config
 EXIT_LABELS = {"trailing_stop": "Трейлинг-стоп", "liquidation": "Ликвидация"}
 
 
-def compute_analytics(conn: sqlite3.Connection, balance: float | None = None) -> dict[str, Any]:
+def compute_analytics(conn: sqlite3.Connection, balances: dict[str, float] | None = None) -> dict[str, Any]:
     conn.row_factory = sqlite3.Row
-    closed = list(conn.execute("SELECT * FROM paper_trades WHERE status = 'closed' ORDER BY closed_at"))
-    open_count = conn.execute("SELECT COUNT(*) FROM paper_trades WHERE status = 'open'").fetchone()[0]
+    variants = {}
+    for variant in config.PAPER_VARIANTS:
+        balance = (balances or {}).get(variant)
+        variants[variant] = _variant_stats(conn, variant, balance)
+    return {"variants": variants, "candidates": _candidate_stats(conn)}
+
+
+def _variant_stats(conn: sqlite3.Connection, variant: str, balance: float | None) -> dict[str, Any]:
+    closed = list(
+        conn.execute(
+            "SELECT * FROM paper_trades WHERE status = 'closed' AND variant = ? ORDER BY closed_at", (variant,)
+        )
+    )
+    open_count = conn.execute(
+        "SELECT COUNT(*) FROM paper_trades WHERE status = 'open' AND variant = ?", (variant,)
+    ).fetchone()[0]
     trades = _trade_stats(closed)
     trades["open"] = int(open_count)
+    if balance is None:
+        row = conn.execute("SELECT value FROM paper_kv WHERE key = ?", (f"balance:{variant}",)).fetchone()
+        balance = float(row[0]) if row else None
     if balance is not None:
         trades["balance"] = round(balance, 2)
     return {
@@ -26,8 +43,8 @@ def compute_analytics(conn: sqlite3.Connection, balance: float | None = None) ->
         "by_grade": _group(closed, lambda r: f"Сила {r['grade'] or 'C'}"),
         "by_btc": _group(closed, lambda r: "BTC строгий режим" if r["strict_btc"] else "BTC обычный"),
         "by_trigger": _group(closed, _trigger_label),
-        "equity": _equity(conn),
-        "candidates": _candidate_stats(conn),
+        "by_passed": _group(closed, _passed_label),
+        "equity": _equity(conn, variant),
     }
 
 
@@ -98,8 +115,18 @@ def _trigger_label(row: sqlite3.Row) -> str:
     return {"4h": "Рост за ≤4 ч", "24h": "Рост за 24 ч", "7d": "Рост за 7 д", "14d": "Рост за 14 д"}.get(trigger, trigger)
 
 
-def _equity(conn: sqlite3.Connection) -> list[list[float]]:
-    rows = conn.execute("SELECT ts, balance, equity FROM paper_equity ORDER BY ts DESC LIMIT 2000").fetchall()
+def _passed_label(row: sqlite3.Row) -> str:
+    entry = _loads(row["entry_json"])
+    count = entry.get("passed_count")
+    if count is None:
+        return "?"
+    return f"Условий {count}/{len(entry.get('checks') or {}) or 9}"
+
+
+def _equity(conn: sqlite3.Connection, variant: str) -> list[list[float]]:
+    rows = conn.execute(
+        "SELECT ts, balance, equity FROM paper_equity_v WHERE variant = ? ORDER BY ts DESC LIMIT 2000", (variant,)
+    ).fetchall()
     return [[int(r["ts"]), round(float(r["balance"]), 2), round(float(r["equity"]), 2)] for r in reversed(rows)]
 
 
@@ -170,13 +197,21 @@ def _candidate_stats(conn: sqlite3.Connection) -> dict[str, Any]:
     }
 
 
-def list_trades(conn: sqlite3.Connection, status: str = "closed", limit: int = 300) -> list[dict[str, Any]]:
+def list_trades(
+    conn: sqlite3.Connection, status: str = "closed", limit: int = 300, variant: str | None = None
+) -> list[dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     order = "closed_at" if status == "closed" else "opened_at"
-    rows = conn.execute(
-        f"SELECT * FROM paper_trades WHERE status = ? ORDER BY {order} DESC LIMIT ?",
-        (status, limit),
-    )
+    if variant:
+        rows = conn.execute(
+            f"SELECT * FROM paper_trades WHERE status = ? AND variant = ? ORDER BY {order} DESC LIMIT ?",
+            (status, variant, limit),
+        )
+    else:
+        rows = conn.execute(
+            f"SELECT * FROM paper_trades WHERE status = ? ORDER BY {order} DESC LIMIT ?",
+            (status, limit),
+        )
     out = []
     for row in rows:
         item = dict(row)
@@ -197,6 +232,10 @@ def list_candidates(conn: sqlite3.Connection, limit: int = 300) -> list[dict[str
         item = dict(row)
         item["last_eval"] = _loads(item.get("last_eval"))
         item["fail_counts"] = _loads(item.get("fail_counts"))
+        try:
+            item["variants"] = json.loads(item.get("variants") or "[]")
+        except (TypeError, ValueError):
+            item["variants"] = []
         item.pop("near_miss_json", None)
         out.append(item)
     return out

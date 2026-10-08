@@ -1,8 +1,9 @@
 """Тест стратегии: сам ищет пампы, ждёт затухания, открывает и ведёт виртуальные шорты.
 
 Кандидат — один памп одной монеты. Пока он жив, каждые 3 секунды проверяются
-все обязательные условия. Все прошли — открывается виртуальная сделка.
-Не хватило ровно одного — запускается теневая сделка: что было бы при входе.
+все обязательные условия. Варианты входа идут параллельно, у каждого свой счёт:
+«5 из 9», «все 9» и «сильная двойная вершина + 3 условия». Не хватило ровно
+одного из 9 — запускается теневая сделка: что было бы при входе.
 Всё пишется в SQLite для анализа.
 """
 
@@ -19,6 +20,7 @@ from signal_engine.paper.analytics import compute_analytics
 from signal_engine.paper.detect import (
     CHECK_LABELS,
     MANDATORY,
+    VARIANT_LABELS,
     PumpInfo,
     btc_change_4h,
     evaluate,
@@ -33,12 +35,16 @@ from signal_engine.state import Bar, SymbolState
 log = logging.getLogger(__name__)
 
 BOARD_TYPE = "paper_test"
+VARIANTS = config.PAPER_VARIANTS
 _SHADOW_MARGIN = config.PAPER_START_BALANCE_USD * config.PAPER_MARGIN_PCT / 100.0
+_REASON_CONDITIONS = "условия пампа больше не выполняются"
+_MINUTES_KEEP_MS = 180 * 60_000
 
 
 @dataclass
 class OpenTrade:
     id: int
+    variant: str
     symbol: str
     kind: str
     pos: Position
@@ -61,6 +67,8 @@ class Candidate:
     best_passed: int = 0
     last_eval: dict | None = None
     near_miss: bool = False
+    entered: list[str] = field(default_factory=list)
+    last_trade_id: int | None = None
     note: str | None = None
     dirty: bool = True
 
@@ -80,12 +88,13 @@ class PaperStrategy:
         self.tape = TapeBook()
         self.klines: dict[str, dict[str, list[Bar]]] = {}
         self.kline_at: dict[str, float] = {}
-        self.balance = config.PAPER_START_BALANCE_USD
-        self.trades: dict[str, OpenTrade] = {}
+        self.balances: dict[str, float] = {v: config.PAPER_START_BALANCE_USD for v in VARIANTS}
+        self.trades: dict[tuple[str, str], OpenTrade] = {}
         self.candidates: dict[str, Candidate] = {}
         self.shadows: dict[int, Shadow] = {}
-        self.last_close: dict[str, int] = {}
+        self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
+        self.started_ms = int(time.time() * 1000)
         self._next_detect = 0
         self._next_persist = 0
         self._next_equity = 0
@@ -98,11 +107,22 @@ class PaperStrategy:
 
     def open(self) -> None:
         self.store.open()
-        saved = self.store.get_kv("balance")
-        self.balance = float(saved) if saved is not None else config.PAPER_START_BALANCE_USD
-        if saved is None:
-            self.store.set_kv("balance", str(self.balance))
-            self.store.set_kv("started_at", str(int(time.time() * 1000)))
+        now = int(time.time() * 1000)
+        self.started_ms = now
+        if self.store.get_kv("started_at") is None:
+            self.store.set_kv("started_at", str(now))
+        for variant in VARIANTS:
+            saved = self.store.get_kv(f"balance:{variant}")
+            self.balances[variant] = float(saved) if saved is not None else config.PAPER_START_BALANCE_USD
+            if saved is None:
+                self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
+        if self.store.get_kv("revived_restart_expiry") is None:
+            # До защиты от перезапуска кандидаты снимались, пока свечи ещё не подгрузились.
+            since = now - config.PAPER_LONG_LIFETIME_HOURS * 3_600_000
+            revived = self.store.revive_candidates(_REASON_CONDITIONS, since)
+            self.store.set_kv("revived_restart_expiry", str(now))
+            if revived:
+                log.info("Тест: возвращено кандидатов после ошибочного снятия: %s", revived)
         for row in self.store.open_trades():
             pos = Position(
                 symbol=row["symbol"],
@@ -119,8 +139,10 @@ class PaperStrategy:
                 next_funding_ts=row["next_funding_ts"],
                 last_price=float(row["last_price"] or row["entry_price"]),
             )
-            self.trades[row["symbol"]] = OpenTrade(
+            variant = str(row["variant"] or "v9")
+            self.trades[(variant, row["symbol"])] = OpenTrade(
                 id=int(row["id"]),
+                variant=variant,
                 symbol=row["symbol"],
                 kind=str(row["kind"] or ""),
                 pos=pos,
@@ -129,7 +151,7 @@ class PaperStrategy:
                 strict_btc=bool(row["strict_btc"]),
                 entry=_loads(row["entry_json"]),
                 candidate_id=row["candidate_id"],
-                last_check=int(time.time() * 1000),
+                last_check=now,
             )
         for row in self.store.active_candidates():
             pump = _pump_from_row(row)
@@ -144,6 +166,8 @@ class PaperStrategy:
                 best_passed=int(row["best_passed"] or 0),
                 last_eval=last_eval,
                 near_miss=row["near_miss_at"] is not None,
+                entered=_loads_list(row["variants"]),
+                last_trade_id=row["trade_id"],
                 dirty=False,
             )
         for row in self.store.open_shadows():
@@ -163,26 +187,20 @@ class PaperStrategy:
                 symbol=row["symbol"],
                 missing=str(row["near_miss_missing"] or ""),
                 pos=pos,
-                last_check=int(time.time() * 1000),
+                last_check=now,
             )
         self.last_close = self.store.last_close_by_symbol()
         for row in self.store.db.execute(
-            "SELECT symbol, MAX(peak_ts) AS ts FROM paper_candidates WHERE status = 'expired' GROUP BY symbol"
+            "SELECT symbol, MAX(peak_ts) AS ts FROM paper_candidates WHERE status != 'watching' GROUP BY symbol"
         ):
             if row["ts"] is not None:
                 self.expired_peaks[str(row["symbol"])] = int(row["ts"])
-        now = int(time.time() * 1000)
-        cutoff = now - config.PAPER_TAPE_RETENTION_HOURS * 3_600_000
-        for row in self.store.load_tape(cutoff):
-            tape = self.tape.get(str(row["symbol"]))
-            tape.buckets[int(row["ts"])] = [float(row["buy"]), float(row["sell"])]
-            if tape.first_ts is None or int(row["ts"]) < tape.first_ts:
-                tape.first_ts = int(row["ts"])
-        self._analytics = compute_analytics(self.store.db, self.balance)
+        self._load_tape(now)
+        self._analytics = compute_analytics(self.store.db, self.balances)
         self._opened = True
         log.info(
-            "Тест стратегии: баланс %.2f, открытых %s, кандидатов %s, теневых %s",
-            self.balance,
+            "Тест стратегии: балансы %s, открытых %s, кандидатов %s, теневых %s",
+            ", ".join(f"{v} {self.balances[v]:.2f}" for v in VARIANTS),
             len(self.trades),
             len(self.candidates),
             len(self.shadows),
@@ -190,8 +208,9 @@ class PaperStrategy:
 
     def close(self) -> None:
         if self._opened:
-            self._persist(int(time.time() * 1000), force=True)
-            self._save_tape(int(time.time() * 1000))
+            now = int(time.time() * 1000)
+            self._persist(now, force=True)
+            self._save_tape(now)
         self.store.close()
 
     # --- входящие данные ---
@@ -234,34 +253,43 @@ class PaperStrategy:
         self._evaluate(states, btc_4h, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
-            self.store.add_equity(now_ms, self.balance, self.equity(), len(self.trades))
+            for variant in VARIANTS:
+                self._snapshot_equity(variant, now_ms)
             self._next_equity = now_ms + config.PAPER_EQUITY_SNAPSHOT_SEC * 1000
         if now_ms >= self._next_tape:
             self._save_tape(now_ms)
             self._next_tape = now_ms + 300_000
         if now_ms >= self._next_analytics:
-            self._analytics = compute_analytics(self.store.db, self.balance)
+            self._analytics = compute_analytics(self.store.db, self.balances)
             self._next_analytics = now_ms + 30_000
         return {"type": BOARD_TYPE, "timestamp": now_ms, "data": self.view(now_ms, btc_4h)}
 
-    def used_margin(self) -> float:
-        return sum(t.pos.margin for t in self.trades.values())
+    def _variant_trades(self, variant: str) -> list[OpenTrade]:
+        return [t for t in self.trades.values() if t.variant == variant]
 
-    def unrealized(self) -> float:
-        return sum(t.pos.net_pnl(t.pos.last_price) for t in self.trades.values())
+    def used_margin(self, variant: str) -> float:
+        return sum(t.pos.margin for t in self._variant_trades(variant))
 
-    def equity(self) -> float:
-        return self.balance + self.unrealized()
+    def unrealized(self, variant: str) -> float:
+        return sum(t.pos.net_pnl(t.pos.last_price) for t in self._variant_trades(variant))
+
+    def equity(self, variant: str) -> float:
+        return self.balances[variant] + self.unrealized(variant)
+
+    def _snapshot_equity(self, variant: str, now_ms: int) -> None:
+        self.store.add_equity(
+            variant, now_ms, self.balances[variant], self.equity(variant), len(self._variant_trades(variant))
+        )
 
     def _update_trades(self, states: dict[str, SymbolState], now_ms: int) -> None:
-        for symbol, trade in list(self.trades.items()):
-            state = states.get(symbol)
+        for trade in list(self.trades.values()):
+            state = states.get(trade.symbol)
             if state is None or not state.last_price:
                 continue
             pos = trade.pos
             low, high, last = _price_range(state, trade.last_check)
             trade.last_check = now_ms
-            self._funding(pos, symbol, state, now_ms)
+            self._funding(pos, trade.symbol, state, now_ms)
             reason = pos.update(low, high, last)
             if reason:
                 self._close_trade(trade, reason, state, now_ms)
@@ -278,8 +306,9 @@ class PaperStrategy:
 
     def _close_trade(self, trade: OpenTrade, reason: str, state: SymbolState, now_ms: int) -> None:
         pos = trade.pos
+        variant = trade.variant
         result = pos.close_result(reason)
-        self.balance += result["pnl_usd"]
+        self.balances[variant] += result["pnl_usd"]
         points = state.oi_points()
         exit_json = {
             "duration_min": round((now_ms - pos.opened_at) / 60_000),
@@ -307,23 +336,24 @@ class PaperStrategy:
                 "stop_price": pos.stop_price,
                 "last_price": pos.last_price,
                 "funding_paid": pos.funding_paid,
-                "balance_after": self.balance,
+                "balance_after": self.balances[variant],
                 "exit_json": exit_json,
             },
             commit=False,
         )
-        self.trades.pop(trade.symbol, None)
-        self.store.set_kv("balance", str(self.balance))
-        self.store.add_equity(now_ms, self.balance, self.equity(), len(self.trades))
-        self.last_close[trade.symbol] = now_ms
+        self.trades.pop((variant, trade.symbol), None)
+        self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
+        self._snapshot_equity(variant, now_ms)
+        self.last_close[(variant, trade.symbol)] = now_ms
         self._next_analytics = 0
         log.info(
-            "Тест: закрыт шорт %s (%s), P&L %+.2f USD (%+.1f%%), баланс %.2f",
+            "Тест [%s]: закрыт шорт %s (%s), P&L %+.2f USD (%+.1f%%), баланс %.2f",
+            variant,
             trade.symbol,
             reason,
             result["pnl_usd"],
             result["roe_pct"],
-            self.balance,
+            self.balances[variant],
         )
 
     def _update_shadows(self, states: dict[str, SymbolState], now_ms: int) -> None:
@@ -355,11 +385,8 @@ class PaperStrategy:
                 self._next_analytics = 0
 
     def _detect(self, states: dict[str, SymbolState], now_ms: int) -> None:
-        cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
         for symbol, state in states.items():
-            if symbol in self.candidates or symbol in self.trades:
-                continue
-            if not state.last_price or now_ms - self.last_close.get(symbol, 0) < cooldown:
+            if symbol in self.candidates or not state.last_price:
                 continue
             pump = find_pump(state, self.tape.symbols.get(symbol), now_ms)
             if pump is None:
@@ -386,7 +413,18 @@ class PaperStrategy:
                 pump.trigger,
             )
 
+    def _ready(self, state: SymbolState, cand: Candidate, now_ms: int) -> bool:
+        """Хватает ли истории в памяти, чтобы честно решить, что памп кончился."""
+        if now_ms - self.started_ms < config.PAPER_STARTUP_GRACE_MIN * 60_000:
+            return False
+        if len(state.bars_htf.get("15") or []) < config.PAPER_READY_15M_BARS:
+            return False
+        if cand.pump.kind == "long" and len(state.bars_htf.get("240") or []) < config.PAPER_READY_4H_BARS:
+            return False
+        return True
+
     def _evaluate(self, states: dict[str, SymbolState], btc_4h: float | None, now_ms: int) -> None:
+        cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
         for symbol, cand in list(self.candidates.items()):
             state = states.get(symbol)
             if state is None or not state.last_price:
@@ -394,39 +432,45 @@ class PaperStrategy:
             tape = self.tape.get(symbol)
             pump = find_pump(state, tape, now_ms)
             if pump is None:
-                self._end_candidate(cand, "expired", _expire_reason(cand.pump, state, now_ms), now_ms)
+                reason = _expire_reason(cand.pump, state, now_ms)
+                if reason == _REASON_CONDITIONS and not self._ready(state, cand, now_ms):
+                    continue
+                self._end_candidate(cand, reason, now_ms)
                 continue
             cand.pump = pump
             ev = evaluate(state, tape, pump, self.klines.get(symbol, {}), btc_4h, now_ms)
             cand.scans += 1
             for key in ev.failed:
                 cand.fail_counts[key] = cand.fail_counts.get(key, 0) + 1
-            cand.best_passed = max(cand.best_passed, len(MANDATORY) - len(ev.failed))
+            cand.best_passed = max(cand.best_passed, ev.passed_count)
             cand.last_eval = ev.to_data()
             cand.dirty = True
-            if symbol in self.trades:
-                continue
-            if ev.passed:
-                margin = self.balance * config.PAPER_MARGIN_PCT / 100.0
-                if margin <= 0 or self.balance - self.used_margin() < margin:
-                    cand.note = "нет свободной маржи"
+            notes = []
+            for variant in ev.variants:
+                if (variant, symbol) in self.trades:
                     continue
-                self._open_trade(cand, state, ev, margin, now_ms)
-                continue
-            cand.note = None
+                if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                    continue
+                balance = self.balances[variant]
+                margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                if margin <= 0 or balance - self.used_margin(variant) < margin:
+                    notes.append(f"{VARIANT_LABELS[variant]}: нет свободной маржи")
+                    continue
+                self._open_trade(variant, cand, state, ev, margin, now_ms)
+            cand.note = "; ".join(notes) or None
             if len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
 
-    def _open_trade(self, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
+    def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
         price = float(state.last_price)
         tape = self.tape.symbols.get(cand.symbol)
         nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
         pos = Position(symbol=cand.symbol, opened_at=now_ms, entry_price=price, margin=margin, next_funding_ts=nft)
         entry = ev.to_data()
-        balance_before = self.balance
         trade_id = self.store.insert_trade(
             {
                 "symbol": cand.symbol,
+                "variant": variant,
                 "candidate_id": cand.id,
                 "kind": cand.pump.kind,
                 "status": "open",
@@ -447,12 +491,13 @@ class PaperStrategy:
                 "score": ev.score,
                 "grade": grade_for(ev.score),
                 "strict_btc": ev.strict_btc,
-                "balance_before": balance_before,
+                "balance_before": self.balances[variant],
                 "entry_json": entry,
             }
         )
-        self.trades[cand.symbol] = OpenTrade(
+        self.trades[(variant, cand.symbol)] = OpenTrade(
             id=trade_id,
+            variant=variant,
             symbol=cand.symbol,
             kind=cand.pump.kind,
             pos=pos,
@@ -463,13 +508,19 @@ class PaperStrategy:
             candidate_id=cand.id,
             last_check=now_ms,
         )
-        self._end_candidate(cand, "entered", "вход", now_ms, trade_id=trade_id)
+        if variant not in cand.entered:
+            cand.entered.append(variant)
+        cand.last_trade_id = trade_id
+        cand.dirty = True
         self._next_analytics = 0
         log.info(
-            "Тест: открыт шорт %s по %s, маржа %.2f USD, балл %.1f",
+            "Тест [%s]: открыт шорт %s по %s, маржа %.2f USD, условий %s/%s, балл %.1f",
+            variant,
             cand.symbol,
             price,
             margin,
+            ev.passed_count,
+            len(MANDATORY),
             ev.score,
         )
 
@@ -496,9 +547,8 @@ class PaperStrategy:
         )
         self.shadows[cand.id] = Shadow(cand.id, cand.symbol, missing, pos, now_ms)
 
-    def _end_candidate(
-        self, cand: Candidate, status: str, reason: str, now_ms: int, trade_id: int | None = None
-    ) -> None:
+    def _end_candidate(self, cand: Candidate, reason: str, now_ms: int) -> None:
+        status = "entered" if cand.entered else "expired"
         fields = {
             "status": status,
             "ended_at": now_ms,
@@ -508,13 +558,12 @@ class PaperStrategy:
             "fail_counts": cand.fail_counts,
             "best_passed": cand.best_passed,
             "last_eval": cand.last_eval or {},
+            "variants": cand.entered,
+            "trade_id": cand.last_trade_id,
             **_pump_fields(cand.pump),
         }
-        if trade_id is not None:
-            fields["trade_id"] = trade_id
         self.store.update_candidate(cand.id, fields)
-        if status == "expired":
-            self.expired_peaks[cand.symbol] = cand.pump.peak_ts
+        self.expired_peaks[cand.symbol] = cand.pump.peak_ts
         self.candidates.pop(cand.symbol, None)
 
     def _persist(self, now_ms: int, force: bool = False) -> None:
@@ -548,6 +597,8 @@ class PaperStrategy:
                     "fail_counts": cand.fail_counts,
                     "best_passed": cand.best_passed,
                     "last_eval": cand.last_eval or {},
+                    "variants": cand.entered,
+                    "trade_id": cand.last_trade_id,
                     **_pump_fields(cand.pump),
                 },
                 commit=False,
@@ -569,12 +620,39 @@ class PaperStrategy:
     def _save_tape(self, now_ms: int) -> None:
         since = now_ms - 15 * 60_000
         rows: list[tuple[str, int, float, float]] = []
+        minute_rows: list[tuple[str, int, float, float, float, float]] = []
         for symbol, tape in self.tape.symbols.items():
             for ts, (buy, sell) in tape.buckets.items():
                 if ts >= since:
                     rows.append((symbol, ts, buy, sell))
+            keys = {k for k in tape.minutes if k >= since}
+            keys |= {k for k in tape.liq_long if k >= since}
+            keys |= {k for k in tape.liq_short if k >= since}
+            for ts in keys:
+                buy, sell = tape.minutes.get(ts) or (0.0, 0.0)
+                minute_rows.append(
+                    (symbol, ts, buy, sell, tape.liq_long.get(ts, 0.0), tape.liq_short.get(ts, 0.0))
+                )
+        self.store.save_tape(rows, now_ms - config.PAPER_TAPE_RETENTION_HOURS * 3_600_000)
+        self.store.save_tape_minutes(minute_rows, now_ms - _MINUTES_KEEP_MS)
+
+    def _load_tape(self, now_ms: int) -> None:
         cutoff = now_ms - config.PAPER_TAPE_RETENTION_HOURS * 3_600_000
-        self.store.save_tape(rows, cutoff)
+        for row in self.store.load_tape(cutoff):
+            tape = self.tape.get(str(row["symbol"]))
+            ts = int(row["ts"])
+            tape.buckets[ts] = [float(row["buy"]), float(row["sell"])]
+            if tape.first_ts is None or ts < tape.first_ts:
+                tape.first_ts = ts
+        for row in self.store.load_tape_minutes(now_ms - _MINUTES_KEEP_MS):
+            tape = self.tape.get(str(row["symbol"]))
+            ts = int(row["ts"])
+            if row["buy"] or row["sell"]:
+                tape.minutes[ts] = [float(row["buy"]), float(row["sell"])]
+            if row["liq_long"]:
+                tape.liq_long[ts] = float(row["liq_long"])
+            if row["liq_short"]:
+                tape.liq_short[ts] = float(row["liq_short"])
 
     # --- вид для браузера ---
 
@@ -582,20 +660,27 @@ class PaperStrategy:
         trades = sorted(self.trades.values(), key=lambda t: t.pos.opened_at, reverse=True)
         cands = sorted(
             self.candidates.values(),
-            key=lambda c: (-(len(MANDATORY) - len((c.last_eval or {}).get("failed") or MANDATORY)), -c.pump.growth_pct),
+            key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.pump.growth_pct),
         )
-        used = self.used_margin()
-        unreal = self.unrealized()
+        accounts = {}
+        for variant in VARIANTS:
+            used = self.used_margin(variant)
+            unreal = self.unrealized(variant)
+            balance = self.balances[variant]
+            accounts[variant] = {
+                "label": VARIANT_LABELS[variant],
+                "balance": round(balance, 2),
+                "equity": round(balance + unreal, 2),
+                "unrealized": round(unreal, 2),
+                "used_margin": round(used, 2),
+                "free_margin": round(balance - used, 2),
+                "open_trades": len(self._variant_trades(variant)),
+            }
         return {
             "updated_at": now_ms,
             "summary": {
                 "start_balance": config.PAPER_START_BALANCE_USD,
-                "balance": round(self.balance, 2),
-                "equity": round(self.balance + unreal, 2),
-                "unrealized": round(unreal, 2),
-                "used_margin": round(used, 2),
-                "free_margin": round(self.balance - used, 2),
-                "open_trades": len(self.trades),
+                "accounts": accounts,
                 "candidates": len(self.candidates),
                 "shadows_open": len(self.shadows),
                 "btc_4h_pct": _r(btc_4h),
@@ -603,6 +688,8 @@ class PaperStrategy:
                 "margin_pct": config.PAPER_MARGIN_PCT,
                 "leverage": config.PAPER_LEVERAGE,
             },
+            "variants": list(VARIANTS),
+            "variant_labels": VARIANT_LABELS,
             "open_trades": [self._trade_view(t, now_ms) for t in trades],
             "candidates": [self._candidate_view(c, now_ms) for c in cands],
             "check_labels": CHECK_LABELS,
@@ -616,6 +703,7 @@ class PaperStrategy:
         pump = (trade.entry.get("metrics") or {}).get("pump") or {}
         return {
             "id": trade.id,
+            "variant": trade.variant,
             "symbol": trade.symbol,
             "kind": trade.kind,
             "pump": pump,
@@ -653,6 +741,8 @@ class PaperStrategy:
             "watch_min": round((now_ms - cand.started_at) / 60_000),
             "scans": cand.scans,
             "best_passed": cand.best_passed,
+            "entered": cand.entered,
+            "open_in": [v for v in VARIANTS if (v, cand.symbol) in self.trades],
             "note": cand.note,
             "eval": cand.last_eval,
             "shadow": (
@@ -682,11 +772,11 @@ def _expire_reason(pump: PumpInfo, state: SymbolState, now_ms: int) -> str:
     last = float(state.last_price or 0)
     if pump.peak_price > 0 and last > 0:
         if (1 - last / pump.peak_price) * 100.0 > config.PAPER_MAX_DRAWDOWN_FROM_PEAK_PCT:
-            return "откат от пика без входа"
+            return "откат от пика"
     hours = config.PAPER_SHORT_LIFETIME_HOURS if pump.kind == "short" else config.PAPER_LONG_LIFETIME_HOURS
     if now_ms - pump.peak_ts > hours * 3_600_000:
         return "истекло время после пика"
-    return "условия пампа больше не выполняются"
+    return _REASON_CONDITIONS
 
 
 def _pump_fields(pump: PumpInfo) -> dict:
@@ -727,6 +817,16 @@ def _loads(raw) -> dict:
     except (TypeError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _loads_list(raw) -> list[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return [str(v) for v in value] if isinstance(value, list) else []
 
 
 def _r(value, digits: int = 2):

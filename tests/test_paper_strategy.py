@@ -4,7 +4,7 @@ from pathlib import Path
 
 import config
 from signal_engine.paper.analytics import compute_analytics
-from signal_engine.paper.detect import double_top, evaluate, find_pump, round_level_near
+from signal_engine.paper.detect import double_top, evaluate, find_pump, round_level_near, strong_top
 from signal_engine.paper.position import Position, liquidation_price, trail_distance_pct
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.strategy import PaperStrategy
@@ -182,7 +182,8 @@ class StrategyCycleTest(unittest.TestCase):
             states = {state.symbol: state}
 
             view = strategy.scan(states, NOW)["data"]
-            self.assertEqual(len(view["open_trades"]), 1)
+            # Все 9 условий: входят «5 из 9» и «все 9», без вершины «dt» не входит.
+            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["v5", "v9"])
             trade = view["open_trades"][0]
             self.assertAlmostEqual(trade["entry_price"], 1.35)
             self.assertAlmostEqual(trade["margin"], 50.0)
@@ -190,18 +191,21 @@ class StrategyCycleTest(unittest.TestCase):
             state.bars_1m.append(Bar(NOW + MIN, 1.3, 1.3, 1.2, 1.2, 10.0))
             state.last_price = 1.2
             strategy.scan(states, NOW + MIN + 5000)
-            self.assertIn(state.symbol, strategy.trades)
+            self.assertIn(("v9", state.symbol), strategy.trades)
 
             state.bars_1m.append(Bar(NOW + 2 * MIN, 1.2, 1.33, 1.2, 1.32, 10.0))
             state.last_price = 1.32
             strategy.scan(states, NOW + 2 * MIN + 5000)
-            self.assertNotIn(state.symbol, strategy.trades)
-            self.assertGreater(strategy.balance, config.PAPER_START_BALANCE_USD)
+            self.assertEqual(strategy.trades, {})
+            self.assertGreater(strategy.balances["v5"], config.PAPER_START_BALANCE_USD)
+            self.assertGreater(strategy.balances["v9"], config.PAPER_START_BALANCE_USD)
+            self.assertEqual(strategy.balances["dt"], config.PAPER_START_BALANCE_USD)
 
-            stats = compute_analytics(store.db, strategy.balance)
-            self.assertEqual(stats["trades"]["closed"], 1)
-            self.assertEqual(stats["trades"]["wins"], 1)
-            self.assertEqual(stats["candidates"]["by_status"].get("entered"), 1)
+            stats = compute_analytics(store.db, strategy.balances)
+            self.assertEqual(stats["variants"]["v9"]["trades"]["closed"], 1)
+            self.assertEqual(stats["variants"]["v9"]["trades"]["wins"], 1)
+            self.assertEqual(stats["variants"]["dt"]["trades"]["closed"], 0)
+            self.assertEqual(strategy.candidates[state.symbol].entered, ["v5", "v9"])
             strategy.close()
 
     def test_near_miss_starts_shadow(self) -> None:
@@ -214,11 +218,77 @@ class StrategyCycleTest(unittest.TestCase):
             tape.add_liquidation(NOW, "Sell", 9_000.0)
             strategy.tape.symbols[state.symbol] = tape
             view = strategy.scan({state.symbol: state}, NOW)["data"]
-            self.assertEqual(view["open_trades"], [])
+            # 8 из 9: вход только в варианте «5 из 9», для «все 9» — теневая сделка.
+            self.assertEqual([t["variant"] for t in view["open_trades"]], ["v5"])
             self.assertEqual(len(view["candidates"]), 1)
             self.assertEqual(view["candidates"][0]["shadow"]["missing"], "short_liq_faded")
             self.assertEqual(len(strategy.shadows), 1)
             strategy.close()
+
+    def test_restart_keeps_candidate_and_tape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper.db"
+            strategy = PaperStrategy(PaperStore(path))
+            strategy.open()
+            state = pumped_state()
+            strategy.tape.symbols[state.symbol] = pumped_tape()
+            strategy.scan({state.symbol: state}, NOW)
+            self.assertIn(state.symbol, strategy.candidates)
+            strategy.close()
+
+            restarted = PaperStrategy(PaperStore(path))
+            restarted.open()
+            self.assertIn(state.symbol, restarted.candidates)
+            self.assertEqual(restarted.candidates[state.symbol].entered, ["v5", "v9"])
+            self.assertEqual(len(restarted.trades), 2)
+            tape = restarted.tape.symbols[state.symbol]
+            self.assertTrue(tape.minutes)
+            self.assertTrue(tape.liq_short)
+
+            # Свечи ещё не подгрузились: памп не виден, но кандидата не снимаем.
+            empty = SymbolState(state.symbol)
+            empty.last_price = 1.35
+            restarted.scan({state.symbol: empty}, NOW + MIN)
+            self.assertIn(state.symbol, restarted.candidates)
+            restarted.close()
+
+
+class StrongTopTest(unittest.TestCase):
+    @staticmethod
+    def _bars(first: float, second: float, gap: int, after: int) -> list[Bar]:
+        hour = 3_600_000
+        highs = [1.5] * 10 + [first] + [1.5] * gap + [second] + [1.5] * after
+        return [Bar(i * hour, 1.4, h, 1.3, 1.4, 10.0) for i, h in enumerate(highs)]
+
+    def _find(self, bars: list[Bar]):
+        now = (len(bars) + 1) * 3_600_000
+        return strong_top({"60": bars}, now)
+
+    def test_lower_second_top_found(self) -> None:
+        found = self._find(self._bars(2.0, 1.85, gap=5, after=3))
+        assert found is not None
+        self.assertEqual(found["second_price"], 1.85)
+        self.assertLess(found["diff_pct"], 10)
+
+    def test_rejects_higher_second_or_wide_gap_or_too_fresh(self) -> None:
+        self.assertIsNone(self._find(self._bars(2.0, 2.05, gap=5, after=3)))
+        self.assertIsNone(self._find(self._bars(2.0, 1.75, gap=5, after=3)))
+        self.assertIsNone(self._find(self._bars(2.0, 1.85, gap=3, after=3)))
+        self.assertIsNone(self._find(self._bars(2.0, 1.85, gap=5, after=0)))
+
+    def test_variants_by_passed_count(self) -> None:
+        state, tape = pumped_state(), pumped_tape()
+        pump = find_pump(state, tape, NOW)
+        assert pump is not None
+        ev = evaluate(state, tape, pump, {}, None, NOW)
+        for key in list(ev.checks)[:5]:
+            ev.checks[key]["ok"] = False
+        self.assertEqual(ev.passed_count, 4)
+        self.assertEqual(ev.variants, [])
+        ev.strong_top = {"interval": "60"}
+        self.assertEqual(ev.variants, ["dt"])
+        ev.checks["stall"]["ok"] = True
+        self.assertEqual(ev.variants, ["v5", "dt"])
 
 
 if __name__ == "__main__":

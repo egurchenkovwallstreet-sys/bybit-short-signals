@@ -70,10 +70,12 @@ async def paper_snapshot() -> dict[str, Any]:
 
 
 @app.get("/api/paper/trades")
-async def paper_trades(status: str = "closed", limit: int = 300) -> dict[str, Any]:
+async def paper_trades(status: str = "closed", limit: int = 300, variant: str | None = None) -> dict[str, Any]:
     if status not in {"open", "closed"}:
         raise HTTPException(status_code=400, detail="status: open или closed")
-    rows = await asyncio.to_thread(paper_db.trades, status, max(1, min(limit, 2000)))
+    if variant is not None and variant not in config.PAPER_VARIANTS:
+        raise HTTPException(status_code=400, detail="неизвестный вариант")
+    rows = await asyncio.to_thread(paper_db.trades, status, max(1, min(limit, 2000)), variant)
     return {"rows": rows}
 
 

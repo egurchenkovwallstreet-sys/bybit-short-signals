@@ -237,6 +237,24 @@ PAPER_DT_MAX_DIFF_PCT = _env_float("PAPER_DT_MAX_DIFF_PCT", 3.0)
 PAPER_DT_MIN_HOURS_AFTER = _env_float("PAPER_DT_MIN_HOURS_AFTER", 3.0)
 PAPER_DT_PIVOT_WING = _env_int("PAPER_DT_PIVOT_WING", 2)
 
+# Сильная двойная вершина: 2-я ниже 1-й, разница < 10%, после 2-й ≥ 2 ч,
+# между вершинами 1H ≥5 свечей или 30m ≥10.
+PAPER_STRONG_TOP_MAX_DIFF_PCT = _env_float("PAPER_STRONG_TOP_MAX_DIFF_PCT", 10.0)
+PAPER_STRONG_TOP_MIN_HOURS_AFTER = _env_float("PAPER_STRONG_TOP_MIN_HOURS_AFTER", 2.0)
+PAPER_STRONG_TOP_MIN_BARS_1H = _env_int("PAPER_STRONG_TOP_MIN_BARS_1H", 5)
+PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
+
+# Варианты входа, у каждого свой счёт: любые N из 9 условий, все 9, сильная вершина + N условий.
+PAPER_VARIANTS = ("v5", "v9", "dt")
+PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
+PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
+
+# После перезапуска свечи в памяти не сразу полные: кандидата не снимаем
+# «по условиям пампа», пока не прошло столько минут и не набралась история.
+PAPER_STARTUP_GRACE_MIN = _env_int("PAPER_STARTUP_GRACE_MIN", 15)
+PAPER_READY_15M_BARS = _env_int("PAPER_READY_15M_BARS", 96)
+PAPER_READY_4H_BARS = _env_int("PAPER_READY_4H_BARS", 84)
+
 # Круглый уровень (0.5, 1, 5, 10…): пик или диапазон в пределах этого % от уровня.
 PAPER_ROUND_LEVEL_NEAR_PCT = _env_float("PAPER_ROUND_LEVEL_NEAR_PCT", 1.5)
 

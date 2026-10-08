@@ -95,11 +95,30 @@ CREATE TABLE IF NOT EXISTS paper_equity (
     open_trades INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS paper_equity_v (
+    variant TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    balance REAL NOT NULL,
+    equity REAL NOT NULL,
+    open_trades INTEGER NOT NULL,
+    PRIMARY KEY (variant, ts)
+);
+
 CREATE TABLE IF NOT EXISTS paper_tape (
     symbol TEXT NOT NULL,
     ts INTEGER NOT NULL,
     buy REAL NOT NULL,
     sell REAL NOT NULL,
+    PRIMARY KEY (symbol, ts)
+);
+
+CREATE TABLE IF NOT EXISTS paper_tape_min (
+    symbol TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    buy REAL NOT NULL,
+    sell REAL NOT NULL,
+    liq_long REAL NOT NULL,
+    liq_short REAL NOT NULL,
     PRIMARY KEY (symbol, ts)
 );
 
@@ -121,7 +140,28 @@ class PaperStore:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.executescript(_SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Базы до вариантов входа: всё старое считается вариантом «все 9 условий»."""
+        db = self.db
+        trade_cols = {r["name"] for r in db.execute("PRAGMA table_info(paper_trades)")}
+        if "variant" not in trade_cols:
+            db.execute("ALTER TABLE paper_trades ADD COLUMN variant TEXT NOT NULL DEFAULT 'v9'")
+        db.execute("CREATE INDEX IF NOT EXISTS paper_trades_variant ON paper_trades(variant, status)")
+        cand_cols = {r["name"] for r in db.execute("PRAGMA table_info(paper_candidates)")}
+        if "variants" not in cand_cols:
+            db.execute("ALTER TABLE paper_candidates ADD COLUMN variants TEXT")
+        if not db.execute("SELECT 1 FROM paper_equity_v LIMIT 1").fetchone():
+            db.execute(
+                "INSERT OR IGNORE INTO paper_equity_v(variant, ts, balance, equity, open_trades) "
+                "SELECT 'v9', ts, balance, equity, open_trades FROM paper_equity"
+            )
+        old = db.execute("SELECT value FROM paper_kv WHERE key = 'balance'").fetchone()
+        if old is not None:
+            db.execute("INSERT OR IGNORE INTO paper_kv(key, value) VALUES('balance:v9', ?)", (old["value"],))
+            db.execute("DELETE FROM paper_kv WHERE key = 'balance'")
 
     def close(self) -> None:
         if self.conn is not None:
@@ -171,11 +211,12 @@ class PaperStore:
     def open_trades(self) -> list[sqlite3.Row]:
         return list(self.db.execute("SELECT * FROM paper_trades WHERE status = 'open' ORDER BY opened_at"))
 
-    def last_close_by_symbol(self) -> dict[str, int]:
+    def last_close_by_symbol(self) -> dict[tuple[str, str], int]:
         rows = self.db.execute(
-            "SELECT symbol, MAX(closed_at) AS ts FROM paper_trades WHERE status = 'closed' GROUP BY symbol"
+            "SELECT variant, symbol, MAX(closed_at) AS ts FROM paper_trades WHERE status = 'closed' "
+            "GROUP BY variant, symbol"
         )
-        return {str(r["symbol"]): int(r["ts"]) for r in rows if r["ts"] is not None}
+        return {(str(r["variant"]), str(r["symbol"])): int(r["ts"]) for r in rows if r["ts"] is not None}
 
     # --- кандидаты ---
 
@@ -213,12 +254,21 @@ class PaperStore:
 
     # --- баланс ---
 
-    def add_equity(self, ts: int, balance: float, equity: float, open_trades: int) -> None:
+    def add_equity(self, variant: str, ts: int, balance: float, equity: float, open_trades: int) -> None:
         self.db.execute(
-            "INSERT OR REPLACE INTO paper_equity(ts, balance, equity, open_trades) VALUES(?, ?, ?, ?)",
-            (ts, balance, equity, open_trades),
+            "INSERT OR REPLACE INTO paper_equity_v(variant, ts, balance, equity, open_trades) VALUES(?, ?, ?, ?, ?)",
+            (variant, ts, balance, equity, open_trades),
         )
         self.db.commit()
+
+    def revive_candidates(self, end_reason: str, since_ts: int) -> int:
+        cur = self.db.execute(
+            "UPDATE paper_candidates SET status = 'watching', ended_at = NULL, end_reason = NULL "
+            "WHERE status = 'expired' AND end_reason = ? AND peak_ts >= ?",
+            (end_reason, since_ts),
+        )
+        self.db.commit()
+        return cur.rowcount
 
     # --- лента ---
 
@@ -232,6 +282,23 @@ class PaperStore:
 
     def load_tape(self, cutoff_ts: int) -> list[sqlite3.Row]:
         return list(self.db.execute("SELECT symbol, ts, buy, sell FROM paper_tape WHERE ts >= ?", (cutoff_ts,)))
+
+    def save_tape_minutes(self, rows: list[tuple[str, int, float, float, float, float]], cutoff_ts: int) -> None:
+        if rows:
+            self.db.executemany(
+                "INSERT OR REPLACE INTO paper_tape_min(symbol, ts, buy, sell, liq_long, liq_short) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        self.db.execute("DELETE FROM paper_tape_min WHERE ts < ?", (cutoff_ts,))
+        self.db.commit()
+
+    def load_tape_minutes(self, cutoff_ts: int) -> list[sqlite3.Row]:
+        return list(
+            self.db.execute(
+                "SELECT symbol, ts, buy, sell, liq_long, liq_short FROM paper_tape_min WHERE ts >= ?", (cutoff_ts,)
+            )
+        )
 
     def commit(self) -> None:
         self.db.commit()

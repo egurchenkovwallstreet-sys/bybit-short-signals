@@ -5,6 +5,8 @@
     closed: [],
     history: [],
     selected: null, // {type: "open"|"closed"|"cand", id}
+    variant: "v5",
+    closedVariant: "",
     interval: "15",
     chart: null,
     series: null,
@@ -28,7 +30,9 @@
     btc_down: "BTC падает",
     short_liq_90: "Ликв. шортов затихли ≥90%",
     distribution: "Раздача (объём есть, цена вниз)",
+    strong_top: "Сильная двойная вершина",
   };
+  const VARIANT_COLORS = { v5: "#5dade2", v9: "#3dd68c", dt: "#f6d365" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -83,6 +87,25 @@
   function mandatory() {
     return (paper.data && paper.data.mandatory) || [];
   }
+  function variants() {
+    return (paper.data && paper.data.variants) || ["v5", "v9", "dt"];
+  }
+  function vlabel(v) {
+    return ((paper.data && paper.data.variant_labels) || {})[v] || v;
+  }
+  function vbadge(v) {
+    return `<span class="paper-vbadge" style="border-color:${VARIANT_COLORS[v] || "#8e9aab"};color:${VARIANT_COLORS[v] || "#8e9aab"}">${esc(vlabel(v))}</span>`;
+  }
+  function account(v) {
+    return (((paper.data && paper.data.summary) || {}).accounts || {})[v] || {};
+  }
+  function vstats(v) {
+    return ((((paper.data && paper.data.analytics) || {}).variants) || {})[v] || {};
+  }
+  function passedText(ev) {
+    if (!ev || ev.passed_count === undefined) return "—";
+    return `${ev.passed_count}/${mandatory().length || 9}`;
+  }
 
   // --- данные ---
 
@@ -113,14 +136,17 @@
 
   async function fetchLists(force) {
     const now = Date.now();
-    if (!force && now - paper.lastListFetch < 30000) return;
+    if (!force && now - paper.lastListFetch < 30000 && paper.closedVariant === paper.variant) return;
     paper.lastListFetch = now;
+    const variant = paper.variant;
     try {
       const [closed, hist] = await Promise.all([
-        fetch("/api/paper/trades?status=closed&limit=500").then((r) => r.json()),
+        fetch(`/api/paper/trades?status=closed&limit=500&variant=${encodeURIComponent(variant)}`).then((r) => r.json()),
         fetch("/api/paper/candidates?limit=500").then((r) => r.json()),
       ]);
+      if (variant !== paper.variant) return;
       paper.closed = closed.rows || [];
+      paper.closedVariant = variant;
       paper.history = hist.rows || [];
     } catch (_err) {
       /* ignore */
@@ -128,6 +154,7 @@
   }
 
   function render() {
+    renderVariants();
     renderSummary();
     renderEquity();
     renderOpen();
@@ -145,17 +172,64 @@
 
   // --- сводка ---
 
+  function renderVariants() {
+    const table = document.getElementById("paper-variants");
+    if (!table) return;
+    const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
+    table.innerHTML = `<thead><tr>
+      <th>Вариант</th><th>Баланс</th><th>Equity</th><th>Итог P&amp;L</th><th>Закрыто</th><th>Win rate</th><th>PF</th>
+      <th>Ср. ROE</th><th>Макс. просадка</th><th>Открыто</th><th>Маржа в работе</th>
+    </tr></thead><tbody>${variants()
+      .map((v) => {
+        const a = account(v);
+        const t = vstats(v).trades || {};
+        const balance = a.balance ?? t.balance ?? start;
+        return `<tr class="clickable${v === paper.variant ? " selected" : ""}" data-variant="${v}">
+          <td>${vbadge(v)}</td>
+          <td>$${num(balance)} ${pct(((balance - start) / start) * 100)}</td>
+          <td>$${num(a.equity ?? balance)}</td>
+          <td>${usd(t.total_pnl ?? 0)}</td>
+          <td>${t.closed ?? 0} (${t.wins ?? 0} / ${t.losses ?? 0})</td>
+          <td>${num(t.win_rate ?? 0, 1)}%</td>
+          <td>${t.profit_factor ?? "—"}</td>
+          <td>${pct(t.avg_roe ?? 0, 1)}</td>
+          <td>${num(t.max_drawdown_pct ?? 0)}%</td>
+          <td>${a.open_trades ?? t.open ?? 0}</td>
+          <td>$${num(a.used_margin ?? 0)}</td>
+        </tr>`;
+      })
+      .join("")}</tbody>`;
+    table.querySelectorAll("tr[data-variant]").forEach((tr) => {
+      tr.addEventListener("click", () => {
+        if (paper.variant === tr.dataset.variant) return;
+        paper.variant = tr.dataset.variant;
+        if (paper.selected && (paper.selected.type === "open" || paper.selected.type === "closed")) {
+          paper.selected = null;
+          paper.chartKey = "";
+        }
+        render();
+        fetchLists(true).then(() => {
+          renderClosed();
+          renderHistory();
+        });
+      });
+    });
+  }
+
   function renderSummary() {
     const root = document.getElementById("paper-summary");
     if (!root) return;
+    const title = document.getElementById("paper-variant-title");
+    if (title) title.innerHTML = `Вариант: ${vbadge(paper.variant)}`;
     const s = (paper.data && paper.data.summary) || {};
-    const t = ((paper.data && paper.data.analytics) || {}).trades || {};
+    const a = account(paper.variant);
+    const t = vstats(paper.variant).trades || {};
     const start = s.start_balance || 1000;
-    const balance = s.balance ?? t.balance ?? start;
+    const balance = a.balance ?? t.balance ?? start;
     const cards = [
       ["Баланс", `$${num(balance)}`, `старт $${num(start, 0)} · ${pct(((balance - start) / start) * 100)}`],
-      ["Equity", `$${num(s.equity ?? balance)}`, `плавающий ${usd(s.unrealized ?? 0)}`],
-      ["Открыто сделок", s.open_trades ?? 0, `маржа в работе $${num(s.used_margin ?? 0)}`],
+      ["Equity", `$${num(a.equity ?? balance)}`, `плавающий ${usd(a.unrealized ?? 0)}`],
+      ["Открыто сделок", a.open_trades ?? 0, `маржа в работе $${num(a.used_margin ?? 0)}`],
       ["Закрыто сделок", t.closed ?? 0, `${t.wins ?? 0} в плюс · ${t.losses ?? 0} в минус`],
       ["Win rate", `${num(t.win_rate ?? 0, 1)}%`, `PF ${t.profit_factor ?? "—"}`],
       ["Итог P&L", usd(t.total_pnl ?? 0), `ср. ROE ${num(t.avg_roe ?? 0, 1)}%`],
@@ -178,20 +252,31 @@
   function renderEquity() {
     const box = document.getElementById("paper-equity");
     if (!box || typeof echarts === "undefined") return;
-    const rows = ((paper.data && paper.data.analytics) || {}).equity || [];
     if (!paper.equityChart) paper.equityChart = echarts.init(box, null, { renderer: "canvas" });
-    paper.equityChart.setOption({
-      backgroundColor: "transparent",
-      grid: { left: 60, right: 20, top: 20, bottom: 30 },
-      tooltip: { trigger: "axis" },
-      legend: { data: ["Баланс", "Equity"], textStyle: { color: "#8e9aab" }, top: 0 },
-      xAxis: { type: "time", axisLabel: { color: "#8e9aab" } },
-      yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
-      series: [
-        { name: "Баланс", type: "line", showSymbol: false, data: rows.map((r) => [r[0], r[1]]), lineStyle: { color: "#5dade2" } },
-        { name: "Equity", type: "line", showSymbol: false, data: rows.map((r) => [r[0], r[2]]), lineStyle: { color: "#3dd68c", type: "dashed" } },
-      ],
+    const series = variants().map((v) => {
+      const rows = vstats(v).equity || [];
+      const color = VARIANT_COLORS[v] || "#8e9aab";
+      return {
+        name: vlabel(v),
+        type: "line",
+        showSymbol: false,
+        data: rows.map((r) => [r[0], r[2]]),
+        lineStyle: { color, width: v === paper.variant ? 2.5 : 1.2 },
+        itemStyle: { color },
+      };
     });
+    paper.equityChart.setOption(
+      {
+        backgroundColor: "transparent",
+        grid: { left: 60, right: 20, top: 28, bottom: 30 },
+        tooltip: { trigger: "axis" },
+        legend: { data: series.map((s) => s.name), textStyle: { color: "#8e9aab" }, top: 0 },
+        xAxis: { type: "time", axisLabel: { color: "#8e9aab" } },
+        yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
+        series,
+      },
+      true,
+    );
     paper.equityChart.resize();
   }
 
@@ -217,19 +302,20 @@
   function renderOpen() {
     const table = document.getElementById("paper-open-table");
     if (!table) return;
-    const rows = (paper.data && paper.data.open_trades) || [];
+    const rows = ((paper.data && paper.data.open_trades) || []).filter((r) => r.variant === paper.variant);
     if (!rows.length) {
-      table.innerHTML = '<tbody><tr><td class="quiet">Открытых сделок нет.</td></tr></tbody>';
+      table.innerHTML = '<tbody><tr><td class="quiet">Открытых сделок в этом варианте нет.</td></tr></tbody>';
       return;
     }
     table.innerHTML = `<thead><tr>
-      <th>Монета</th><th>Памп</th><th>Вход</th><th>Цена входа</th><th>Текущая</th><th>Изм. цены</th>
+      <th>Монета</th><th>Памп</th><th>Условий</th><th>Вход</th><th>Цена входа</th><th>Текущая</th><th>Изм. цены</th>
       <th>Стоп</th><th>Лучшая</th><th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Маржа</th><th>Funding</th><th>Сила</th><th>В сделке</th>
     </tr></thead><tbody>${rows
       .map(
         (r) => `<tr class="clickable${isSel("open", r.id)}" data-id="${r.id}">
         <td><b>${esc(r.symbol)}</b></td>
         <td>${pumpLine(r.pump)}</td>
+        <td>${passedText(r.entry)}</td>
         <td>${time(r.opened_at)}</td>
         <td>${price(r.entry_price)}</td>
         <td>${price(r.last_price)}</td>
@@ -270,7 +356,8 @@
     const total = mandatory().length;
     table.innerHTML = `<thead><tr>
       <th>Монета</th><th>Памп</th><th>С пика</th><th>Диапазон</th><th>Объём ×</th><th>Покупки на росте</th>
-      <th>Продажи 5/10/15м</th><th>OI 1ч / 4ч</th><th>Funding</th><th>Условия</th><th>Не хватает</th><th>Сила</th><th>Тень</th>
+      <th>Продажи 5/10/15м</th><th>OI 1ч / 4ч</th><th>Funding</th><th>Условия</th><th>Не хватает</th>
+      <th>Вершина</th><th>Подходит / в сделке</th><th>Сила</th><th>Тень</th>
     </tr></thead><tbody>${rows
       .map((r) => {
         const ev = r.eval || {};
@@ -278,8 +365,11 @@
         const p = r.pump || {};
         const ss = m.sell_share || {};
         const failed = (ev.failed || []).map((k) => labels()[k] || k);
-        const passed = total - (ev.failed || mandatory()).length;
+        const passed = ev.passed_count ?? total - (ev.failed || mandatory()).length;
         const sh = r.shadow ? `${pct(r.shadow.roe_pct, 1)}` : "—";
+        const st = m.strong_top;
+        const fits = (ev.variants || []).map(vbadge).join(" ") || "—";
+        const inTrade = (r.open_in || []).map(vbadge).join(" ");
         return `<tr class="clickable${isSel("cand", r.id)}" data-id="${r.id}">
           <td><b>${esc(r.symbol)}</b></td>
           <td>${pumpLine(p)}</td>
@@ -292,6 +382,8 @@
           <td>${m.funding_rate === null || m.funding_rate === undefined ? "—" : num(m.funding_rate * 100, 4) + "%"}</td>
           <td>${checkDots(ev)} ${passed}/${total}</td>
           <td>${esc(r.note || failed.join(", ") || "—")}</td>
+          <td>${st ? `${st.interval === "60" ? "1H" : "30m"} −${num(st.diff_pct, 1)}%` : "—"}</td>
+          <td>${fits}${inTrade ? `<br><span class="quiet">в сделке:</span> ${inTrade}` : ""}</td>
           <td class="grade-${ev.grade || "C"}">${ev.grade || "—"} · ${num(ev.score, 1)}</td>
           <td>${sh}</td>
         </tr>`;
@@ -303,13 +395,13 @@
   function renderClosed() {
     const table = document.getElementById("paper-closed-table");
     if (!table) return;
-    const rows = paper.closed || [];
+    const rows = paper.closedVariant === paper.variant ? paper.closed || [] : [];
     if (!rows.length) {
-      table.innerHTML = '<tbody><tr><td class="quiet">Закрытых сделок пока нет.</td></tr></tbody>';
+      table.innerHTML = '<tbody><tr><td class="quiet">Закрытых сделок в этом варианте пока нет.</td></tr></tbody>';
       return;
     }
     table.innerHTML = `<thead><tr>
-      <th>Монета</th><th>Памп</th><th>Вход</th><th>Выход</th><th>Цена входа</th><th>Цена выхода</th><th>Причина</th>
+      <th>Монета</th><th>Памп</th><th>Условий</th><th>Вход</th><th>Выход</th><th>Цена входа</th><th>Цена выхода</th><th>Причина</th>
       <th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Мин. ROE</th><th>Комиссии</th><th>Funding</th><th>Сила</th><th>Баланс после</th>
     </tr></thead><tbody>${rows
       .map((r) => {
@@ -317,6 +409,7 @@
         return `<tr class="clickable${isSel("closed", r.id)}" data-id="${r.id}">
           <td><b>${esc(r.symbol)}</b></td>
           <td>${pumpLine(p)}</td>
+          <td>${passedText(r.entry)}</td>
           <td>${time(r.opened_at)}</td>
           <td>${time(r.closed_at)} (${dur((r.closed_at - r.opened_at) / 60000)})</td>
           <td>${price(r.entry_price)}</td>
@@ -346,8 +439,9 @@
   function renderBreakdowns() {
     const root = document.getElementById("paper-breakdowns");
     if (!root) return;
-    const a = (paper.data && paper.data.analytics) || {};
+    const a = vstats(paper.variant);
     root.innerHTML = [
+      groupTable("По числу условий при входе", a.by_passed),
       groupTable("По причине выхода", a.by_reason),
       groupTable("По типу пампа", a.by_kind),
       groupTable("По окну роста", a.by_trigger),
@@ -362,7 +456,7 @@
     const c = ((paper.data && paper.data.analytics) || {}).candidates || {};
     const st = c.by_status || {};
     const L = labels();
-    let html = `<p>Всего кандидатов: <b>${c.total || 0}</b> · ведутся: ${st.watching || 0} · вошли: ${st.entered || 0} · истекли без входа: ${st.expired || 0}</p>`;
+    let html = `<p>Всего кандидатов: <b>${c.total || 0}</b> · ведутся: ${st.watching || 0} · закончились со входом: ${st.entered || 0} · без входа ни в одном варианте: ${st.expired || 0}</p>`;
     const blockers = Object.entries(c.blockers || {});
     const failRate = c.fail_rate || {};
     html += `<h4>Какие условия не выполнялись</h4><table class="paper-table"><thead><tr><th>Условие</th><th>Блокировало в конце (кандидатов)</th><th>Не выполнялось, % проверок</th></tr></thead><tbody>${mandatory()
@@ -411,7 +505,7 @@
               : "—";
         return `<tr class="clickable${isSel("hist", r.id)}" data-id="${r.id}">
           <td><b>${esc(r.symbol)}</b></td><td>${pumpLine(p)}</td><td>${time(r.started_at)}</td><td>${time(r.ended_at)}</td>
-          <td>${STATUS[r.status] || esc(r.status)}</td><td>${esc(r.end_reason || "—")}</td>
+          <td>${STATUS[r.status] || esc(r.status)}${(r.variants || []).length ? "<br>" + r.variants.map(vbadge).join(" ") : ""}</td><td>${esc(r.end_reason || "—")}</td>
           <td>${r.best_passed}/${mandatory().length}</td><td>${esc(failed || "—")}</td>
           <td>${esc(L[r.near_miss_missing] || r.near_miss_missing || "—")}</td><td>${shadow}</td>
         </tr>`;
@@ -465,7 +559,8 @@
     const m = ev.metrics || {};
     const p = m.pump || {};
     const g = p.growth || {};
-    let html = "<h4>Обязательные условия</h4><ul class=\"paper-check-list\">";
+    const fits = (ev.variants || []).map(vbadge).join(" ");
+    let html = `<h4>Условия: выполнено ${passedText(ev)}${fits ? ` · подходит под ${fits}` : ""}</h4><ul class="paper-check-list">`;
     html += mandatory()
       .map((key) => {
         const c = ev.checks[key] || {};
@@ -514,8 +609,15 @@
       )
       .join("")}</tbody></table>`;
     const dt = m.double_top;
+    const st = m.strong_top;
     const rl = m.round_level;
     html += kv([
+      [
+        "Сильная двойная вершина",
+        st
+          ? `${st.interval === "60" ? "1H" : "30m"}: ${price(st.first_price)} → ${price(st.second_price)} (ниже на ${num(st.diff_pct, 2)}%), ${st.bars_between} свечей, после 2-й ${num(st.hours_after, 1)} ч`
+          : "нет",
+      ],
       ["Двойная вершина", dt ? `${dt.interval === "60" ? "1H" : "30m"}: ${price(dt.first_price)} / ${price(dt.second_price)}, разница ${num(dt.diff_pct, 2)}%, ${dt.bars_between} свечей, после 2-й ${num(dt.hours_after, 1)} ч` : "нет"],
       ["Круглый уровень", rl ? `${rl.level} (до пика ${num(rl.distance_pct, 2)}%)` : "нет"],
     ]);
@@ -529,6 +631,7 @@
     const r = item.row;
     if (item.live) {
       return kv([
+        ["Вариант", vbadge(r.variant)],
         ["Цена входа", price(r.entry_price)],
         ["Время входа", time(r.opened_at)],
         ["Текущая цена", `${price(r.last_price)} (${pct(r.price_change_pct)})`],
@@ -545,6 +648,7 @@
       ]);
     }
     return kv([
+      ["Вариант", vbadge(r.variant)],
       ["Вход", `${price(r.entry_price)} · ${time(r.opened_at)}`],
       ["Выход", `${price(r.exit_price)} · ${time(r.closed_at)} · ${EXIT[r.exit_reason] || esc(r.exit_reason)}`],
       ["ROE / P&L", `${pct(r.roe_pct, 1)} / ${usd(r.pnl_usd)}`],
@@ -564,11 +668,14 @@
       return kv([
         ["Ведётся", `${dur(r.watch_min)} · проверок ${r.scans}`],
         ["Лучший результат", `${r.best_passed}/${mandatory().length} условий`],
+        ["Вошли в вариантах", (r.entered || []).map(vbadge).join(" ") || "нет"],
+        ["Сейчас в сделке", (r.open_in || []).map(vbadge).join(" ") || "нет"],
         ["Теневая сделка", r.shadow ? `вход ${price(r.shadow.entry_price)}, ROE ${pct(r.shadow.roe_pct, 1)}, не хватало: ${esc(labels()[r.shadow.missing] || r.shadow.missing)}` : "нет"],
       ]);
     }
     return kv([
       ["Итог", `${r.status === "entered" ? "Вход" : "Без входа"} · ${esc(r.end_reason || "")}`],
+      ["Вошли в вариантах", (r.variants || []).map(vbadge).join(" ") || "нет"],
       ["Период", `${time(r.started_at)} → ${time(r.ended_at)}`],
       ["Проверок", r.scans],
       ["Лучший результат", `${r.best_passed}/${mandatory().length} условий`],
@@ -594,7 +701,7 @@
     panel.hidden = false;
     const title = document.getElementById("paper-detail-title");
     const what = item.kind === "trade" ? (item.live ? "Открытая сделка" : "Закрытая сделка") : "Кандидат";
-    title.textContent = `${item.symbol} — ${what}`;
+    title.textContent = `${item.symbol} — ${what}${item.kind === "trade" && item.row.variant ? ` (${vlabel(item.row.variant)})` : ""}`;
     const info = document.getElementById("paper-detail-info");
     const scroll = info.scrollTop;
     info.innerHTML = (item.kind === "trade" ? tradeHtml(item) : candHtml(item)) + evalHtml(item.ev);

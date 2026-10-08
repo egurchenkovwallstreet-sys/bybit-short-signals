@@ -1,9 +1,10 @@
 """Памп и условия входа в виртуальный шорт. Чистые функции без SQLite и Redis.
 
-Обязательные условия (все сразу): качество пампа (объём ×10, покупки ≥70%),
-торможение в диапазоне, покупки упали, продажи перевешивают, объём падает
-(или держится при снижении цены), ликвидации шортов затихли, OI за 1 ч < 0,
-а при сильном росте BTC ещё пробой EMA50 15m или двойная вершина.
+9 условий: качество пампа (объём ×10, покупки ≥70%), торможение в диапазоне,
+покупки упали, продажи перевешивают, объём падает (или держится при снижении
+цены), ликвидации шортов затихли, OI за 1 ч < 0, а при сильном росте BTC ещё
+пробой EMA50 15m или двойная вершина. Вход по вариантам: любые 5 из 9, все 9,
+или сильная двойная вершина (2-я ниже 1-й < 10%, после неё ≥ 2 ч) + 3 условия.
 Остальное только добавляет баллы силы.
 """
 
@@ -45,6 +46,12 @@ CHECK_LABELS = {
     "short_liq_faded": "Ликвидации шортов затихли ≥80%",
     "oi_1h_negative": "OI за 1 ч отрицательный",
     "btc_guard": "BTC: строгий режим пройден",
+}
+
+VARIANT_LABELS = {
+    "v5": f"{config.PAPER_V5_MIN_PASSED} из {len(MANDATORY)} условий",
+    "v9": f"Все {len(MANDATORY)} условий",
+    "dt": f"Двойная вершина + {config.PAPER_DT_MIN_PASSED} условия",
 }
 
 _TF_WEIGHT = {"15": 1.0, "30": 1.5, "60": 2.0, "240": 3.0}
@@ -97,6 +104,7 @@ class Evaluation:
     score: float
     score_parts: dict[str, float]
     strict_btc: bool
+    strong_top: dict | None = None
 
     @property
     def passed(self) -> bool:
@@ -105,6 +113,23 @@ class Evaluation:
     @property
     def failed(self) -> list[str]:
         return [key for key in MANDATORY if not self.checks[key]["ok"]]
+
+    @property
+    def passed_count(self) -> int:
+        return len(MANDATORY) - len(self.failed)
+
+    def qualifies(self, variant: str) -> bool:
+        if variant == "v9":
+            return self.passed
+        if variant == "v5":
+            return self.passed_count >= config.PAPER_V5_MIN_PASSED
+        if variant == "dt":
+            return self.strong_top is not None and self.passed_count >= config.PAPER_DT_MIN_PASSED
+        return False
+
+    @property
+    def variants(self) -> list[str]:
+        return [v for v in config.PAPER_VARIANTS if self.qualifies(v)]
 
     def to_data(self) -> dict:
         return {
@@ -115,7 +140,9 @@ class Evaluation:
             "score_parts": {k: round(v, 2) for k, v in self.score_parts.items() if v},
             "strict_btc": self.strict_btc,
             "passed": self.passed,
+            "passed_count": self.passed_count,
             "failed": self.failed,
+            "variants": self.variants,
         }
 
 
@@ -296,7 +323,18 @@ def ema_table(klines: dict[str, list[Bar]], now_ms: int) -> dict[str, dict]:
     return out
 
 
-def double_top(bars: list[Bar], interval: str, min_between: int, now_ms: int) -> dict | None:
+def double_top(
+    bars: list[Bar],
+    interval: str,
+    min_between: int,
+    now_ms: int,
+    max_diff_pct: float | None = None,
+    min_hours_after: float | None = None,
+    lower_second: bool = False,
+) -> dict | None:
+    """Две вершины по pivot-high. lower_second: 2-я строго ниже 1-й, после неё цена её не переписала."""
+    max_diff = config.PAPER_DT_MAX_DIFF_PCT if max_diff_pct is None else max_diff_pct
+    hours_after = config.PAPER_DT_MIN_HOURS_AFTER if min_hours_after is None else min_hours_after
     closed = closed_bars(bars, interval, now_ms)
     if len(closed) < min_between + 6:
         return None
@@ -304,21 +342,24 @@ def double_top(bars: list[Bar], interval: str, min_between: int, now_ms: int) ->
     if len(pivots) < 2:
         return None
     second = pivots[-1]
-    if now_ms - second["time"] < config.PAPER_DT_MIN_HOURS_AFTER * HOUR_MS:
+    if now_ms - second["time"] < hours_after * HOUR_MS:
         return None
     after = closed[second["bar_index"] + 1 :]
     best = None
     for first in reversed(pivots[:-1]):
         if second["bar_index"] - first["bar_index"] < min_between:
             continue
+        if lower_second and second["price"] >= first["price"]:
+            continue
         top = max(first["price"], second["price"])
         diff = abs(first["price"] - second["price"]) / top * 100.0
-        if diff > config.PAPER_DT_MAX_DIFF_PCT:
+        if diff >= max_diff if lower_second else diff > max_diff:
             continue
         between = closed[first["bar_index"] + 1 : second["bar_index"]]
         if between and max(b.high for b in between) > top:
             continue
-        if after and max(b.high for b in after) > top:
+        ceiling = second["price"] if lower_second else top
+        if after and max(b.high for b in after) > ceiling:
             continue
         if best is None or diff < best["diff_pct"]:
             best = {
@@ -332,6 +373,25 @@ def double_top(bars: list[Bar], interval: str, min_between: int, now_ms: int) ->
                 "hours_after": round((now_ms - second["time"]) / HOUR_MS, 1),
             }
     return best
+
+
+def strong_top(klines: dict[str, list[Bar]], now_ms: int) -> dict | None:
+    for interval, min_between in (
+        ("60", config.PAPER_STRONG_TOP_MIN_BARS_1H),
+        ("30", config.PAPER_STRONG_TOP_MIN_BARS_30M),
+    ):
+        found = double_top(
+            klines.get(interval) or [],
+            interval,
+            min_between,
+            now_ms,
+            max_diff_pct=config.PAPER_STRONG_TOP_MAX_DIFF_PCT,
+            min_hours_after=config.PAPER_STRONG_TOP_MIN_HOURS_AFTER,
+            lower_second=True,
+        )
+        if found is not None:
+            return found
+    return None
 
 
 def round_level_near(price: float) -> dict | None:
@@ -484,6 +544,7 @@ def evaluate(
     dt_1h = double_top(klines.get("60") or [], "60", config.PAPER_DT_MIN_BARS_1H, now_ms)
     dt_30 = double_top(klines.get("30") or [], "30", config.PAPER_DT_MIN_BARS_30M, now_ms)
     dtop = dt_1h or dt_30
+    strong = strong_top(klines, now_ms)
     strict = btc_4h_pct is not None and btc_4h_pct >= config.PAPER_BTC_STRICT_4H_PCT
     ema15_50 = emas.get("15m_EMA50", {}).get("broken", False)
     checks["btc_guard"] = _check(
@@ -502,6 +563,7 @@ def evaluate(
     ema_sum = sum(row["weight"] for row in emas.values() if row["broken"])
     parts["ema"] = ema_sum / ema_max * 40.0
     parts["double_top"] = 10.0 if dtop else 0.0
+    parts["strong_top"] = 15.0 if strong else 0.0
     parts["round_level"] = level["weight"] if level else 0.0
     if long_liq > 0:
         parts["long_liq"] = 5.0 if long_liq >= short_liq_15 else 2.0
@@ -541,10 +603,13 @@ def evaluate(
             "ema": {k: {"ema": v["ema"], "close": v["close"], "broken": v["broken"]} for k, v in emas.items()},
             "ema_broken": [k for k, v in emas.items() if v["broken"]],
             "double_top": dtop,
+            "strong_top": strong,
             "round_level": level,
         }
     )
-    return Evaluation(checks=checks, metrics=metrics, score=score, score_parts=parts, strict_btc=strict)
+    return Evaluation(
+        checks=checks, metrics=metrics, score=score, score_parts=parts, strict_btc=strict, strong_top=strong
+    )
 
 
 def _volume_and_price(state: SymbolState) -> tuple[float | None, float | None]:

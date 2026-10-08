@@ -1428,6 +1428,15 @@ th { cursor: pointer; color: var(--muted); }
   cursor: pointer;
 }
 .paper-btn.active { border-color: var(--blue); background: #1a3050; }
+.paper-vbadge {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.paper-variant-title { margin: 4px 0 0; font-size: 15px; }
 .paper-detail-body {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);

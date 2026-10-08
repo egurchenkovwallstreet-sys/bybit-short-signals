@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261008a">
+  <link rel="stylesheet" href="/static/styles.css?v=20261008b">
 </head>
 <body>
   <header class="topbar">
@@ -93,11 +93,17 @@
     <p class="quiet paper-intro">
       Виртуальные шорты после пампа: система сама находит монету, ждёт затухания и открывает сделку на бумаге.
       Депозит $1000, маржа 5% от баланса, плечо ×10 (изолированная), трейлинг-стоп, комиссии и funding учтены.
-      Ордера на биржу не уходят.
+      Ордера на биржу не уходят. Три варианта входа идут параллельно, у каждого свой счёт $1000.
     </p>
+    <section class="paper-panel">
+      <h3>Сравнение вариантов</h3>
+      <p class="quiet">Нажмите на строку, чтобы смотреть сделки и статистику этого варианта.</p>
+      <div class="table-wrap"><table id="paper-variants" class="paper-table"></table></div>
+    </section>
+    <h3 id="paper-variant-title" class="paper-variant-title"></h3>
     <div id="paper-summary" class="paper-cards"></div>
     <section class="paper-panel">
-      <h3>Баланс</h3>
+      <h3>Баланс по вариантам</h3>
       <div id="paper-equity" class="paper-equity"></div>
     </section>
     <section class="paper-panel">
@@ -119,7 +125,10 @@
     </section>
     <section class="paper-panel">
       <h3>Кандидаты сейчас</h3>
-      <p class="quiet">Монеты после пампа, которые система ведёт. Вход — когда все обязательные условия зелёные.</p>
+      <p class="quiet">
+        Монеты после пампа, которые система ведёт. Вход: «5 из 9» — любые 5 условий, «Все 9» — все условия,
+        «Двойная вершина» — вторая вершина ниже первой меньше чем на 10%, после неё прошло 2 ч и выполнено 3 условия.
+      </p>
       <div class="table-wrap"><table id="paper-cand-table" class="paper-table"></table></div>
     </section>
     <section class="paper-panel">
@@ -185,9 +194,9 @@
 
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
-  <script src="/static/paper_test.js?v=20261008a"></script>
+  <script src="/static/paper_test.js?v=20261008b"></script>
   <script src="/static/board_chart.js?v=20251008v"></script>
-  <script src="/static/app.js?v=20261008a"></script>
+  <script src="/static/app.js?v=20261008b"></script>
   <script src="/static/pump_scan.js?v=20251008v"></script>
   <script src="/static/x2_retrace.js?v=20251008v"></script>
   <script src="/static/pump_strategy.js?v=20251008h"></script>
