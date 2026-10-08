@@ -1,0 +1,4 @@
+{
+  "install": "bash scripts/cloud_agent_ssh_setup.sh && pip install -r requirements.txt -q",
+  "start": "bash scripts/cloud_agent_ssh_setup.sh"
+}
