@@ -30,6 +30,8 @@ window.boardChart = {
   LIQ_CHART: {
     depthPct: 0.35,
     refreshMs: 45_000,
+    /** Макс. ширина полоски — доля ширины графика от левого края. */
+    widthPct: 0.3,
   },
   _liqZonesFetch: new Map(),
   BOOK_PANEL: {
@@ -528,61 +530,37 @@ window.boardChart = {
     const series = runtime?.series;
     if (!el || !series || !mark) return;
     runtime._overlayProbePrice = Number(mark) || runtime._overlayProbePrice;
-    const list = zones || [];
-    if (!list.length) {
+    BC.clearLiqPriceLines(runtime);
+    const pendingOnly = (zones || [])
+      .map((z) => {
+        const pending = Number(z.notional_pending_usd);
+        const vol =
+          pending > 0
+            ? pending
+            : Number(z.notional_cleared_usd) > 0
+              ? 0
+              : Number(z.notional_usd) || 0;
+        return { ...z, _vol: vol };
+      })
+      .filter((z) => z._vol > 0);
+    if (!pendingOnly.length) {
       el.innerHTML = "";
-      BC.clearLiqPriceLines(runtime);
       return;
     }
-    BC.syncLiqPriceLines(runtime, list);
-    const maxN = Math.max(...list.map((z) => Number(z.notional_usd) || 0), 1);
-    const anchorX = BC.lastCandleAnchorX(runtime);
-    const hostW = el.parentElement?.clientWidth || el.clientWidth || 640;
-    const offX = BC.overlayPlotOffsetX(runtime);
-    const rawAnchor = anchorX != null ? Math.round(anchorX + offX) : null;
-    const maxPx = rawAnchor != null && rawAnchor > 12 ? rawAnchor : Math.round(hostW * 0.82);
+    const maxVol = Math.max(...pendingOnly.map((z) => z._vol), 1);
     const parts = [];
-    for (const z of list) {
+    for (const z of pendingOnly) {
       const y = series.priceToCoordinate(Number(z.price));
       if (y == null) continue;
       const yPx = Math.round(y);
-      const pending = Number(z.notional_pending_usd);
-      const cleared = Number(z.notional_cleared_usd);
-      const totalN =
-        (pending > 0 || cleared > 0 ? pending + cleared : Number(z.notional_usd)) || 0;
-      if (totalN <= 0) continue;
-      const pPending = pending > 0 ? pending : Math.max(0, totalN - (cleared > 0 ? cleared : 0));
-      const pCleared = cleared > 0 ? cleared : Math.max(0, totalN - pPending);
-      const ratio = totalN / maxN;
-      const widthTotal = Math.max(28, Math.round(ratio * maxPx));
-      let wPending = Math.round((pPending / totalN) * widthTotal);
-      let wCleared = Math.round((pCleared / totalN) * widthTotal);
-      if (pPending > 0 && wPending < 14) wPending = 14;
-      if (pCleared > 0 && wCleared < 10) wCleared = 10;
-      const segSum = wPending + wCleared;
-      if (segSum > widthTotal) {
-        const scale = widthTotal / segSum;
-        wPending = Math.max(pPending > 0 ? 4 : 0, Math.round(wPending * scale));
-        wCleared = Math.max(pCleared > 0 ? 4 : 0, widthTotal - wPending);
-      }
+      const barPct = Math.min(100, Math.max(10, Math.round((z._vol / maxVol) * 100)));
       const side = z.side === "short" ? "short" : "long";
       const src = z.source === "hist" ? "факт" : z.source === "model" ? "модель" : "смесь";
-      const segs = [];
-      if (wPending > 0) segs.push(`<span class="psc-liq-chart-bar pending" style="width:${wPending}px"></span>`);
-      if (wPending > 0 && wCleared > 0) segs.push('<span class="psc-liq-chart-sep" aria-hidden="true"></span>');
-      if (wCleared > 0) {
-        const onlyCleared = wPending <= 0 ? " only-cleared" : "";
-        segs.push(`<span class="psc-liq-chart-bar cleared${onlyCleared}" style="width:${wCleared}px"></span>`);
-      }
-      parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · впереди ~$${BC.formatBookSize(pPending)} · снято ~$${BC.formatBookSize(pCleared)} · ${src}">
-        ${segs.join("")}
+      parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · ~$${BC.formatBookSize(z._vol)} · ${src}">
+        <span class="psc-liq-chart-bar" style="width:${barPct}%"></span>
       </div>`);
     }
-    const legend = `<div class="psc-liq-legend" aria-hidden="true">
-      <span class="psc-liq-leg pending">■ впереди</span>
-      <span class="psc-liq-leg cleared">▧ уже проходили</span>
-    </div>`;
-    el.innerHTML = legend + parts.join("");
+    el.innerHTML = parts.join("");
   },
 
   refreshLiqZonesOverlay(runtime, symbol, refPrice) {
