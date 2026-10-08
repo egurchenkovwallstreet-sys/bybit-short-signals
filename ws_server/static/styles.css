@@ -359,6 +359,16 @@ body.psc-book-fs-active {
   z-index: 1;
 }
 
+.psc-book-table--dense .psc-book-tr--empty .psc-book-price {
+  color: var(--muted);
+  opacity: 0.55;
+}
+
+.psc-book-table--dense .psc-book-tr--empty .psc-book-vol-text {
+  color: var(--muted);
+  opacity: 0.45;
+}
+
 .psc-book-tr.ask .psc-book-price {
   color: #ff8a9a;
 }

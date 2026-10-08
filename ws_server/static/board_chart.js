@@ -17,9 +17,9 @@ window.boardChart = {
   /** Стакан в боковой панели: глубина ±10% от текущей цены. */
   BOOK_DEPTH_PCT: 0.1,
   BOOK_PANEL: {
-    maxRowsPerSide: 96,
+    maxGridRowsPerSide: 320,
     /** Объединение уровней: N тиков цены в одну строку (сумма объёма). */
-    binTicks: 20,
+    binTicks: 10,
   },
   _bookFetch: new Map(),
 
@@ -113,6 +113,31 @@ window.boardChart = {
     return out;
   },
 
+  /** Все ценовые бины в ±band от mid (в т.ч. без заявок — объём 0). */
+  fillBookSideGrid(mid, lo, hi, step, isBid, sizeByPrice) {
+    const BC = window.boardChart;
+    const rows = [];
+    if (!(step > 0) || !(mid > 0)) return rows;
+    const cap = BC.BOOK_PANEL.maxGridRowsPerSide ?? 320;
+    const eps = step * 1e-6;
+    if (isBid) {
+      let p = BC.bucketPrice(mid - step, step);
+      while (p >= mid - eps) p = BC.bucketPrice(p - step, step);
+      while (p >= lo - eps && rows.length < cap) {
+        rows.push({ price: p, size: sizeByPrice.get(p) || 0, step, bid: true });
+        p = BC.bucketPrice(p - step, step);
+      }
+    } else {
+      let p = BC.bucketPrice(mid + step, step);
+      while (p <= mid + eps) p = BC.bucketPrice(p + step, step);
+      while (p <= hi + eps && rows.length < cap) {
+        rows.push({ price: p, size: sizeByPrice.get(p) || 0, step, bid: false });
+        p = BC.bucketPrice(p + step, step);
+      }
+    }
+    return rows;
+  },
+
   mergeBookLevels(pairs, isBid) {
     const m = new Map();
     for (const [priceRaw, sizeRaw] of pairs) {
@@ -140,10 +165,13 @@ window.boardChart = {
     const bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
     const asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
     const binTicks = BC.BOOK_PANEL.binTicks ?? 10;
-    let bids = BC.aggregateBookLevels(bidsRaw, true, mid, binTicks);
-    let asks = BC.aggregateBookLevels(asksRaw, false, mid, binTicks);
-    bids.sort((a, b) => b.price - a.price);
-    asks.sort((a, b) => a.price - b.price);
+    const step = BC.bookBinSize(mid, binTicks);
+    const bidsAgg = BC.aggregateBookLevels(bidsRaw, true, mid, binTicks);
+    const asksAgg = BC.aggregateBookLevels(asksRaw, false, mid, binTicks);
+    const bidMap = new Map(bidsAgg.map((r) => [r.price, r.size]));
+    const askMap = new Map(asksAgg.map((r) => [r.price, r.size]));
+    let bids = BC.fillBookSideGrid(mid, lo, hi, step, true, bidMap);
+    let asks = BC.fillBookSideGrid(mid, lo, hi, step, false, askMap);
     const walls = new Map();
     for (const w of book?.walls || []) {
       const p = Number(w.price);
@@ -173,15 +201,16 @@ window.boardChart = {
     const maxAsk = Math.max(...asks.map((r) => r.size), 1);
     const maxBid = Math.max(...bids.map((r) => r.size), 1);
     const rowHtml = (r, side, maxVol) => {
-      const tag = BC.wallTag(wallAt(r.price));
+      const empty = !(r.size > 0);
+      const tag = empty ? "" : BC.wallTag(wallAt(r.price));
       const priceLabel = BC.formatBookPrice(r.price);
-      const barPct = Math.max(4, Math.round((r.size / maxVol) * 100));
-      return `<tr class="psc-book-tr ${side}">
+      const barPct = empty ? 0 : Math.max(4, Math.round((r.size / maxVol) * 100));
+      return `<tr class="psc-book-tr ${side}${empty ? " psc-book-tr--empty" : ""}">
         <td class="psc-book-price">${priceLabel}</td>
         <td class="psc-book-vol">
           <span class="psc-book-vol-wrap">
             <span class="psc-book-vol-bar ${side}" style="width:${barPct}%"></span>
-            <span class="psc-book-vol-text">${BC.formatBookSize(r.size)}${tag}</span>
+            <span class="psc-book-vol-text">${empty ? "—" : BC.formatBookSize(r.size)}${tag}</span>
           </span>
         </td>
       </tr>`;

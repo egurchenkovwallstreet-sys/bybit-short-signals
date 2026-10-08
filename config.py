@@ -128,7 +128,7 @@ KLINE_FETCH_LIMIT = _env_int("KLINE_FETCH_LIMIT", 200)
 OI_FETCH_LIMIT = _env_int("OI_FETCH_LIMIT", 200)
 # Окно индикаторов в карточке сигнала (открытый интерес, CVD и т.д.), часы.
 DETAIL_CHART_WINDOW_HOURS = _env_int("DETAIL_CHART_WINDOW_HOURS", 48)
-ORDERBOOK_DEPTH = 50
+ORDERBOOK_DEPTH = _env_int("ORDERBOOK_DEPTH", 500)
 
 
 # --- Redis -------------------------------------------------------------------

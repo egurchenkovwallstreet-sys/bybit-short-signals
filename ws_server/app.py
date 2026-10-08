@@ -209,7 +209,7 @@ async def orderbook(symbol: str, refresh: bool = False) -> dict[str, Any]:
     hub: Hub = app.state.hub
     view = hub.cache.book_view(symbol)
     levels = len(view.get("bids") or []) + len(view.get("asks") or [])
-    if levels >= 8 and not refresh:
+    if levels >= 80 and not refresh:
         return {"symbol": symbol, "book": view}
     from collector.rest_client import BybitRest
 
