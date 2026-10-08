@@ -149,12 +149,12 @@ class BybitRest:
         payload = await self._call("publicGetV5MarketOrderbook", params)
         return orderbook_from_rest(_result(payload))
 
-    async def fetch_klines(self, symbol: str, interval: str) -> dict[str, Any] | None:
+    async def fetch_klines(self, symbol: str, interval: str, limit: int | None = None) -> dict[str, Any] | None:
         params = {
             "category": config.BYBIT_CATEGORY,
             "symbol": symbol,
             "interval": interval,
-            "limit": config.KLINE_FETCH_LIMIT,
+            "limit": limit or config.KLINE_FETCH_LIMIT,
         }
         payload = await self._call("publicGetV5MarketKline", params)
         rows = _result(payload).get("list") or []

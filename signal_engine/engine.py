@@ -18,6 +18,7 @@ from signal_engine.state import SymbolState
 from signal_engine.pump_scan import build_pump_scan_board
 from signal_engine.x2_retrace import build_x2_retrace_board
 from signal_engine.pump_strategy import build_pump_strategy_board
+from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.store import SignalStore
 from signal_engine.watch_store import WatchStore
 
@@ -26,15 +27,23 @@ log = logging.getLogger(__name__)
 
 
 class Engine:
-    def __init__(self, store: SignalStore, watches: WatchStore | None = None) -> None:
+    def __init__(
+        self,
+        store: SignalStore,
+        watches: WatchStore | None = None,
+        paper: PaperStrategy | None = None,
+    ) -> None:
         self.store = store
         self.watches = watches or WatchStore(config.SQLITE_PATH)
+        self.paper = paper
         self.symbols: dict[str, SymbolState] = {}
         self.open_signals: dict[str, Signal] = {}
         self._signal_column_pending: dict[str, tuple[int, int]] = {}
 
     def restore(self) -> None:
         self.watches.open()
+        if self.paper is not None:
+            self.paper.open()
         for signal in self.store.load_open():
             self.open_signals[signal.symbol] = signal
             self.symbols.setdefault(signal.symbol, SymbolState(signal.symbol))
@@ -51,6 +60,8 @@ class Engine:
             state.ingest(message)
         except (TypeError, ValueError):
             log.exception("Сообщение %s %s пропущено", symbol, message.get("type"))
+        if self.paper is not None:
+            self.paper.ingest(message)
 
     def scan(self, now_ms: int) -> list[dict]:
         wins, total = self.store.outcome_counts()
@@ -78,13 +89,19 @@ class Engine:
             if self._refresh(signal, evaluate(state, now_ms), now_ms, wins, total):
                 changed.append(signal.to_message("update", now_ms))
         # Доска каждые 3 секунды — снимок колонок, даже если галочки не менялись.
-        return [
+        out = [
             *changed,
             self._board(now_ms),
             build_pump_scan_board(self.symbols, now_ms, self.watches),
             build_x2_retrace_board(self.symbols, now_ms, self.watches),
             build_pump_strategy_board(self.symbols, now_ms, self.watches),
         ]
+        if self.paper is not None:
+            try:
+                out.append(self.paper.scan(self.symbols, now_ms))
+            except Exception:
+                log.exception("Тест стратегии: ошибка скана")
+        return out
 
     def _try_open(self, state: SymbolState, now_ms: int, wins: int, total: int) -> Signal | None:
         if state.last_price is None or state.last_price <= 0:

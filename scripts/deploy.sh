@@ -18,6 +18,8 @@ _stop_orphans() {
 
 if command -v pm2 >/dev/null 2>&1; then
   ECOSYSTEM="$ROOT/scripts/ecosystem.config.cjs"
+  # Старый BTC-тест удалён из проекта: снять процесс, если он ещё в PM2.
+  pm2 delete btc-strategy-test >/dev/null 2>&1 || true
   if pm2 describe collector >/dev/null 2>&1; then
     pm2 restart "$ECOSYSTEM" --update-env
   else

@@ -75,7 +75,7 @@ bash scripts/deploy.sh
 bash scripts/setup_pm2.sh
 ```
 
-Процессы: `collector`, `signal-engine`, `ws-server`, `btc-strategy-test`. Логи: `logs-*.txt` в корне проекта.
+Процессы: `collector`, `signal-engine`, `ws-server`. Тест стратегии (виртуальные шорты) работает внутри `signal-engine`, журнал — `data/paper_strategy.db`. Логи: `logs-*.txt` в корне проекта.
 
 ## Чего система не делает
 

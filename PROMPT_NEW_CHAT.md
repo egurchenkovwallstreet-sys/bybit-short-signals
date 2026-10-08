@@ -5,7 +5,7 @@
 1. Прочитай полностью TZ.md и PROGRESS.md в корне репозитория (включая раздел «РАСШИРЕНИЯ UI И ДОСОК» и журнал 2026-10-06).
 2. Прочитай .cursor/rules/deploy-workflow.mdc.
 3. Изучи код по цепочке: config.py → collector/ → signal_engine/ (engine.py, pump_scan.py, x2_retrace.py, watch_store.py, pump_history.py, swing_highs.py) → ws_server/ (app.py, hub.py, cache.py, static/).
-4. Пойми текущее состояние: вкладки «Сигналы», «Памп-скан», «2× откат», «BTC · тест»; липкие board_watches; debounce колонок; dismiss API.
+4. Пойми текущее состояние: вкладки «Сигналы», «Памп-скан», «2× откат», «Тест стратегии» (виртуальные шорты, `signal_engine/paper/`); липкие board_watches; debounce колонок; dismiss API.
 
 Принцип работы в этом проекте («чистый лист» = новый чат, не переписывать архитектуру):
 - Продолжаем с текущего main, минимальные дифы, существующие конвенции.

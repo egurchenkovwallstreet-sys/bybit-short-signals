@@ -13,6 +13,7 @@ from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from ws_server import paper as paper_db
 from ws_server.hub import Client, Hub
 
 
@@ -60,55 +61,26 @@ async def stats() -> dict[str, Any]:
     return app.state.hub.stats()
 
 
-@app.get("/api/btc-test/analytics")
-async def btc_analytics() -> dict[str, Any]:
-    data = app.state.hub.btc.view()
-    if not data:
-        from ws_server.btc_hydrate import btc_snapshot_from_db
-
-        data = btc_snapshot_from_db()
-    if not data:
-        return {"closed": 0, "wins": 0, "losses": 0, "win_rate": 0, "by_grade": {}, "factors_wins": {}, "factors_losses": {}}
-    return data.get("analytics") or {}
-
-
-@app.get("/api/btc-test/snapshot")
-async def btc_snapshot() -> dict[str, Any]:
-    from strategy_test.symbol_state import read_active_symbol
-
-    data = app.state.hub.btc.view()
+@app.get("/api/paper/snapshot")
+async def paper_snapshot() -> dict[str, Any]:
+    data = app.state.hub.paper.view()
     if data:
         return data
-    from ws_server.btc_hydrate import btc_snapshot_from_db
-
-    sym = await read_active_symbol(app.state.redis)
-    snap = btc_snapshot_from_db(sym)
-    if snap:
-        return snap
-    return {"symbol": sym, "signals": [], "markers": [], "analytics": {}, "candles_by_tf": {}}
+    return await asyncio.to_thread(paper_db.snapshot_from_db)
 
 
-@app.get("/api/btc-test/symbols")
-async def btc_test_symbols() -> dict[str, Any]:
-    from strategy_test.symbol_state import read_active_symbol
-    from ws_server.btc_universe import list_symbols_with_volatility
-
-    active = await read_active_symbol(app.state.redis)
-    rows = list_symbols_with_volatility(app.state.hub.cache)
-    return {"active": active, "symbols": rows}
+@app.get("/api/paper/trades")
+async def paper_trades(status: str = "closed", limit: int = 300) -> dict[str, Any]:
+    if status not in {"open", "closed"}:
+        raise HTTPException(status_code=400, detail="status: open или closed")
+    rows = await asyncio.to_thread(paper_db.trades, status, max(1, min(limit, 2000)))
+    return {"rows": rows}
 
 
-@app.post("/api/btc-test/symbol")
-async def btc_test_set_symbol(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    from strategy_test.symbol_state import write_active_symbol
-
-    symbol = str(body.get("symbol") or "").strip().upper()
-    if not _SYMBOL.fullmatch(symbol):
-        raise HTTPException(status_code=400, detail="Некорректный тикер")
-    if not symbol.endswith("USDT"):
-        raise HTTPException(status_code=400, detail="Доступны только USDT-перпы")
-    await write_active_symbol(app.state.redis, symbol)
-    return {"ok": True, "symbol": symbol}
+@app.get("/api/paper/candidates")
+async def paper_candidates(limit: int = 300) -> dict[str, Any]:
+    rows = await asyncio.to_thread(paper_db.candidates, max(1, min(limit, 2000)))
+    return {"rows": rows}
 
 
 @app.get("/api/tooltips")

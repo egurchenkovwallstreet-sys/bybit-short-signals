@@ -1,4 +1,4 @@
-/** PM2: collector, signal_engine, ws_server, strategy_test (этап 6). */
+/** PM2: collector, signal_engine (вместе с тестом стратегии), ws_server. */
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
@@ -29,6 +29,5 @@ module.exports = {
     app("collector", "collector", "logs-collector.txt"),
     app("signal-engine", "signal_engine", "logs-engine.txt"),
     app("ws-server", "ws_server", "logs-ws.txt"),
-    app("btc-strategy-test", "strategy_test", "logs-btc-test.txt"),
   ],
 };

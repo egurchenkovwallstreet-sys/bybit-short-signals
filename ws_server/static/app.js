@@ -171,7 +171,7 @@ function connectSocket() {
     renderBoard();
     renderDetail();
     renderStats();
-    if (message.btc_test && window.btcTest) window.btcTest.onBtcMessage(message.btc_test);
+    if (message.paper_test && window.paperTest) window.paperTest.onSnapshot(message.paper_test);
     if (window.pumpScan) {
       window.pumpScan.onPumpScanSnapshot(message.pump_scan_board, message.pump_scan_detail);
     }
@@ -184,8 +184,8 @@ function connectSocket() {
         message.pump_strategy_detail,
       );
     }
-  } else if (message.type === "btc_test" && window.btcTest) {
-    window.btcTest.onBtcMessage(message.data);
+  } else if (message.type === "paper_test" && window.paperTest) {
+    window.paperTest.onSnapshot(message.data);
   } else if (message.type === "board") {
     setDemo(message.demo);
     state.board = message.data || [];
@@ -242,13 +242,10 @@ function showTab(name) {
   if (pumpStrategyView) pumpStrategyView.hidden = name !== "pump_strategy";
   document.getElementById("view-pending").hidden = name !== "pending";
   document.getElementById("view-stats").hidden = name !== "stats";
-  const btcView = document.getElementById("view-btc");
-  if (btcView) btcView.hidden = name !== "btc";
-  if (name === "btc" && window.btcTest) {
-    requestAnimationFrame(() => {
-      window.btcTest.initBtcTab();
-      window.btcTest.fetchBtcFallback?.();
-    });
+  const paperView = document.getElementById("view-paper");
+  if (paperView) paperView.hidden = name !== "paper";
+  if (name === "paper" && window.paperTest) {
+    requestAnimationFrame(() => window.paperTest.onTab());
   }
   if (name === "pump_scan" && window.pumpScan) {
     window.pumpScan.initPumpScanTab();

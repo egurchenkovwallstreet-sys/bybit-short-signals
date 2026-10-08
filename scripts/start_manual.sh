@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Запуск без PM2 (fallback), все 4 процесса.
+# Запуск без PM2 (fallback), все 3 процесса. Тест стратегии работает внутри signal_engine.
 set -euo pipefail
 
 ROOT="${SIGNALS_ROOT:-/opt/signals}"
@@ -14,6 +14,5 @@ sleep 1
 setsid .venv/bin/python -m collector >> logs-collector.txt 2>&1 < /dev/null &
 setsid .venv/bin/python -m signal_engine >> logs-engine.txt 2>&1 < /dev/null &
 setsid .venv/bin/python -m ws_server >> logs-ws.txt 2>&1 < /dev/null &
-setsid .venv/bin/python -m strategy_test >> logs-btc-test.txt 2>&1 < /dev/null &
 
 echo "Запущено вручную (без PM2)."

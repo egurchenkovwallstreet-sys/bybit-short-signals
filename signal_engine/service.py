@@ -14,6 +14,7 @@ import time
 import config
 from collector.publisher import RedisPublisher, open_redis
 from signal_engine.engine import Engine
+from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.store import SignalStore
 
 
@@ -22,7 +23,7 @@ log = logging.getLogger(__name__)
 
 class SignalService:
     def __init__(self, engine: Engine | None = None) -> None:
-        self.engine = engine or Engine(SignalStore(config.SQLITE_PATH))
+        self.engine = engine or Engine(SignalStore(config.SQLITE_PATH), paper=PaperStrategy())
         self._market = None
         self._publisher_redis = None
         self._publisher: RedisPublisher | None = None
@@ -46,6 +47,9 @@ class SignalService:
             config.REDIS_CHANNEL_SIGNALS,
         )
         next_scan = 0.0
+        kline_task = (
+            asyncio.create_task(self._paper_kline_loop()) if self.engine.paper is not None else None
+        )
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
@@ -57,6 +61,11 @@ class SignalService:
                         self._publisher.publish(item)
                     next_scan = now + config.MARKET_SCAN_INTERVAL_SEC
         finally:
+            if kline_task is not None:
+                kline_task.cancel()
+                await asyncio.gather(kline_task, return_exceptions=True)
+            if self.engine.paper is not None:
+                self.engine.paper.close()
             await pubsub.unsubscribe(config.REDIS_CHANNEL_MARKET)
             await pubsub.aclose()
             if self._publisher is not None:
@@ -71,6 +80,34 @@ class SignalService:
                         await result
             self.engine.store.close()
             self.engine.watches.close()
+
+    async def _paper_kline_loop(self) -> None:
+        """Свечи 15m/30m/1H/4H с глубиной под EMA200 — только для кандидатов теста."""
+        from collector.rest_client import BybitRest
+
+        paper = self.engine.paper
+        assert paper is not None
+        rest = BybitRest()
+        await rest.open()
+        try:
+            while True:
+                for symbol in paper.kline_wanted():
+                    fetched = paper.kline_at.get(symbol, 0.0)
+                    if time.time() - fetched < config.PAPER_KLINE_REFRESH_SEC:
+                        continue
+                    for interval in config.PAPER_EMA_INTERVALS:
+                        try:
+                            message = await rest.fetch_klines(symbol, interval, config.PAPER_KLINE_LIMIT)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            log.exception("Тест: свечи %s %s не получены", symbol, interval)
+                            continue
+                        candles = ((message or {}).get("data") or {}).get("candles") or []
+                        paper.on_klines(symbol, interval, candles)
+                await asyncio.sleep(5)
+        finally:
+            await rest.close()
 
     def _ingest_raw(self, raw: object) -> None:
         if isinstance(raw, bytes):

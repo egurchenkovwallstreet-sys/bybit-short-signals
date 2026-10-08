@@ -1366,7 +1366,7 @@ th { cursor: pointer; color: var(--muted); }
 
 .empty { color: var(--muted); }
 
-.btc-test {
+.paper-view {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -1376,202 +1376,99 @@ th { cursor: pointer; color: var(--muted); }
   flex-direction: column;
   gap: 12px;
 }
-
-.btc-symbol-panel h3 {
-  margin: 0 0 4px;
-  font-size: 14px;
-}
-
-.btc-symbol-wrap {
-  max-height: 220px;
-  overflow: auto;
-}
-
-#btc-symbol-table tbody tr.selected {
-  background: rgba(88, 166, 255, 0.12);
-}
-
-.btc-sym-pick {
-  padding: 4px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.btc-sym-pick:hover {
-  border-color: var(--blue);
-}
-
-.btc-tf-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.btc-tf {
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--panel-2);
-  color: var(--text);
-  cursor: pointer;
-}
-
-.btc-tf.active {
-  border-color: var(--blue);
-  background: #1a3050;
-}
-
-.btc-follow-label {
-  margin-left: 16px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.btc-decode {
-  padding: 14px 16px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-
-.btc-decode h3 {
-  margin: 0 0 8px;
-  font-size: 16px;
-}
-
-.decode-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 20px;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
-
-.decode-checks {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.paper-intro { margin: 0; }
+.paper-cards {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
-
-.decode-checks li {
+.paper-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
   padding: 10px 12px;
+}
+.paper-card .label { display: block; font-size: 12px; color: var(--muted); }
+.paper-card .value { font-size: 18px; font-weight: 700; margin-top: 2px; }
+.paper-card .sub { font-size: 12px; color: var(--muted); }
+.paper-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.paper-panel h3 { margin: 0 0 6px; font-size: 15px; }
+.paper-panel h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); }
+.paper-equity { height: 220px; }
+.paper-table { font-size: 13px; }
+.paper-table th { white-space: nowrap; cursor: default; }
+.paper-table td { white-space: nowrap; padding: 6px 8px; }
+.paper-table tbody tr.clickable { cursor: pointer; }
+.paper-table tbody tr.clickable:hover { background: rgba(93, 173, 226, 0.08); }
+.paper-table tbody tr.selected { background: rgba(93, 173, 226, 0.16); }
+.paper-scroll { max-height: 420px; }
+.pos { color: var(--green); }
+.neg { color: var(--red); }
+.paper-checks { display: inline-flex; gap: 3px; }
+.paper-check {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: rgba(255, 93, 115, 0.55);
+}
+.paper-check.ok { background: rgba(61, 214, 140, 0.8); }
+.paper-detail-head { display: flex; justify-content: space-between; align-items: center; }
+.paper-btn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.paper-btn.active { border-color: var(--blue); background: #1a3050; }
+.paper-detail-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+  gap: 14px;
+  margin-top: 8px;
+}
+.paper-tf-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.paper-chart { height: 460px; border: 1px solid var(--line); border-radius: 10px; }
+.paper-detail-info { max-height: 520px; overflow: auto; font-size: 13px; }
+.paper-kv {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 14px;
+  margin: 0 0 8px;
+}
+.paper-kv dt { color: var(--muted); }
+.paper-kv dd { margin: 0; text-align: right; }
+.paper-check-list { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 4px; }
+.paper-check-list li {
+  padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--line);
   background: var(--panel-2);
 }
-
-.decode-checks li.yes {
-  border-color: rgba(61, 214, 140, 0.35);
-}
-
-.decode-checks li.no {
-  opacity: 0.75;
-}
-
-#btc-signal-table tbody tr.btc-row {
-  cursor: pointer;
-}
-
-#btc-signal-table tbody tr.selected {
-  background: rgba(93, 173, 226, 0.12);
-}
-
-.btc-chart {
-  flex: 1 1 auto;
-  height: clamp(560px, 58vh, 900px);
-  min-height: 560px;
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--panel);
-  position: relative;
-}
-
-.btc-chart[data-empty="1"]::after {
-  content: "Загрузка свечей BTC…";
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--muted);
-}
-
-.btc-stats-extended {
-  padding: 14px 16px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-
-.btc-stats-extended h3 {
-  margin: 0 0 8px;
-  font-size: 16px;
-}
-
-.btc-stats-extended h4 {
-  margin: 14px 0 6px;
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.btc-stats-grid {
+.paper-check-list li.ok { border-color: rgba(61, 214, 140, 0.45); }
+.paper-check-list li.fail { border-color: rgba(255, 93, 115, 0.45); }
+.paper-check-list .need { display: block; color: var(--muted); font-size: 12px; }
+.paper-ema { border-collapse: collapse; margin-bottom: 8px; }
+.paper-ema td, .paper-ema th { padding: 3px 8px; text-align: center; }
+.paper-ema td.broken { background: rgba(61, 214, 140, 0.25); }
+.paper-breakdowns {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 10px 16px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
 }
-
-.btc-stats-grid .label {
-  display: block;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.btc-mini-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.btc-mini-table th,
-.btc-mini-table td {
-  border-bottom: 1px solid var(--line);
-  padding: 6px 8px;
-  text-align: left;
-}
-
-.btc-equity-scroll {
-  max-height: 220px;
-  overflow: auto;
-}
-
-.btc-analytics {
-  padding: 12px;
-  background: var(--panel);
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  font-size: 13px;
-}
-
-.btc-factor-grid {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 6px 16px;
-  margin-top: 8px;
-}
-
-.btc-factor-grid .win { color: var(--green); }
-.btc-factor-grid .loss { color: var(--red); }
-
 .grade-A { color: var(--green); font-weight: 700; }
 .grade-B { color: var(--yellow); font-weight: 600; }
 .grade-C { color: var(--muted); }
+@media (max-width: 1100px) {
+  .paper-detail-body { grid-template-columns: 1fr; }
+}
 
 @media (max-width: 1100px) {
   body { height: auto; overflow: auto; }

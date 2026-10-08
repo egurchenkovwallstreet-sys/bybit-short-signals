@@ -12,9 +12,8 @@ import time
 from typing import Any
 
 import config
-from ws_server.btc_cache import BtcTestCache
-from ws_server.btc_hydrate import btc_snapshot_from_db
 from ws_server.cache import MarketCache
+from ws_server.paper import PaperCache
 from ws_server.demo import demo_board, demo_market, demo_stats
 from ws_server.stats import compute_stats
 
@@ -42,9 +41,9 @@ class Client:
 class Hub:
     def __init__(self) -> None:
         self.cache = MarketCache()
-        self.btc = BtcTestCache()
+        self.paper = PaperCache()
         self.clients: set[Client] = set()
-        self.btc_dirty = False
+        self.paper_dirty = False
         self.demo = False
         self.board_dirty = False
         self.pump_scan_dirty = False
@@ -54,9 +53,6 @@ class Hub:
         self._stopped = False
         self._stats_cache: dict[str, Any] | None = None
         self._stats_at = 0.0
-        cached = btc_snapshot_from_db()
-        if cached is not None:
-            self.btc.payload = cached
 
     def load_demo(self) -> None:
         columns = demo_board()
@@ -118,7 +114,7 @@ class Hub:
                 if client.pump_strategy_symbol
                 else None
             ),
-            "btc_test": self.btc.view(),
+            "paper_test": self.paper.view(),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
@@ -211,9 +207,8 @@ class Hub:
         await pubsub.subscribe(
             config.REDIS_CHANNEL_SIGNALS,
             config.REDIS_CHANNEL_MARKET,
-            config.REDIS_CHANNEL_BTC_TEST,
         )
-        log.info("Веб-сервер слушает сигналы, рынок и BTC-тест")
+        log.info("Веб-сервер слушает сигналы и рынок")
         try:
             while not self._stopped:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
@@ -222,9 +217,9 @@ class Hub:
                 payload = _decode(message.get("data"))
                 if payload is None:
                     continue
-                if payload.get("type") == "btc_strategy":
-                    if self.btc.apply(payload):
-                        self.btc_dirty = True
+                if payload.get("type") == "paper_test":
+                    if self.paper.apply(payload):
+                        self.paper_dirty = True
                     continue
                 kind = self.cache.apply(payload)
                 if kind == "board":
@@ -246,7 +241,6 @@ class Hub:
             await pubsub.unsubscribe(
                 config.REDIS_CHANNEL_SIGNALS,
                 config.REDIS_CHANNEL_MARKET,
-                config.REDIS_CHANNEL_BTC_TEST,
             )
             await pubsub.aclose()
             close = getattr(client, "aclose", None)
@@ -267,13 +261,13 @@ class Hub:
                 self.cache.view_pump_strategy_board() if self.pump_strategy_dirty else None
             )
             send_detail = self.market_dirty
-            btc = self.btc.view() if self.btc_dirty else None
+            paper = self.paper.view() if self.paper_dirty else None
             self.board_dirty = False
             self.pump_scan_dirty = False
             self.x2_retrace_dirty = False
             self.pump_strategy_dirty = False
             self.market_dirty = False
-            self.btc_dirty = False
+            self.paper_dirty = False
             pnl = None
             if now - last_ticker >= ticker_gap:
                 pnl = self.cache.pnl_items()
@@ -352,8 +346,8 @@ class Hub:
                         client.force_pump_strategy_detail = False
                     if pnl is not None:
                         await client.websocket.send_json({"type": "pnl", "items": pnl})
-                    if btc is not None:
-                        await client.websocket.send_json({"type": "btc_test", "data": btc})
+                    if paper is not None:
+                        await client.websocket.send_json({"type": "paper_test", "data": paper})
                 except Exception:
                     self.clients.discard(client)
 

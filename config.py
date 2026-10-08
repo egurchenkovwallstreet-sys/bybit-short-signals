@@ -166,29 +166,83 @@ WEB_PORT = _env_int("WEB_PORT", 8787)
 DATA_DIR = BASE_DIR / "data"
 SQLITE_PATH = Path(_env("SQLITE_PATH", str(DATA_DIR / "signals.db")))
 
-# --- Тест: BTC стратегия (вне основного ТЗ) ---------------------------------
+# --- Тест стратегии: виртуальные шорты после пампа --------------------------
+# Сделки только на бумаге. Ордера на бирже не выставляются.
 
-BTC_TEST_SYMBOL = _env("BTC_TEST_SYMBOL", "BTCUSDT")
-BTC_TEST_SYMBOL_REDIS_KEY = _env("BTC_TEST_SYMBOL_REDIS_KEY", "btc_test:active_symbol")
-BTC_TEST_SQLITE_PATH = Path(_env("BTC_TEST_SQLITE_PATH", str(DATA_DIR / "btc_strategy.db")))
-REDIS_CHANNEL_BTC_TEST = _env("REDIS_CHANNEL_BTC_TEST", "btc:strategy:updates")
-BTC_TEST_SCAN_SEC = _env_float("BTC_TEST_SCAN_SEC", 3.0)
-BTC_TEST_KLINE_REFRESH_SEC = _env_int("BTC_TEST_KLINE_REFRESH_SEC", 45)
-# Taker ~0.055% за сделку (открытие + закрытие = 2×).
-BTC_TEST_FEE_RATE_TAKER = _env_float("BTC_TEST_FEE_RATE_TAKER", 0.00055)
-BTC_TEST_MIN_MTF_SCORE_INTRADAY = _env_int("BTC_TEST_MIN_MTF_SCORE_INTRADAY", 6)
-BTC_TEST_MIN_MTF_SCORE_SCALP = _env_int("BTC_TEST_MIN_MTF_SCORE_SCALP", 5)
-BTC_TEST_MIN_PERP_SCORE = _env_int("BTC_TEST_MIN_PERP_SCORE", 2)
-BTC_TEST_MIN_ENTRY_SCORE = _env_int("BTC_TEST_MIN_ENTRY_SCORE", 8)
-BTC_TEST_ENTRY_COOLDOWN_SEC = _env_int("BTC_TEST_ENTRY_COOLDOWN_SEC", 300)
-# Лонг: не догонять памп — RSI и отрыв от EMA20 на 15m.
-BTC_TEST_LONG_MAX_RSI_15 = _env_float("BTC_TEST_LONG_MAX_RSI_15", 68.0)
-BTC_TEST_LONG_MAX_RSI_5 = _env_float("BTC_TEST_LONG_MAX_RSI_5", 62.0)
-BTC_TEST_LONG_MAX_EMA_EXTENSION_ATR = _env_float("BTC_TEST_LONG_MAX_EMA_EXTENSION_ATR", 1.2)
-# Рост за ~4 часа (15m×16): выше — лонг не открываем (типичный хвост пампа).
-BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT = _env_float("BTC_TEST_LONG_BLOCK_4H_CHANGE_PCT", 6.0)
-# Лонг не открывать, если цена у подтверждённого pivot-high (15m/1h).
-BTC_TEST_LONG_NEAR_SWING_HIGH_PCT = _env_float("BTC_TEST_LONG_NEAR_SWING_HIGH_PCT", 0.35)
+PAPER_SQLITE_PATH = Path(_env("PAPER_SQLITE_PATH", str(DATA_DIR / "paper_strategy.db")))
+PAPER_START_BALANCE_USD = _env_float("PAPER_START_BALANCE_USD", 1000.0)
+PAPER_MARGIN_PCT = _env_float("PAPER_MARGIN_PCT", 5.0)
+PAPER_LEVERAGE = _env_int("PAPER_LEVERAGE", 10)
+PAPER_FEE_RATE_TAKER = _env_float("PAPER_FEE_RATE_TAKER", 0.00055)
+# Поддерживающая маржа: изолированный шорт ×10 ликвидируется около +9.5%, а не ровно +10%.
+PAPER_MAINT_MARGIN_RATE = _env_float("PAPER_MAINT_MARGIN_RATE", 0.005)
+PAPER_REENTRY_COOLDOWN_SEC = _env_int("PAPER_REENTRY_COOLDOWN_SEC", 300)
+
+# Трейлинг: расстояние стопа от лучшей цены в % цены по прибыли на маржу (ROE).
+PAPER_TRAIL_START_DIST_PCT = _env_float("PAPER_TRAIL_START_DIST_PCT", 10.0)
+PAPER_TRAIL_TIGHTEN_FROM_ROE = _env_float("PAPER_TRAIL_TIGHTEN_FROM_ROE", 100.0)
+PAPER_TRAIL_TIGHTEN_TO_ROE = _env_float("PAPER_TRAIL_TIGHTEN_TO_ROE", 300.0)
+PAPER_TRAIL_MIN_DIST_PCT = _env_float("PAPER_TRAIL_MIN_DIST_PCT", 2.0)
+
+# Памп: короткий (окно до 4 ч / 24 ч по 15m), длинный (7 д / 14 д по 4H).
+PAPER_SHORT_4H_MIN_PCT = _env_float("PAPER_SHORT_4H_MIN_PCT", 30.0)
+PAPER_SHORT_24H_MIN_PCT = _env_float("PAPER_SHORT_24H_MIN_PCT", 50.0)
+PAPER_LONG_7D_MIN_PCT = _env_float("PAPER_LONG_7D_MIN_PCT", 80.0)
+PAPER_LONG_14D_MIN_PCT = _env_float("PAPER_LONG_14D_MIN_PCT", 100.0)
+PAPER_PUMP_VOLUME_MIN_RATIO = _env_float("PAPER_PUMP_VOLUME_MIN_RATIO", 10.0)
+PAPER_PUMP_VOLUME_BASE_BARS = _env_int("PAPER_PUMP_VOLUME_BASE_BARS", 20)
+PAPER_PUMP_BUY_SHARE_MIN_PCT = _env_float("PAPER_PUMP_BUY_SHARE_MIN_PCT", 70.0)
+# Лента сделок покрывает рост не меньше этого (минуты), иначе доля покупок неизвестна.
+PAPER_PUMP_TAPE_MIN_MINUTES = _env_int("PAPER_PUMP_TAPE_MIN_MINUTES", 60)
+PAPER_TAPE_RETENTION_HOURS = _env_int("PAPER_TAPE_RETENTION_HOURS", 26)
+# Сколько кандидат живёт после пика и насколько цена может уйти от пика.
+PAPER_SHORT_LIFETIME_HOURS = _env_int("PAPER_SHORT_LIFETIME_HOURS", 12)
+PAPER_LONG_LIFETIME_HOURS = _env_int("PAPER_LONG_LIFETIME_HOURS", 48)
+PAPER_MAX_DRAWDOWN_FROM_PEAK_PCT = _env_float("PAPER_MAX_DRAWDOWN_FROM_PEAK_PCT", 25.0)
+
+# Торможение: без нового хая 20 мин – 2 ч, ширина диапазона 5–10%.
+PAPER_STALL_MIN_MINUTES = _env_int("PAPER_STALL_MIN_MINUTES", 20)
+PAPER_STALL_MAX_MINUTES = _env_int("PAPER_STALL_MAX_MINUTES", 120)
+PAPER_RANGE_MIN_PCT = _env_float("PAPER_RANGE_MIN_PCT", 5.0)
+PAPER_RANGE_MAX_PCT = _env_float("PAPER_RANGE_MAX_PCT", 10.0)
+# Покупки «упали»: последние 15 мин не больше этой доли от пика 15 мин за 3 ч.
+PAPER_BUYS_FADE_MAX_RATIO = _env_float("PAPER_BUYS_FADE_MAX_RATIO", 0.5)
+PAPER_SELL_WINDOWS_MIN = (5, 10, 15)
+PAPER_SELL_SHARE_MIN_PCT = _env_float("PAPER_SELL_SHARE_MIN_PCT", 50.0)
+PAPER_SELL_WINDOWS_REQUIRED = _env_int("PAPER_SELL_WINDOWS_REQUIRED", 2)
+# Объём «падает»: средний 1m объём за 20 мин против пика такой же средней за 3 ч.
+PAPER_VOLUME_WINDOW_MIN = _env_int("PAPER_VOLUME_WINDOW_MIN", 20)
+PAPER_VOLUME_FADE_MAX_RATIO = _env_float("PAPER_VOLUME_FADE_MAX_RATIO", 0.6)
+# Раздача: объём не упал, а цена за 20 мин снизилась минимум на столько.
+PAPER_DISTRIBUTION_PRICE_DROP_PCT = _env_float("PAPER_DISTRIBUTION_PRICE_DROP_PCT", 2.0)
+# Ликвидации шортов: текущий поток не больше (1 − fade) от пика в окне.
+PAPER_SHORT_LIQ_WINDOW_MIN = _env_int("PAPER_SHORT_LIQ_WINDOW_MIN", 15)
+PAPER_SHORT_LIQ_FADE_MIN = _env_float("PAPER_SHORT_LIQ_FADE_MIN", 0.80)
+PAPER_SHORT_LIQ_FADE_STRONG = _env_float("PAPER_SHORT_LIQ_FADE_STRONG", 0.90)
+
+# BTC: рост за 4 ч от порога — строгий режим (нужен пробой EMA50 15m или двойная вершина).
+PAPER_BTC_SYMBOL = _env("PAPER_BTC_SYMBOL", "BTCUSDT")
+PAPER_BTC_STRICT_4H_PCT = _env_float("PAPER_BTC_STRICT_4H_PCT", 3.0)
+
+# EMA 50/100/200 на 15m/30m/1H/4H — пробой закрытием свечи.
+PAPER_EMA_INTERVALS = ("15", "30", "60", "240")
+PAPER_EMA_PERIODS = (50, 100, 200)
+PAPER_KLINE_LIMIT = _env_int("PAPER_KLINE_LIMIT", 320)
+PAPER_KLINE_REFRESH_SEC = _env_int("PAPER_KLINE_REFRESH_SEC", 60)
+
+# Двойная вершина: 1H ≥10 свечей между вершинами или 30m ≥20, разница ≤3%, после 2-й ≥3 ч.
+PAPER_DT_MIN_BARS_1H = _env_int("PAPER_DT_MIN_BARS_1H", 10)
+PAPER_DT_MIN_BARS_30M = _env_int("PAPER_DT_MIN_BARS_30M", 20)
+PAPER_DT_MAX_DIFF_PCT = _env_float("PAPER_DT_MAX_DIFF_PCT", 3.0)
+PAPER_DT_MIN_HOURS_AFTER = _env_float("PAPER_DT_MIN_HOURS_AFTER", 3.0)
+PAPER_DT_PIVOT_WING = _env_int("PAPER_DT_PIVOT_WING", 2)
+
+# Круглый уровень (0.5, 1, 5, 10…): пик или диапазон в пределах этого % от уровня.
+PAPER_ROUND_LEVEL_NEAR_PCT = _env_float("PAPER_ROUND_LEVEL_NEAR_PCT", 1.5)
+
+PAPER_DETECT_INTERVAL_SEC = _env_int("PAPER_DETECT_INTERVAL_SEC", 30)
+PAPER_PERSIST_INTERVAL_SEC = _env_int("PAPER_PERSIST_INTERVAL_SEC", 15)
+PAPER_EQUITY_SNAPSHOT_SEC = _env_int("PAPER_EQUITY_SNAPSHOT_SEC", 300)
 
 
 # --- Telegram (опционально, отправка не входит в Этап 1) --------------------
