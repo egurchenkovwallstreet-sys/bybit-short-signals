@@ -105,6 +105,14 @@
 
 ## ЖУРНАЛ ИЗМЕНЕНИЙ
 
+### 2026-10-08 (график Памп-скан / 2×: стакан, liq-зоны, суммы по свечам)
+
+- **Оверлеи на графике:** стакан по цене справа, зоны ликвидации слева (30% ширины), синхронизация с pan/zoom; перенос DOM-оверлеев в `.psc-chart-wrap`.
+- **Модель зон:** `signal_engine/liq_zones.py` — pending/cleared, sweep long↓ / short↑; REST `GET /api/liquidation-zones/{symbol}`.
+- **Проблемы UX (исправлено):** рассинхрон цены и стакана при смене символа; лаг из-за перерисовки на каждый кадр; несовпадение объёмов стакана (разные band/бины — выровнено, затем band **±30%**).
+- **Ликвидации на свечах:** агрегация Buy=long / Sell=short; кэш до 8000 событий; `liquidations_for_chart`; **`GET /api/liquidations-by-bar`**; иконки ⚡ на **5** последних свечах, tooltip только суммы.
+- **Коммиты (main):** `1cf955e`, `5fbc26d`, `7d9cf8c`, `d9e48ff`, `e12a3fb`, **`dce1453`**. UI: http://129.101.127.78:8787 (`static` cache-bust `?v=20251008v`).
+
 ### 2026-10-05
 
 - Проект инициализирован.
@@ -169,12 +177,24 @@
 - **Deploy:** VPS `/opt/signals`, UI http://129.101.127.78:8787, PM2 restart через `scripts/deploy.sh`.
 - **HEAD на момент записи:** `01e9dd1` (после деплоя watches пересобираются движком; эталоны проходят verify).
 
+### График досок: стакан, зоны liq, суммы по свечам ✅ (2026-10-08)
+
+- [x] Общий **`board_chart.js`** для **Памп-скан** и **2× откат**: свечи, объём, оверлеи в `.psc-chart-wrap`.
+- [x] **Стакан ±30%** от mid в панели и на графике (одинаковые бины; автошаг бинов под ширину band).
+- [x] **Зоны ликвидации слева** (30% ширины): long зелёный / short красный; API `liquidation-zones` + `liq_zones.py`.
+- [x] **Ликвидации по свечам:** буфер до 8k/symbol; detail без лимита «400 events»; **`/api/liquidations-by-bar`** (5 баров).
+- [x] UI: иконка **⚡** на последних **5** свечах (при сумме > 0); popup **Short $ / Long $** за свечу (без построчного списка).
+- [x] Фиксы **desync** при смене тикера (`resetChartSession`, `chartOverlayReady`, live last bar, fit price scale).
+- [x] **Производительность:** убран вечный rAF на оверлеях; throttle pan/book; server-side agg liq-by-bar.
+- [x] Тест **`tests/test_liquidations_by_bar.py`** (агрегация по двум барам).
+- [x] Deploy на VPS; актуальный HEAD на момент записи: **`dce1453`**.
+
 ### Архитектура (шпаргалка)
 
 | Слой | Файлы |
 |------|--------|
 | Config | `config.py` |
 | Collector | `collector/` |
-| Engine | `signal_engine/engine.py`, `pump_scan.py`, `x2_retrace.py`, `watch_store.py` |
-| Web | `ws_server/app.py`, `hub.py`, `cache.py`, `static/` |
+| Engine | `signal_engine/engine.py`, `pump_scan.py`, `x2_retrace.py`, `watch_store.py`, `liq_zones.py` |
+| Web | `ws_server/app.py`, `hub.py`, `cache.py`, `static/board_chart.js`, `pump_scan.js`, `x2_retrace.js` |
 | Ops | `scripts/deploy.sh`, `verify_x2_examples.py`, `audit_x2_turnover.py` |

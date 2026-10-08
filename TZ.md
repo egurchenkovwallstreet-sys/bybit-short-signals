@@ -458,3 +458,60 @@ AI НЕ принимает решения за пользователя.
 ### Принцип «чистый лист» в новом чате
 
 Новая сессия должна **сначала прочитать `TZ.md` и `PROGRESS.md`**, затем обойти ключевые модули в коде и продолжать с текущего состояния репозитория на `main`, не переписывая архитектуру без запроса пользователя.
+
+### График досок «Памп-скан» и «2× откат» (общий UI, 2026-10-08)
+
+Единый модуль **`ws_server/static/board_chart.js`**: свечи Lightweight Charts, объём, оверлеи поверх **`.psc-chart-wrap`** (не внутри canvas LWC), синхронизация с pan/zoom по времени и цене.
+
+#### Стакан (панель справа + полоски на графике)
+
+| Параметр | Значение |
+|---|---|
+| Глубина от mid | **±30%** (`BOOK_DEPTH_PCT`, `BOOK_CHART.depthPct`) |
+| Бины | `BOOK_PANEL.binTicks` (по умолчанию 5 тиков); при band ≥25% шаг **автоувеличивается**, чтобы сетка влезала в `maxGridRowsPerSide` |
+| Панель | таблица ask/mid/bid, стены Holding/Spoof/Building |
+| На графике | те же бины и band, что в панели; полоски справа по `priceToCoordinate` |
+| Обновление live | throttled (~320 ms) для оверлея на графике; при смене тикера — сразу |
+
+#### Зоны ликвидации слеva (оценка, не официальный Bybit)
+
+| Параметр | Значение |
+|---|---|
+| Ширина полосок | **30%** ширины графика слева (`LIQ_CHART.widthPct`) |
+| Цвет | **long — зелёный**, **short — красный** |
+| Источник | `GET /api/liquidation-zones/{symbol}?interval=…` → `signal_engine/liq_zones.py` (OI + hist ликвидации + модель) |
+| Отображение | `notional_pending_usd` приоритетно; если pending=0 — показывается **`notional_usd`**, чтобы зоны не пропадали после «пробоя» |
+| Кэш | ~45 s на символ/интервал; prefetch в `scheduleAssetsPrefetch` |
+
+#### Ликвидации по свечам (поток `allLiquidation`)
+
+| Правило | Описание |
+|---|---|
+| Семантика | **Buy** = ликвидирован **long** (зелёный); **Sell** = ликвидирован **short** (красный) |
+| Окно в detail | `DETAIL_CHART_WINDOW_HOURS` (48 h), без обрезки «последние 400 событий» |
+| Буфер collector/cache | до **8000** событий на символ (`cache.py`) |
+| API агрегации | **`GET /api/liquidations-by-bar/{symbol}?interval=&bars=5`** — суммы long/short по последним N свечам klines |
+| UI | на **5 последних свечах** — иконка **⚡** над high (если сумма > 0); hover/click → всплывашка **только итоги** Short $ / Long $ за интервал свечи (без списка сделок) |
+| Live | последняя свеча дополнительно уточняется из WS `detail.liquidations` |
+
+#### Производительность и смена тикера
+
+- **`resetChartSession`** при выборе карточки: очистка серии, оверлеев, отмена устаревших fetch liq-zones.
+- **`chartOverlayReady`**: стакан/liq-оверлеи не рисуются, пока нет `_lastBars` и символ совпадает с `_activeSymbol`.
+- **`patchLiveLastBar` + `maybeFitLivePriceScale`**: last bar и autoScale под live-цену (пока пользователь не зумил вручную).
+- Синхронизация оверлеев: debounce на pan/zoom (~150 ms); **без** бесконечного `requestAnimationFrame` на шкале цены.
+- Агрегация liq-by-bar на **сервере**, не перебор тысяч events на клиенте при каждой отрисовке.
+
+#### Связанные файлы
+
+| Область | Файлы |
+|---|---|
+| UI графика | `ws_server/static/board_chart.js`, `styles.css`, `index.html` |
+| Доски | `pump_scan.js`, `x2_retrace.js` (`merge*Detail`, `setChartLiquidations`, `resetChartSession`) |
+| API | `ws_server/app.py` — `/api/liquidation-zones`, `/api/liquidations`, `/api/liquidations-by-bar` |
+| Кэш / detail | `ws_server/cache.py` — `liquidations_for_chart`, `liquidations_by_bar`, `liquidation_zones` |
+| Модель зон | `signal_engine/liq_zones.py`, `tests/test_liq_zones.py`, `tests/test_liquidations_by_bar.py` |
+
+#### Коммиты (ветка main, октябрь 2026)
+
+`1cf955e` desync fix · `5fbc26d` labels/throttle · `7d9cf8c` liq history · `d9e48ff` liq-by-bar API · `e12a3fb` hints · **`dce1453`** стакан ±30%, иконки ⚡ на 5 свечах.
