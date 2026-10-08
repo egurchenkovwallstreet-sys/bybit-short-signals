@@ -208,7 +208,7 @@ class MarketCache:
             "interval": interval,
             "candles": candles,
             "book": self.book_view(symbol),
-            "liquidations": _trim_time_window(self.liquidations.get(symbol, [])[-400:], "time"),
+            "liquidations": self.liquidations_for_chart(symbol),
             "oi": _trim_time_window(oi_rows, "timestamp"),
             "cvd": _trim_time_window(self.cvd.get(symbol, []), "time"),
             "obv": _trim_time_window(self._obv(symbol), "time"),
@@ -216,6 +216,10 @@ class MarketCache:
             "taker_ratio": ratio,
             "mini": self.mini_closes(symbol),
         }
+
+    def liquidations_for_chart(self, symbol: str) -> list[dict[str, Any]]:
+        """Все ликвидации символа в окне DETAIL_CHART_WINDOW (без урезания до последних N событий)."""
+        return _trim_time_window(self.liquidations.get(symbol, []), "time")
 
     def view_board(self) -> list[dict[str, Any]]:
         """Колонки для браузера: мини-график и живой P&L шорта."""
@@ -272,7 +276,7 @@ class MarketCache:
             "interval": interval,
             "candles": self.klines.get((symbol, interval), []),
             "book": self.book_view(symbol),
-            "liquidations": _trim_time_window(self.liquidations.get(symbol, [])[-400:], "time"),
+            "liquidations": self.liquidations_for_chart(symbol),
             "oi": _trim_time_window(oi_rows, "timestamp"),
             "cvd": _trim_time_window(self.cvd.get(symbol, []), "time"),
             "obv": _trim_time_window(self._obv(symbol), "time"),
@@ -459,7 +463,7 @@ class MarketCache:
                         "position": "long" if side == "Buy" else "short",
                     }
                 )
-                del bucket[:-600]
+                del bucket[:-8000]
         elif kind == "ticker":
             mark = _num(data.get("mark_price"))
             if mark:

@@ -37,7 +37,11 @@ window.boardChart = {
   LIQ_CANDLE: {
     minUsd: 500,
     maxTooltipRows: 48,
+    /** Всегда подписывать последние N свечей (если есть данные ≥ minUsd). */
+    recentBars: 10,
+    fetchMs: 20_000,
   },
+  _liqChartFetch: new Map(),
   _liqZonesFetch: new Map(),
   BOOK_PANEL: {
     maxGridRowsPerSide: 320,
@@ -502,15 +506,21 @@ window.boardChart = {
       const usd = price * size;
       const side = String(ev.side || "");
       let bucket = null;
-      for (const m of meta) {
-        if (ts >= m.startMs && ts < m.endMs) {
-          bucket = map.get(m.key);
-          break;
+      if (meta.length) {
+        let lo = 0;
+        let hi = meta.length - 1;
+        let idx = -1;
+        while (lo <= hi) {
+          const mid = (lo + hi) >> 1;
+          if (meta[mid].startMs <= ts) {
+            idx = mid;
+            lo = mid + 1;
+          } else hi = mid - 1;
         }
-      }
-      if (!bucket && meta.length) {
-        const lastM = meta[meta.length - 1];
-        if (ts >= lastM.startMs) bucket = map.get(lastM.key);
+        if (idx >= 0) {
+          const m = meta[idx];
+          if (ts < m.endMs || idx === meta.length - 1) bucket = map.get(m.key);
+        }
       }
       if (!bucket) continue;
       const row = {
@@ -528,6 +538,18 @@ window.boardChart = {
     return map;
   },
 
+  mergeLiquidationEvents(existing, incoming) {
+    const BC = window.boardChart;
+    const byKey = new Map();
+    for (const ev of [...(existing || []), ...(incoming || [])]) {
+      const ts = BC.liqEventMs(ev.time ?? ev.timestamp);
+      if (!ts) continue;
+      const k = `${ts}|${ev.side}|${ev.price}|${ev.size}`;
+      byKey.set(k, ev);
+    }
+    return [...byKey.values()];
+  },
+
   setChartLiquidations(runtime, liquidations) {
     const BC = window.boardChart;
     if (!runtime) return;
@@ -540,6 +562,43 @@ window.boardChart = {
     const iv = runtime._chartInterval || "60";
     runtime._liqByBar = BC.aggregateLiqByBar(bars, runtime._liquidations, iv);
     BC.renderLiqCandleLabels(runtime);
+  },
+
+  async ensureChartLiquidations(runtime, symbol) {
+    const BC = window.boardChart;
+    const sym = String(symbol || "").toUpperCase();
+    if (!sym || !runtime) return;
+    if (runtime._activeSymbol && sym !== runtime._activeSymbol) return;
+    const now = Date.now();
+    const hit = BC._liqChartFetch.get(sym);
+    if (hit?.data && now - hit.ts < BC.LIQ_CANDLE.fetchMs) {
+      BC.setChartLiquidations(runtime, BC.mergeLiquidationEvents(runtime._liquidations, hit.data));
+      return;
+    }
+    if (hit?.pending) {
+      await hit.pending;
+      return;
+    }
+    const job = fetch(`/api/liquidations/${encodeURIComponent(sym)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body) => {
+        const rows = body?.liquidations;
+        if (Array.isArray(rows) && rows.length) {
+          BC._liqChartFetch.set(sym, { data: rows, ts: Date.now(), pending: null });
+          if (!runtime._activeSymbol || runtime._activeSymbol === sym) {
+            BC.setChartLiquidations(runtime, BC.mergeLiquidationEvents(runtime._liquidations, rows));
+          }
+        } else {
+          BC._liqChartFetch.set(sym, { data: hit?.data || [], ts: Date.now(), pending: null });
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        const c = BC._liqChartFetch.get(sym);
+        if (c) c.pending = null;
+      });
+    BC._liqChartFetch.set(sym, { ...(hit || {}), pending: job });
+    await job;
   },
 
   ensureLiqCandleOverlay(runtime, chartEl) {
@@ -598,8 +657,12 @@ window.boardChart = {
       return;
     }
     const offX = BC.overlayPlotOffsetX(runtime);
-    const from = Math.max(0, Math.floor(range.from));
-    const to = Math.min(bars.length - 1, Math.ceil(range.to));
+    const recentN = BC.LIQ_CANDLE.recentBars || 10;
+    const visFrom = Math.max(0, Math.floor(range.from));
+    const visTo = Math.min(bars.length - 1, Math.ceil(range.to));
+    const recentStart = Math.max(0, bars.length - recentN);
+    const from = Math.min(visFrom, recentStart);
+    const to = Math.max(visTo, bars.length - 1);
     const parts = [];
     for (let i = from; i <= to; i++) {
       const bar = bars[i];
@@ -1448,6 +1511,8 @@ window.boardChart = {
       const ref = bars.length ? bars[bars.length - 1].close : runtime._overlayProbePrice;
       BC.refreshLiqZonesOverlay(runtime, runtime._chartSymbol, ref);
     }
+    const liqSym = runtime._activeSymbol || runtime._chartSymbol;
+    if (liqSym) void BC.ensureChartLiquidations(runtime, liqSym);
   },
 
   renderWalls(containerId, book) {

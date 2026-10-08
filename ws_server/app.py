@@ -226,6 +226,16 @@ async def orderbook(symbol: str, refresh: bool = False) -> dict[str, Any]:
     return {"symbol": symbol, "book": view}
 
 
+@app.get("/api/liquidations/{symbol}")
+async def chart_liquidations(symbol: str) -> dict[str, Any]:
+    """Поток ликвидаций из кэша (48ч окно) для подписей на свечах."""
+    if not _SYMBOL.fullmatch(symbol or ""):
+        raise HTTPException(status_code=400, detail="Некорректный тикер")
+    hub: Hub = app.state.hub
+    rows = hub.cache.liquidations_for_chart(symbol)
+    return {"symbol": symbol, "liquidations": rows}
+
+
 @app.get("/api/liquidation-zones/{symbol}")
 async def liquidation_zones(symbol: str, interval: str = "60") -> dict[str, Any]:
     """Оценочные зоны ликвидации (модель OI + история), не официальные данные Bybit."""
