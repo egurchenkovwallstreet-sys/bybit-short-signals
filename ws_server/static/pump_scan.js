@@ -51,6 +51,8 @@ function togglePumpScanSymbol(symbol) {
   }
   pumpState.selected = symbol;
   pumpState.detail = null;
+  pumpState.chart.chartGen += 1;
+  window.boardChart.resetChartSession(pumpState.chart, symbol);
   openPumpScanChart();
   renderPumpBoard();
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
@@ -188,7 +190,8 @@ async function refreshPumpScanChart(resetScale) {
     pumpState.detail.candles = candles;
     pumpState.detail.interval = interval;
   }
-  window.boardChart.drawCandles(pumpState.chart, candles, interval, resetScale, PUMP_CHART.chart);
+  const live = findPumpRow(symbol)?.last_price ?? pumpState.detail?.last_price;
+  window.boardChart.drawCandles(pumpState.chart, candles, interval, resetScale, PUMP_CHART.chart, live);
   window.boardChart.setChartLiquidations(pumpState.chart, pumpState.detail?.liquidations);
   if (resetScale) renderPumpScanInfo(true);
   else updatePumpScanLive();

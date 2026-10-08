@@ -375,11 +375,58 @@ window.boardChart = {
   syncChartOverlays(runtime) {
     const BC = window.boardChart;
     if (!runtime) return;
+    if (runtime._syncOverlayRaf) return;
+    runtime._syncOverlayRaf = requestAnimationFrame(() => {
+      runtime._syncOverlayRaf = 0;
+      BC.syncChartOverlaysNow(runtime);
+    });
+  },
+
+  syncChartOverlaysNow(runtime) {
+    const BC = window.boardChart;
+    if (!runtime) return;
     const ctx = runtime._lastBookOverlay;
     if (ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice, ctx.symbol, { skipLiqFetch: true });
     const liq = runtime._lastLiqCtx;
     if (liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
     BC.renderLiqCandleLabels(runtime);
+  },
+
+  resetChartSession(runtime, symbol) {
+    const BC = window.boardChart;
+    if (!runtime) return;
+    runtime._activeSymbol = symbol || "";
+    runtime._chartSymbol = symbol || "";
+    runtime._lastBookOverlay = null;
+    runtime._lastLiqCtx = null;
+    runtime._liquidations = [];
+    runtime._liqByBar = null;
+    runtime._lastBars = [];
+    runtime._liqFetchGen = (runtime._liqFetchGen || 0) + 1;
+    if (runtime.bookOverlayEl) runtime.bookOverlayEl.innerHTML = "";
+    if (runtime.liqOverlayEl) runtime.liqOverlayEl.innerHTML = "";
+    if (runtime.liqCandleOverlayEl) runtime.liqCandleOverlayEl.innerHTML = "";
+    if (runtime.liqCandleTipEl) runtime.liqCandleTipEl.hidden = true;
+    BC.clearLiqPriceLines(runtime);
+    if (runtime.series) {
+      runtime.series.setData([]);
+      runtime.volumeSeries?.setData([]);
+    }
+  },
+
+  patchLiveLastBar(bars, livePrice) {
+    const p = Number(livePrice);
+    if (!p || !bars?.length) return;
+    const last = bars[bars.length - 1];
+    last.close = p;
+    last.high = Math.max(last.high, p);
+    last.low = Math.min(last.low, p);
+  },
+
+  chartOverlayReady(runtime, symbol) {
+    if (!runtime?._lastBars?.length) return false;
+    if (symbol && runtime._activeSymbol && symbol !== runtime._activeSymbol) return false;
+    return true;
   },
 
   barTimeKey(time) {
@@ -446,6 +493,10 @@ window.boardChart = {
   setChartLiquidations(runtime, liquidations) {
     const BC = window.boardChart;
     if (!runtime) return;
+    if (!runtime._lastBars?.length) {
+      runtime._liquidations = Array.isArray(liquidations) ? liquidations : [];
+      return;
+    }
     runtime._liquidations = Array.isArray(liquidations) ? liquidations : [];
     const bars = runtime._lastBars || [];
     const iv = runtime._chartInterval || "60";
@@ -655,6 +706,12 @@ window.boardChart = {
     const series = runtime?.series;
     if (!el || !series) return;
     const sym = symbol || runtime._lastBookOverlay?.symbol || "";
+    if (sym && runtime._activeSymbol && sym !== runtime._activeSymbol) return;
+    if (!BC.chartOverlayReady(runtime, sym)) {
+      runtime._lastBookOverlay = { book, refPrice, symbol: sym };
+      el.innerHTML = "";
+      return;
+    }
     if (sym) runtime._chartSymbol = sym;
     runtime._lastBookOverlay = { book, refPrice, symbol: sym };
     const chartCfg = BC.BOOK_CHART;
@@ -675,6 +732,10 @@ window.boardChart = {
     const midY = series.priceToCoordinate(mid);
     if (midY != null) {
       parts.push(`<div class="psc-book-chart-mid" style="top:${Math.round(midY)}px"></div>`);
+    }
+    if (midY == null) {
+      el.innerHTML = "";
+      return;
     }
     for (const r of withVol) {
       const y = series.priceToCoordinate(r.price);
@@ -723,6 +784,10 @@ window.boardChart = {
     const el = runtime?.liqOverlayEl;
     const series = runtime?.series;
     if (!el || !series || !mark) return;
+    if (!BC.chartOverlayReady(runtime, runtime._chartSymbol)) {
+      el.innerHTML = "";
+      return;
+    }
     runtime._overlayProbePrice = Number(mark) || runtime._overlayProbePrice;
     BC.clearLiqPriceLines(runtime);
     const pendingOnly = (zones || [])
@@ -760,8 +825,12 @@ window.boardChart = {
   refreshLiqZonesOverlay(runtime, symbol, refPrice) {
     const BC = window.boardChart;
     if (!symbol || !runtime) return;
+    if (runtime._activeSymbol && symbol !== runtime._activeSymbol) return;
     const interval = runtime._chartInterval || "60";
+    const fetchGen = runtime._liqFetchGen || 0;
     void BC.fetchLiqZones(symbol, interval).then((data) => {
+      if (fetchGen !== runtime._liqFetchGen) return;
+      if (runtime._activeSymbol && symbol !== runtime._activeSymbol) return;
       if (!data?.zones?.length) return;
       const mark = Number(data.mark) || Number(refPrice);
       if (!mark) return;
@@ -1260,7 +1329,7 @@ window.boardChart = {
     return sec;
   },
 
-  drawCandles(runtime, candles, interval, resetScale, chartElId) {
+  drawCandles(runtime, candles, interval, resetScale, chartElId, livePrice) {
     const BC = window.boardChart;
     if (!runtime.series) return;
     runtime._chartInterval = interval;
@@ -1291,6 +1360,7 @@ window.boardChart = {
       const tb = typeof b.time === "object" ? Date.UTC(b.time.year, b.time.month - 1, b.time.day) : b.time;
       return ta - tb;
     });
+    BC.patchLiveLastBar(bars, livePrice);
     runtime.series.setData(bars);
     if (runtime.volumeSeries) {
       runtime.volumeSeries.setData(
@@ -1329,9 +1399,8 @@ window.boardChart = {
         runtime._programmaticChartView = false;
       });
     }
-    BC.syncBookOverlayForChart(chartElId);
-    BC.renderLiqCandleLabels(runtime);
-    if (runtime._chartSymbol && runtime.liqOverlayEl) {
+    BC.syncChartOverlaysNow(runtime);
+    if (runtime._chartSymbol && runtime.liqOverlayEl && runtime._activeSymbol === runtime._chartSymbol) {
       const ref = bars.length ? bars[bars.length - 1].close : runtime._overlayProbePrice;
       BC.refreshLiqZonesOverlay(runtime, runtime._chartSymbol, ref);
     }

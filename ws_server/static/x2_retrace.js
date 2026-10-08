@@ -42,6 +42,8 @@ function toggleX2Symbol(symbol) {
   }
   x2State.selected = symbol;
   x2State.detail = null;
+  x2State.chart.chartGen += 1;
+  window.boardChart.resetChartSession(x2State.chart, symbol);
   openX2Chart();
   renderX2Board();
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
@@ -174,7 +176,8 @@ async function refreshX2Chart(resetScale) {
     x2State.detail.candles = candles;
     x2State.detail.interval = interval;
   }
-  window.boardChart.drawCandles(x2State.chart, candles, interval, resetScale, X2_CHART.chart);
+  const live = x2State.detail?.signal?.last_price ?? findX2Row(symbol)?.last_price;
+  window.boardChart.drawCandles(x2State.chart, candles, interval, resetScale, X2_CHART.chart, live);
   window.boardChart.setChartLiquidations(x2State.chart, x2State.detail?.liquidations);
   if (resetScale) renderX2Info(true);
   else updateX2Live();
