@@ -19,11 +19,11 @@ window.boardChart = {
   _prefetchQueue: [],
   _prefetchActive: 0,
   _prefetchInflight: new Set(),
-  /** Стакан в боковой панели: глубина ±10% от текущей цены. */
-  BOOK_DEPTH_PCT: 0.1,
-  /** Стакан на графике — те же ±10% и бины, что в панели справа. */
+  /** Стакан: глубина ±30% от mid в обе стороны. */
+  BOOK_DEPTH_PCT: 0.3,
+  /** Стакан на графике — те же ±30% и бины, что в панели справа. */
   BOOK_CHART: {
-    depthPct: 0.1,
+    depthPct: 0.3,
     binTicks: 5,
   },
   /** Оценочные зоны ликвидации на графике (слева). */
@@ -36,8 +36,8 @@ window.boardChart = {
   /** Суммы ликвидаций у свечей (Buy=long, Sell=short). */
   LIQ_CANDLE: {
     minUsd: 500,
-    /** Подписи только на последних N свечах (любая сумма > 0). */
-    recentBars: 10,
+    /** Иконки ликвидаций на последних N свечах (минимум 5). */
+    recentBars: 5,
     barFetchMs: 8_000,
   },
   _liqBarFetch: new Map(),
@@ -190,8 +190,17 @@ window.boardChart = {
     const inBand = (p) => p >= lo - 1e-12 && p <= hi + 1e-12;
     const bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
     const asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
-    const binTicks = binTicksOverride ?? BC.BOOK_PANEL.binTicks ?? 10;
-    const step = BC.bookBinSize(mid, binTicks);
+    const cap = BC.BOOK_PANEL.maxGridRowsPerSide ?? 320;
+    let binTicks = binTicksOverride ?? BC.BOOK_PANEL.binTicks ?? 10;
+    if (band >= 0.25) binTicks = Math.max(binTicks, 12);
+    let step = BC.bookBinSize(mid, binTicks);
+    const span = mid * band * 2;
+    let estRows = step > 0 ? Math.ceil(span / step) : cap;
+    while (estRows > cap && binTicks < 240) {
+      binTicks += 6;
+      step = BC.bookBinSize(mid, binTicks);
+      estRows = step > 0 ? Math.ceil(span / step) : cap;
+    }
     const bidsAgg = BC.aggregateBookLevels(bidsRaw, true, mid, binTicks);
     const asksAgg = BC.aggregateBookLevels(asksRaw, false, mid, binTicks);
     const bidMap = new Map(bidsAgg.map((r) => [r.price, r.size]));
@@ -645,15 +654,70 @@ window.boardChart = {
     if (runtime.liqCandleTipEl.parentElement !== host) {
       host.appendChild(runtime.liqCandleTipEl);
     }
+    BC.bindLiqCandleIconPopup(runtime, host);
+  },
+
+  bindLiqCandleIconPopup(runtime, host) {
+    const BC = window.boardChart;
+    if (!runtime || !host || runtime._liqIconPopupBound) return;
+    runtime._liqIconPopupBound = true;
+    let hideTimer = 0;
+    const hide = () => {
+      if (runtime.liqCandleTipEl) runtime.liqCandleTipEl.hidden = true;
+    };
+    const showFromBtn = (btn) => {
+      const tip = runtime.liqCandleTipEl;
+      if (!tip || !btn) return;
+      const shortUsd = Number(btn.dataset.short) || 0;
+      const longUsd = Number(btn.dataset.long) || 0;
+      tip.innerHTML = `<div class="psc-liq-candle-tip-head"><span class="short">Short $${BC.formatBookSize(shortUsd)}</span> · <span class="long">Long $${BC.formatBookSize(longUsd)}</span></div>`;
+      tip.hidden = false;
+      const hostEl = tip.parentElement;
+      if (!hostEl) return;
+      const hostR = hostEl.getBoundingClientRect();
+      const r = btn.getBoundingClientRect();
+      const left = r.left - hostR.left + r.width / 2;
+      const top = r.top - hostR.top - 6;
+      tip.style.left = `${Math.round(left)}px`;
+      tip.style.top = `${Math.round(top)}px`;
+      tip.style.transform = "translate(-50%, -100%)";
+    };
+    host.addEventListener(
+      "click",
+      (e) => {
+        const btn = e.target instanceof Element ? e.target.closest(".psc-liq-candle-icon") : null;
+        if (!btn || !runtime.liqCandleOverlayEl?.contains(btn)) return;
+        e.stopPropagation();
+        showFromBtn(btn);
+      },
+      true,
+    );
+    host.addEventListener(
+      "mouseover",
+      (e) => {
+        const btn = e.target instanceof Element ? e.target.closest(".psc-liq-candle-icon") : null;
+        if (!btn || !runtime.liqCandleOverlayEl?.contains(btn)) return;
+        if (hideTimer) clearTimeout(hideTimer);
+        showFromBtn(btn);
+      },
+      true,
+    );
+    host.addEventListener(
+      "mouseout",
+      (e) => {
+        const rel = e.relatedTarget;
+        if (rel instanceof Element && (rel.closest(".psc-liq-candle-icon") || rel.closest(".psc-liq-candle-tip"))) {
+          return;
+        }
+        hideTimer = window.setTimeout(hide, 220);
+      },
+      true,
+    );
   },
 
   ensureLiqCandleHooks(runtime) {
-    const BC = window.boardChart;
     if (!runtime?.chart || runtime._liqCandleHooks) return;
     runtime._liqCandleHooks = true;
-    runtime.chart.subscribeCrosshairMove((param) => {
-      BC.updateLiqCandleTip(runtime, param);
-    });
   },
 
   formatLiqUsd(usd) {
@@ -680,54 +744,29 @@ window.boardChart = {
       return;
     }
     const offX = BC.overlayPlotOffsetX(runtime);
-    const recentN = BC.LIQ_CANDLE.recentBars || 10;
+    const recentN = Math.max(5, BC.LIQ_CANDLE.recentBars || 5);
     const from = Math.max(0, bars.length - recentN);
     const to = bars.length - 1;
     const parts = [];
     for (let i = from; i <= to; i++) {
       const bar = bars[i];
       const key = BC.barTimeKey(bar.time);
-      const agg = map.get(key);
-      if (!agg) continue;
-      const shortTxt = agg.shortUsd > 0 ? BC.formatBookSize(agg.shortUsd) : "";
-      const longTxt = agg.longUsd > 0 ? BC.formatBookSize(agg.longUsd) : "";
-      if (!shortTxt && !longTxt) continue;
+      const agg = map.get(key) || { shortUsd: 0, longUsd: 0 };
+      const shortUsd = Number(agg.shortUsd) || 0;
+      const longUsd = Number(agg.longUsd) || 0;
+      if (shortUsd <= 0 && longUsd <= 0) continue;
       const x = chart.timeScale().timeToCoordinate(bar.time);
       if (x == null || Number.isNaN(x)) continue;
       const anchorY = series.priceToCoordinate(Math.max(bar.high, bar.open, bar.close));
       if (anchorY == null || Number.isNaN(anchorY)) continue;
       const xPx = Math.round(x + offX);
-      const yPx = Math.round(anchorY - 4);
-      const lines = [];
-      if (shortTxt) lines.push(`<span class="psc-liq-c-sum short">${shortTxt}</span>`);
-      if (longTxt) lines.push(`<span class="psc-liq-c-sum long">${longTxt}</span>`);
-      parts.push(`<div class="psc-liq-candle-tag" style="left:${xPx}px;top:${yPx}px">${lines.join("")}</div>`);
+      const yPx = Math.round(anchorY - 6);
+      const title = `Short $${BC.formatBookSize(shortUsd)} · Long $${BC.formatBookSize(longUsd)}`;
+      parts.push(
+        `<button type="button" class="psc-liq-candle-icon" style="left:${xPx}px;top:${yPx}px" data-short="${shortUsd}" data-long="${longUsd}" title="${title}" aria-label="Ликвидации за свечу"><span aria-hidden="true">⚡</span></button>`,
+      );
     }
     el.innerHTML = parts.join("");
-  },
-
-  updateLiqCandleTip(runtime, param) {
-    const BC = window.boardChart;
-    const tip = runtime?.liqCandleTipEl;
-    const map = runtime?._liqByBar;
-    if (!tip || !map || !param?.time || param.point?.x == null) {
-      if (tip) tip.hidden = true;
-      return;
-    }
-    const key = BC.barTimeKey(param.time);
-    const agg = map.get(key);
-    if (!agg || (agg.shortUsd <= 0 && agg.longUsd <= 0)) {
-      tip.hidden = true;
-      return;
-    }
-    const offX = BC.overlayPlotOffsetX(runtime);
-    tip.innerHTML = `<div class="psc-liq-candle-tip-head">Short $${BC.formatBookSize(agg.shortUsd)} · Long $${BC.formatBookSize(agg.longUsd)}</div>`;
-    tip.hidden = false;
-    const hostRect = host?.getBoundingClientRect();
-    const left = Math.max(8, Math.min((host?.clientWidth || 400) - 220, param.point.x + offX + 12));
-    const top = Math.max(8, param.point.y - 8);
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
   },
 
   scheduleBookChartOverlay(runtime, book, refPrice, symbol) {
@@ -952,7 +991,7 @@ window.boardChart = {
   bookSectionHtml(paneId) {
     return `<div class="psc-book-section">
       <div class="psc-book-head">
-        <h3 class="psc-info-subhead">Стакан ±10%</h3>
+        <h3 class="psc-info-subhead">Стакан ±30%</h3>
         <div class="psc-book-head-actions">
           <button type="button" class="psc-toggle-meta">Скрыть метрики</button>
           <button type="button" class="psc-book-fullscreen" title="Стакан на весь экран" aria-pressed="false">⛶</button>
