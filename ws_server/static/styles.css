@@ -182,6 +182,46 @@ body {
   border: 1px solid var(--border);
 }
 
+.psc-liq-chart-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 22%;
+  width: min(38vw, 200px);
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
+}
+
+.psc-liq-chart-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 2px;
+  z-index: 1;
+}
+
+.psc-liq-chart-bar {
+  height: 6px;
+  min-width: 8px;
+  max-width: 100%;
+  border-radius: 1px;
+  opacity: 0.5;
+}
+
+.psc-liq-chart-row.long .psc-liq-chart-bar {
+  background: linear-gradient(90deg, rgba(255, 140, 60, 0.9), rgba(255, 93, 115, 0.75));
+}
+
+.psc-liq-chart-row.short .psc-liq-chart-bar {
+  background: linear-gradient(90deg, rgba(100, 180, 255, 0.85), rgba(88, 166, 255, 0.7));
+}
+
 .psc-book-chart-overlay {
   position: absolute;
   top: 0;

@@ -73,6 +73,7 @@ class MarketCache:
         self.oi: dict[str, list[dict[str, Any]]] = {}
         self.oi_interval: dict[str, str] = {}
         self.funding: dict[str, float] = {}
+        self.mark_price: dict[str, float] = {}
         self.taker_buy: dict[str, float] = {}
         self.taker_sell: dict[str, float] = {}
         self.mini: dict[str, list[float]] = {}
@@ -288,6 +289,34 @@ class MarketCache:
                 item["funding_rate"] = fr
         return item
 
+    def liquidation_zones(self, symbol: str, interval: str = "60") -> dict[str, Any]:
+        from signal_engine.liq_zones import estimate_liquidation_zones
+
+        mark = self.mark_price.get(symbol)
+        if not mark:
+            sig = self.signals.get(symbol) or self.pump_scan_signals.get(symbol) or self.x2_retrace_signals.get(symbol)
+            mark = _num(sig.get("last_price")) if sig else None
+        if not mark:
+            mini = self.mini.get(symbol) or []
+            if mini:
+                mark = float(mini[-1])
+        if not mark:
+            return estimate_liquidation_zones(mark=0.0)
+        candles = self.klines.get((symbol, interval), [])
+        if not candles:
+            for fallback in ("15", "60", "240"):
+                candles = self.klines.get((symbol, fallback), [])
+                if candles:
+                    break
+        return estimate_liquidation_zones(
+            mark=float(mark),
+            oi_rows=self.oi.get(symbol, []),
+            candles=candles,
+            liquidations=self.liquidations.get(symbol, []),
+            taker_buy=self.taker_buy.get(symbol, 0.0),
+            taker_sell=self.taker_sell.get(symbol, 0.0),
+        )
+
     def book_view(self, symbol: str) -> dict[str, Any]:
         book = self.books.get(symbol) or {"bids": [], "asks": [], "walls": []}
         bids = book.get("bids") or []
@@ -413,14 +442,28 @@ class MarketCache:
                     self.klines[key] = sorted(merged.values(), key=lambda item: item["timestamp"])
         elif kind == "orderbook":
             self._book(symbol, data)
-        elif kind == "liquidation" and data.get("side") == "Sell":
+        elif kind == "liquidation":
+            side = str(data.get("side") or "")
+            if side not in {"Buy", "Sell"}:
+                return
             price = _num(data.get("price"))
             size = _num(data.get("size"))
             if price and size:
                 bucket = self.liquidations.setdefault(symbol, [])
-                bucket.append({"time": timestamp, "price": price, "size": size})
-                del bucket[:-400]
+                bucket.append(
+                    {
+                        "time": timestamp,
+                        "price": price,
+                        "size": size,
+                        "side": side,
+                        "position": "long" if side == "Buy" else "short",
+                    }
+                )
+                del bucket[:-600]
         elif kind == "ticker":
+            mark = _num(data.get("mark_price"))
+            if mark:
+                self.mark_price[symbol] = mark
             rate = _num(data.get("funding_rate"))
             if rate is not None:
                 self.funding[symbol] = rate

@@ -21,6 +21,12 @@ window.boardChart = {
     depthPct: 0.35,
     binTicks: 30,
   },
+  /** Оценочные зоны ликвидации на графике (слева). */
+  LIQ_CHART: {
+    depthPct: 0.35,
+    refreshMs: 45_000,
+  },
+  _liqZonesFetch: new Map(),
   BOOK_PANEL: {
     maxGridRowsPerSide: 320,
     /** Объединение уровней: N тиков цены в одну строку (сумма объёма). */
@@ -267,7 +273,22 @@ window.boardChart = {
       wrap.appendChild(ov);
       runtime.bookOverlayEl = ov;
     }
+    BC.ensureLiqOverlay(runtime, chartEl);
     BC.ensureBookOverlayHooks(runtime);
+  },
+
+  ensureLiqOverlay(runtime, chartEl) {
+    const BC = window.boardChart;
+    if (!runtime || !chartEl) return;
+    const wrap = chartEl.closest(".psc-chart-wrap");
+    if (!wrap) return;
+    if (!runtime.liqOverlayEl) {
+      const ov = document.createElement("div");
+      ov.className = "psc-liq-chart-overlay";
+      ov.setAttribute("aria-hidden", "true");
+      wrap.appendChild(ov);
+      runtime.liqOverlayEl = ov;
+    }
   },
 
   ensureBookOverlayHooks(runtime) {
@@ -276,17 +297,19 @@ window.boardChart = {
     runtime._bookOverlayHooks = true;
     const redraw = () => {
       const ctx = runtime._lastBookOverlay;
-      if (ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice);
+      if (ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice, ctx.symbol);
+      const liq = runtime._lastLiqCtx;
+      if (liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
     };
     runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
   },
 
-  renderBookChartOverlay(runtime, book, refPrice) {
+  renderBookChartOverlay(runtime, book, refPrice, symbol) {
     const BC = window.boardChart;
     const el = runtime?.bookOverlayEl;
     const series = runtime?.series;
     if (!el || !series) return;
-    runtime._lastBookOverlay = { book, refPrice };
+    runtime._lastBookOverlay = { book, refPrice, symbol: symbol || runtime._lastBookOverlay?.symbol || "" };
     const chartCfg = BC.BOOK_CHART;
     const data = BC.prepareBookDepth(book, refPrice, chartCfg.depthPct, chartCfg.binTicks);
     const { mid, asks, bids } = data;
@@ -315,6 +338,66 @@ window.boardChart = {
       </div>`);
     }
     el.innerHTML = parts.join("");
+    const sym = runtime._lastBookOverlay.symbol;
+    if (sym) BC.refreshLiqZonesOverlay(runtime, sym, refPrice);
+  },
+
+  async fetchLiqZones(symbol, interval) {
+    const BC = window.boardChart;
+    const key = `${symbol}|${interval || "60"}`;
+    const cached = BC._liqZonesFetch.get(key);
+    const now = Date.now();
+    if (cached?.data && now - cached.ts < BC.LIQ_CHART.refreshMs) return cached.data;
+    if (cached?.pending) return cached.pending;
+    const job = fetch(`/api/liquidation-zones/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval || "60")}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .catch(() => null)
+      .finally(() => {
+        const c = BC._liqZonesFetch.get(key);
+        if (c) c.pending = null;
+      });
+    BC._liqZonesFetch.set(key, { ...(cached || {}), pending: job });
+    const data = await job;
+    if (data) BC._liqZonesFetch.set(key, { data, ts: now, pending: null });
+    return data;
+  },
+
+  renderLiqChartOverlay(runtime, zones, mark) {
+    const BC = window.boardChart;
+    const el = runtime?.liqOverlayEl;
+    const series = runtime?.series;
+    if (!el || !series || !mark) return;
+    const list = zones || [];
+    if (!list.length) {
+      el.innerHTML = "";
+      return;
+    }
+    const maxN = Math.max(...list.map((z) => Number(z.notional_usd) || 0), 1);
+    const parts = [];
+    for (const z of list) {
+      const y = series.priceToCoordinate(Number(z.price));
+      if (y == null) continue;
+      const yPx = Math.round(y);
+      const bar = Math.min(100, Math.max(10, Math.round(((Number(z.notional_usd) || 0) / maxN) * 100)));
+      const side = z.side === "short" ? "short" : "long";
+      const src = z.source === "hist" ? "факт" : z.source === "model" ? "модель" : "смесь";
+      parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · ~$${BC.formatBookSize(z.notional_usd)} · ${src}">
+        <span class="psc-liq-chart-bar" style="width:${bar}%"></span>
+      </div>`);
+    }
+    el.innerHTML = parts.join("");
+  },
+
+  refreshLiqZonesOverlay(runtime, symbol, refPrice) {
+    const BC = window.boardChart;
+    if (!symbol || !runtime) return;
+    const interval = runtime._chartInterval || "60";
+    void BC.fetchLiqZones(symbol, interval).then((data) => {
+      if (!data?.zones) return;
+      const mark = Number(data.mark) || Number(refPrice);
+      runtime._lastLiqCtx = { zones: data.zones, mark };
+      BC.renderLiqChartOverlay(runtime, data.zones, mark);
+    });
   },
 
   syncBookOverlayForChart(chartElId) {
@@ -322,7 +405,9 @@ window.boardChart = {
     const chartEl = document.getElementById(chartElId);
     const runtime = chartEl?._boardRuntime;
     const ctx = runtime?._lastBookOverlay;
-    if (runtime && ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice);
+    if (runtime && ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice, ctx.symbol);
+    const liq = runtime?._lastLiqCtx;
+    if (runtime && liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
   },
 
   bookSectionHtml(paneId) {
@@ -417,7 +502,7 @@ window.boardChart = {
       el._bookCtx = { book: b, refPrice, symbol: sym };
       const chartId = BC.bookChartIdForPane(containerId);
       const chartEl = chartId ? document.getElementById(chartId) : null;
-      if (chartEl?._boardRuntime) BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice);
+      if (chartEl?._boardRuntime) BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym);
       BC.ensureBookPaneScroll(el);
       const sc = BC.bookScrollEl(el);
       if (options?.centerMid || isNewOpen) BC.scrollBookToMid(el);
@@ -677,6 +762,7 @@ window.boardChart = {
 
   drawCandles(runtime, candles, interval, resetScale, chartElId) {
     if (!runtime.series) return;
+    runtime._chartInterval = interval;
     const byTime = new Map();
     for (const candle of candles || []) {
       const time = window.boardChart.candleTime(candle.timestamp ?? candle.time, interval);

@@ -226,6 +226,18 @@ async def orderbook(symbol: str, refresh: bool = False) -> dict[str, Any]:
     return {"symbol": symbol, "book": view}
 
 
+@app.get("/api/liquidation-zones/{symbol}")
+async def liquidation_zones(symbol: str, interval: str = "60") -> dict[str, Any]:
+    """Оценочные зоны ликвидации (модель OI + история), не официальные данные Bybit."""
+    if not _SYMBOL.fullmatch(symbol or ""):
+        raise HTTPException(status_code=400, detail="Некорректный тикер")
+    if interval not in {"1", "5", "15", "30", "60", "240", "D"}:
+        raise HTTPException(status_code=400, detail="Некорректный интервал")
+    hub: Hub = app.state.hub
+    payload = hub.cache.liquidation_zones(symbol, interval)
+    return {"symbol": symbol, "interval": interval, **payload}
+
+
 @app.get("/api/klines/{symbol}")
 async def klines(
     symbol: str,
