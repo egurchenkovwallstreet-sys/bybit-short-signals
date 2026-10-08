@@ -189,8 +189,8 @@ body {
   right: 0;
   bottom: 22%;
   pointer-events: none;
-  z-index: 2;
-  overflow: hidden;
+  z-index: 5;
+  overflow: visible;
 }
 
 .psc-liq-chart-row {
@@ -240,8 +240,8 @@ body {
   bottom: 22%;
   width: min(42vw, 240px);
   pointer-events: none;
-  z-index: 4;
-  overflow: hidden;
+  z-index: 6;
+  overflow: visible;
 }
 
 .psc-book-chart-mid {
@@ -299,6 +299,7 @@ body {
 
 .psc-candle-chart {
   position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   min-height: min(72vh, 720px);

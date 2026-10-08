@@ -266,7 +266,14 @@ window.boardChart = {
   },
 
   overlayHost(chartEl) {
-    return chartEl || null;
+    return chartEl?.closest?.(".psc-chart-wrap") || chartEl || null;
+  },
+
+  attachOverlayToHost(overlayEl, host, beforeEl) {
+    if (!overlayEl || !host) return;
+    if (overlayEl.parentElement !== host) {
+      host.insertBefore(overlayEl, beforeEl || null);
+    }
   },
 
   /** Pan/zoom по времени и цене; оверлеи синхронизируются в ensureBookOverlayHooks. */
@@ -356,9 +363,9 @@ window.boardChart = {
       const ov = document.createElement("div");
       ov.className = "psc-book-chart-overlay";
       ov.setAttribute("aria-hidden", "true");
-      host.appendChild(ov);
       runtime.bookOverlayEl = ov;
     }
+    BC.attachOverlayToHost(runtime.bookOverlayEl, host, null);
     BC.ensureLiqOverlay(runtime, chartEl);
     BC.ensureBookOverlayHooks(runtime);
   },
@@ -372,9 +379,9 @@ window.boardChart = {
       const ov = document.createElement("div");
       ov.className = "psc-liq-chart-overlay";
       ov.setAttribute("aria-hidden", "true");
-      host.insertBefore(ov, runtime.bookOverlayEl || null);
       runtime.liqOverlayEl = ov;
     }
+    BC.attachOverlayToHost(runtime.liqOverlayEl, host, runtime.bookOverlayEl || null);
   },
 
   ensureBookOverlayHooks(runtime) {
@@ -405,12 +412,15 @@ window.boardChart = {
     const el = runtime?.bookOverlayEl;
     const series = runtime?.series;
     if (!el || !series) return;
-    runtime._lastBookOverlay = { book, refPrice, symbol: symbol || runtime._lastBookOverlay?.symbol || "" };
+    const sym = symbol || runtime._lastBookOverlay?.symbol || "";
+    if (sym) runtime._chartSymbol = sym;
+    runtime._lastBookOverlay = { book, refPrice, symbol: sym };
     const chartCfg = BC.BOOK_CHART;
     const data = BC.prepareBookDepth(book, refPrice, chartCfg.depthPct, chartCfg.binTicks);
     const { mid, asks, bids } = data;
     if (!mid) {
       el.innerHTML = "";
+      if (sym && !options?.skipLiqFetch) BC.refreshLiqZonesOverlay(runtime, sym, refPrice);
       return;
     }
     runtime._overlayProbePrice = mid;
@@ -434,7 +444,6 @@ window.boardChart = {
       </div>`);
     }
     el.innerHTML = parts.join("");
-    const sym = runtime._lastBookOverlay.symbol;
     if (sym && !options?.skipLiqFetch) BC.refreshLiqZonesOverlay(runtime, sym, refPrice);
   },
 
@@ -1056,6 +1065,10 @@ window.boardChart = {
       });
     }
     BC.syncBookOverlayForChart(chartElId);
+    if (runtime._chartSymbol && runtime.liqOverlayEl) {
+      const ref = bars.length ? bars[bars.length - 1].close : runtime._overlayProbePrice;
+      BC.refreshLiqZonesOverlay(runtime, runtime._chartSymbol, ref);
+    }
   },
 
   renderWalls(containerId, book) {
