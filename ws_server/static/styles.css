@@ -186,11 +186,11 @@ body {
   position: absolute;
   top: 0;
   left: 0;
+  right: 0;
   bottom: 22%;
-  width: min(50vw, 280px);
   pointer-events: none;
-  z-index: 4;
-  overflow: visible;
+  z-index: 2;
+  overflow: hidden;
 }
 
 .psc-liq-chart-row {
@@ -201,39 +201,35 @@ body {
   transform: translateY(-50%);
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding-right: 2px;
+  justify-content: flex-start;
   z-index: 1;
 }
 
 .psc-liq-chart-bar {
   height: 8px;
   min-width: 10px;
-  max-width: 96%;
   border-radius: 2px;
-  opacity: 0.42;
-  transform-origin: right center;
+  opacity: 0.4;
+  transform-origin: left center;
 }
 
-/* К правому краю оверлея (к свечам): max объём ≈ упирается в график */
+/* Слева направо; max объём — до X последней свечи на своей цене */
 .psc-liq-chart-row.long .psc-liq-chart-bar {
   background: linear-gradient(
-    270deg,
-    rgba(61, 214, 140, 0.08) 0%,
-    rgba(61, 214, 140, 0.55) 72%,
-    rgba(61, 214, 140, 0.85) 100%
+    90deg,
+    rgba(61, 214, 140, 0.06) 0%,
+    rgba(61, 214, 140, 0.45) 70%,
+    rgba(61, 214, 140, 0.72) 100%
   );
-  box-shadow: 0 0 8px rgba(61, 214, 140, 0.15);
 }
 
 .psc-liq-chart-row.short .psc-liq-chart-bar {
   background: linear-gradient(
-    270deg,
-    rgba(255, 93, 115, 0.06) 0%,
-    rgba(255, 93, 115, 0.52) 72%,
-    rgba(255, 93, 115, 0.88) 100%
+    90deg,
+    rgba(255, 93, 115, 0.05) 0%,
+    rgba(255, 93, 115, 0.42) 70%,
+    rgba(255, 93, 115, 0.75) 100%
   );
-  box-shadow: 0 0 8px rgba(255, 93, 115, 0.12);
 }
 
 .psc-book-chart-overlay {

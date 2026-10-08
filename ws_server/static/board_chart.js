@@ -269,6 +269,16 @@ window.boardChart = {
     return chartEl || null;
   },
 
+  /** Горизонталь последней (формирующейся) свечи — правый край max-полоски liq. */
+  lastCandleAnchorX(runtime) {
+    const chart = runtime?.chart;
+    const t = runtime._lastCandleTime;
+    if (!chart || t == null) return null;
+    const x = chart.timeScale().timeToCoordinate(t);
+    if (x == null || Number.isNaN(x) || x <= 4) return null;
+    return x;
+  },
+
   syncChartOverlays(runtime) {
     const BC = window.boardChart;
     if (!runtime) return;
@@ -291,7 +301,8 @@ window.boardChart = {
       const probe = runtime._overlayProbePrice;
       if (probe != null && probe > 0) {
         const y = runtime.series.priceToCoordinate(probe);
-        const key = y == null ? "null" : String(Math.round(y * 16));
+        const ax = BC.lastCandleAnchorX(runtime);
+        const key = `${y == null ? "n" : Math.round(y * 16)}|${ax == null ? "x" : Math.round(ax)}`;
         if (key !== lastKey) {
           lastKey = key;
           BC.syncChartOverlays(runtime);
@@ -328,7 +339,7 @@ window.boardChart = {
       const ov = document.createElement("div");
       ov.className = "psc-liq-chart-overlay";
       ov.setAttribute("aria-hidden", "true");
-      host.appendChild(ov);
+      host.insertBefore(ov, runtime.bookOverlayEl || null);
       runtime.liqOverlayEl = ov;
     }
   },
@@ -421,17 +432,20 @@ window.boardChart = {
       return;
     }
     const maxN = Math.max(...list.map((z) => Number(z.notional_usd) || 0), 1);
+    const anchorX = BC.lastCandleAnchorX(runtime);
+    const hostW = el.parentElement?.clientWidth || el.clientWidth || 640;
+    const maxPx = anchorX != null ? Math.round(anchorX) : Math.round(hostW * 0.78);
     const parts = [];
     for (const z of list) {
       const y = series.priceToCoordinate(Number(z.price));
       if (y == null) continue;
       const yPx = Math.round(y);
       const ratio = (Number(z.notional_usd) || 0) / maxN;
-      const bar = Math.min(96, Math.max(14, Math.round(ratio * 96)));
+      const widthPx = Math.max(10, Math.round(ratio * maxPx));
       const side = z.side === "short" ? "short" : "long";
       const src = z.source === "hist" ? "факт" : z.source === "model" ? "модель" : "смесь";
       parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · ~$${BC.formatBookSize(z.notional_usd)} · ${src}">
-        <span class="psc-liq-chart-bar" style="width:${bar}%"></span>
+        <span class="psc-liq-chart-bar" style="width:${widthPx}px"></span>
       </div>`);
     }
     el.innerHTML = parts.join("");
@@ -966,10 +980,13 @@ window.boardChart = {
       );
     }
     if (bars.length) {
+      runtime._lastCandleTime = bars[bars.length - 1].time;
       runtime.priceRange = {
         min: Math.min(...bars.map((b) => b.low)),
         max: Math.max(...bars.map((b) => b.high)),
       };
+    } else {
+      runtime._lastCandleTime = null;
     }
     const container = document.getElementById(chartElId);
     if (container && runtime.chart && container.clientWidth > 0) {
