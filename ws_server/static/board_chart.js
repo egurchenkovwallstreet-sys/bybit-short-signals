@@ -303,16 +303,18 @@ window.boardChart = {
     BC.clearLiqPriceLines(runtime);
     if (!list?.length) return;
     runtime._liqPriceLines = [];
-    for (const z of list.slice(0, 20)) {
+    for (const z of list.slice(0, 16)) {
+      const pending = Number(z.notional_pending_usd) || 0;
+      if (pending <= 0) continue;
       const price = Number(z.price);
       if (!price || Number.isNaN(price)) continue;
-      const color = z.side === "short" ? "rgba(255, 93, 115, 0.5)" : "rgba(61, 214, 140, 0.5)";
+      const color = z.side === "short" ? "rgba(255, 93, 115, 0.85)" : "rgba(61, 214, 140, 0.85)";
       runtime._liqPriceLines.push(
         runtime.series.createPriceLine({
           price,
           color,
-          lineWidth: 1,
-          lineStyle: 2,
+          lineWidth: 2,
+          lineStyle: 0,
           axisLabelVisible: false,
           title: "",
         }),
@@ -552,11 +554,11 @@ window.boardChart = {
       const pPending = pending > 0 ? pending : Math.max(0, totalN - (cleared > 0 ? cleared : 0));
       const pCleared = cleared > 0 ? cleared : Math.max(0, totalN - pPending);
       const ratio = totalN / maxN;
-      const widthTotal = Math.max(16, Math.round(ratio * maxPx));
+      const widthTotal = Math.max(28, Math.round(ratio * maxPx));
       let wPending = Math.round((pPending / totalN) * widthTotal);
       let wCleared = Math.round((pCleared / totalN) * widthTotal);
-      if (pPending > 0 && wPending < 6) wPending = 6;
-      if (pCleared > 0 && wCleared < 6) wCleared = 6;
+      if (pPending > 0 && wPending < 14) wPending = 14;
+      if (pCleared > 0 && wCleared < 10) wCleared = 10;
       const segSum = wPending + wCleared;
       if (segSum > widthTotal) {
         const scale = widthTotal / segSum;
@@ -567,12 +569,20 @@ window.boardChart = {
       const src = z.source === "hist" ? "факт" : z.source === "model" ? "модель" : "смесь";
       const segs = [];
       if (wPending > 0) segs.push(`<span class="psc-liq-chart-bar pending" style="width:${wPending}px"></span>`);
-      if (wCleared > 0) segs.push(`<span class="psc-liq-chart-bar cleared" style="width:${wCleared}px"></span>`);
+      if (wPending > 0 && wCleared > 0) segs.push('<span class="psc-liq-chart-sep" aria-hidden="true"></span>');
+      if (wCleared > 0) {
+        const onlyCleared = wPending <= 0 ? " only-cleared" : "";
+        segs.push(`<span class="psc-liq-chart-bar cleared${onlyCleared}" style="width:${wCleared}px"></span>`);
+      }
       parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · впереди ~$${BC.formatBookSize(pPending)} · снято ~$${BC.formatBookSize(pCleared)} · ${src}">
         ${segs.join("")}
       </div>`);
     }
-    el.innerHTML = parts.join("");
+    const legend = `<div class="psc-liq-legend" aria-hidden="true">
+      <span class="psc-liq-leg pending">■ впереди</span>
+      <span class="psc-liq-leg cleared">▧ уже проходили</span>
+    </div>`;
+    el.innerHTML = legend + parts.join("");
   },
 
   refreshLiqZonesOverlay(runtime, symbol, refPrice) {
