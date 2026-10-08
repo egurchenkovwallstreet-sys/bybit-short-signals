@@ -182,6 +182,80 @@ body {
   border: 1px solid var(--border);
 }
 
+.psc-book-chart-overlay {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 22%;
+  width: 118px;
+  pointer-events: none;
+  z-index: 4;
+  overflow: hidden;
+}
+
+.psc-book-chart-mid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed rgba(88, 166, 255, 0.75);
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+.psc-book-chart-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  z-index: 1;
+}
+
+.psc-book-chart-row.empty::after {
+  content: "";
+  width: 6px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  margin-right: 2px;
+}
+
+.psc-book-chart-bar {
+  height: 4px;
+  min-width: 4px;
+  max-width: 72%;
+  border-radius: 1px;
+  opacity: 0.88;
+}
+
+.psc-book-chart-row.ask .psc-book-chart-bar {
+  background: #ff5d73;
+}
+
+.psc-book-chart-row.bid .psc-book-chart-bar {
+  background: #3dd68c;
+}
+
+.psc-book-chart-lbl {
+  font-size: 9px;
+  line-height: 1;
+  color: #c5d0de;
+  text-shadow: 0 0 3px #10141b, 0 0 3px #10141b;
+  white-space: nowrap;
+}
+
+.psc-book-chart-row.ask .psc-book-chart-lbl {
+  color: #ffb0bc;
+}
+
+.psc-book-chart-row.bid .psc-book-chart-lbl {
+  color: #9ef0c8;
+}
+
 .psc-candle-chart {
   width: 100%;
   height: 100%;

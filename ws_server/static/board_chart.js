@@ -19,7 +19,7 @@ window.boardChart = {
   BOOK_PANEL: {
     maxGridRowsPerSide: 320,
     /** Объединение уровней: N тиков цены в одну строку (сумма объёма). */
-    binTicks: 10,
+    binTicks: 5,
   },
   _bookFetch: new Map(),
 
@@ -240,6 +240,90 @@ window.boardChart = {
     </div>`;
   },
 
+  bookChartIdForPane(paneId) {
+    const map = {
+      "pump-scan-book-pane": "pump-scan-candle-chart",
+      "x2-book-pane": "x2-candle-chart",
+      "psc-book-pane": "psc-candle-chart",
+    };
+    return map[paneId] || null;
+  },
+
+  ensureBookOverlay(runtime, chartEl) {
+    const BC = window.boardChart;
+    if (!runtime || !chartEl) return;
+    chartEl._boardRuntime = runtime;
+    const wrap = chartEl.closest(".psc-chart-wrap");
+    if (!wrap) return;
+    if (!runtime.bookOverlayEl) {
+      const ov = document.createElement("div");
+      ov.className = "psc-book-chart-overlay";
+      ov.setAttribute("aria-hidden", "true");
+      wrap.appendChild(ov);
+      runtime.bookOverlayEl = ov;
+    }
+    BC.ensureBookOverlayHooks(runtime);
+  },
+
+  ensureBookOverlayHooks(runtime) {
+    const BC = window.boardChart;
+    if (!runtime?.chart || runtime._bookOverlayHooks) return;
+    runtime._bookOverlayHooks = true;
+    const redraw = () => {
+      const ctx = runtime._lastBookOverlay;
+      if (ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice);
+    };
+    runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
+  },
+
+  renderBookChartOverlay(runtime, book, refPrice) {
+    const BC = window.boardChart;
+    const el = runtime?.bookOverlayEl;
+    const series = runtime?.series;
+    if (!el || !series) return;
+    runtime._lastBookOverlay = { book, refPrice };
+    const data = BC.prepareBookDepth(book, refPrice);
+    const { mid, asks, bids } = data;
+    if (!mid) {
+      el.innerHTML = "";
+      return;
+    }
+    const levels = [
+      ...asks.map((r) => ({ ...r, side: "ask" })),
+      ...bids.map((r) => ({ ...r, side: "bid" })),
+    ];
+    const withVol = levels.filter((r) => r.size > 0);
+    const maxVol = Math.max(...withVol.map((r) => r.size), 1);
+    const parts = [];
+    const midY = series.priceToCoordinate(mid);
+    if (midY != null) {
+      parts.push(`<div class="psc-book-chart-mid" style="top:${Math.round(midY)}px"></div>`);
+    }
+    for (const r of levels) {
+      const y = series.priceToCoordinate(r.price);
+      if (y == null) continue;
+      const yPx = Math.round(y);
+      if (r.size <= 0) {
+        parts.push(`<div class="psc-book-chart-row empty ${r.side}" style="top:${yPx}px"></div>`);
+        continue;
+      }
+      const bar = Math.max(10, Math.round((r.size / maxVol) * 100));
+      parts.push(`<div class="psc-book-chart-row ${r.side}" style="top:${yPx}px" title="${BC.formatBookPrice(r.price)} · ${BC.formatBookSize(r.size)}">
+        <span class="psc-book-chart-bar" style="width:${bar}%"></span>
+        <span class="psc-book-chart-lbl">${BC.formatBookPrice(r.price)}</span>
+      </div>`);
+    }
+    el.innerHTML = parts.join("");
+  },
+
+  syncBookOverlayForChart(chartElId) {
+    const BC = window.boardChart;
+    const chartEl = document.getElementById(chartElId);
+    const runtime = chartEl?._boardRuntime;
+    const ctx = runtime?._lastBookOverlay;
+    if (runtime && ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice);
+  },
+
   bookSectionHtml(paneId) {
     return `<div class="psc-book-section">
       <div class="psc-book-head">
@@ -330,6 +414,9 @@ window.boardChart = {
       const data = BC.prepareBookDepth(b, refPrice);
       el.innerHTML = BC.bookPaneHtml(data);
       el._bookCtx = { book: b, refPrice, symbol: sym };
+      const chartId = BC.bookChartIdForPane(containerId);
+      const chartEl = chartId ? document.getElementById(chartId) : null;
+      if (chartEl?._boardRuntime) BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice);
       BC.ensureBookPaneScroll(el);
       const sc = BC.bookScrollEl(el);
       if (options?.centerMid || isNewOpen) BC.scrollBookToMid(el);
@@ -566,9 +653,11 @@ window.boardChart = {
       priceScaleId: "vol",
     });
     runtime.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+    window.boardChart.ensureBookOverlay(runtime, container);
     const resize = () => {
       if (!runtime.chart || container.clientWidth <= 0) return;
       runtime.chart.resize(container.clientWidth, container.clientHeight || 420);
+      window.boardChart.syncBookOverlayForChart(chartElId);
     };
     new ResizeObserver(resize).observe(container);
     requestAnimationFrame(resize);
@@ -633,6 +722,7 @@ window.boardChart = {
       const to = typeof last === "object" ? last : last + step;
       runtime.chart.timeScale().setVisibleRange({ from: bars[0].time, to });
     }
+    window.boardChart.syncBookOverlayForChart(chartElId);
   },
 
   renderWalls(containerId, book) {
@@ -682,7 +772,7 @@ window.boardChart = {
     document.addEventListener("change", (e) => {
       const sel = e.target.closest(".psc-book-bin");
       if (!sel) return;
-      const ticks = Number(sel.value) || 10;
+      const ticks = Number(sel.value) || 5;
       BC.BOOK_PANEL.binTicks = ticks;
       try {
         localStorage.setItem("psc-book-bin", String(ticks));
