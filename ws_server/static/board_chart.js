@@ -265,17 +265,54 @@ window.boardChart = {
     return map[paneId] || null;
   },
 
+  overlayHost(chartEl) {
+    return chartEl || null;
+  },
+
+  syncChartOverlays(runtime) {
+    const BC = window.boardChart;
+    if (!runtime) return;
+    const ctx = runtime._lastBookOverlay;
+    if (ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice, ctx.symbol, { skipLiqFetch: true });
+    const liq = runtime._lastLiqCtx;
+    if (liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
+  },
+
+  startOverlayPriceSync(runtime) {
+    const BC = window.boardChart;
+    if (!runtime || runtime._overlayPriceSync) return;
+    runtime._overlayPriceSync = true;
+    let lastKey = "";
+    const tick = () => {
+      if (!runtime.series) {
+        runtime._overlayRafId = requestAnimationFrame(tick);
+        return;
+      }
+      const probe = runtime._overlayProbePrice;
+      if (probe != null && probe > 0) {
+        const y = runtime.series.priceToCoordinate(probe);
+        const key = y == null ? "null" : String(Math.round(y * 16));
+        if (key !== lastKey) {
+          lastKey = key;
+          BC.syncChartOverlays(runtime);
+        }
+      }
+      runtime._overlayRafId = requestAnimationFrame(tick);
+    };
+    runtime._overlayRafId = requestAnimationFrame(tick);
+  },
+
   ensureBookOverlay(runtime, chartEl) {
     const BC = window.boardChart;
     if (!runtime || !chartEl) return;
     chartEl._boardRuntime = runtime;
-    const wrap = chartEl.closest(".psc-chart-wrap");
-    if (!wrap) return;
+    const host = BC.overlayHost(chartEl);
+    if (!host) return;
     if (!runtime.bookOverlayEl) {
       const ov = document.createElement("div");
       ov.className = "psc-book-chart-overlay";
       ov.setAttribute("aria-hidden", "true");
-      wrap.appendChild(ov);
+      host.appendChild(ov);
       runtime.bookOverlayEl = ov;
     }
     BC.ensureLiqOverlay(runtime, chartEl);
@@ -285,13 +322,13 @@ window.boardChart = {
   ensureLiqOverlay(runtime, chartEl) {
     const BC = window.boardChart;
     if (!runtime || !chartEl) return;
-    const wrap = chartEl.closest(".psc-chart-wrap");
-    if (!wrap) return;
+    const host = BC.overlayHost(chartEl);
+    if (!host) return;
     if (!runtime.liqOverlayEl) {
       const ov = document.createElement("div");
       ov.className = "psc-liq-chart-overlay";
       ov.setAttribute("aria-hidden", "true");
-      wrap.appendChild(ov);
+      host.appendChild(ov);
       runtime.liqOverlayEl = ov;
     }
   },
@@ -300,16 +337,15 @@ window.boardChart = {
     const BC = window.boardChart;
     if (!runtime?.chart || runtime._bookOverlayHooks) return;
     runtime._bookOverlayHooks = true;
-    const redraw = () => {
-      const ctx = runtime._lastBookOverlay;
-      if (ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice, ctx.symbol);
-      const liq = runtime._lastLiqCtx;
-      if (liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
-    };
+    const redraw = () => BC.syncChartOverlays(runtime);
     runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
+    if (typeof runtime.chart.timeScale().subscribeSizeChange === "function") {
+      runtime.chart.timeScale().subscribeSizeChange(redraw);
+    }
+    BC.startOverlayPriceSync(runtime);
   },
 
-  renderBookChartOverlay(runtime, book, refPrice, symbol) {
+  renderBookChartOverlay(runtime, book, refPrice, symbol, options) {
     const BC = window.boardChart;
     const el = runtime?.bookOverlayEl;
     const series = runtime?.series;
@@ -322,6 +358,7 @@ window.boardChart = {
       el.innerHTML = "";
       return;
     }
+    runtime._overlayProbePrice = mid;
     const withVol = [
       ...asks.filter((r) => r.size > 0).map((r) => ({ ...r, side: "ask" })),
       ...bids.filter((r) => r.size > 0).map((r) => ({ ...r, side: "bid" })),
@@ -339,12 +376,11 @@ window.boardChart = {
       const bar = Math.min(100, Math.max(12, Math.round((r.size / maxVol) * 50) * 2));
       parts.push(`<div class="psc-book-chart-row ${r.side}" style="top:${yPx}px" title="${BC.formatBookPrice(r.price)} · ${BC.formatBookSize(r.size)}">
         <span class="psc-book-chart-bar" style="width:${bar}%"></span>
-        <span class="psc-book-chart-lbl">${BC.formatBookPrice(r.price)}</span>
       </div>`);
     }
     el.innerHTML = parts.join("");
     const sym = runtime._lastBookOverlay.symbol;
-    if (sym) BC.refreshLiqZonesOverlay(runtime, sym, refPrice);
+    if (sym && !options?.skipLiqFetch) BC.refreshLiqZonesOverlay(runtime, sym, refPrice);
   },
 
   async fetchLiqZones(symbol, interval) {
@@ -378,6 +414,7 @@ window.boardChart = {
     const el = runtime?.liqOverlayEl;
     const series = runtime?.series;
     if (!el || !series || !mark) return;
+    runtime._overlayProbePrice = Number(mark) || runtime._overlayProbePrice;
     const list = zones || [];
     if (!list.length) {
       el.innerHTML = "";
@@ -416,10 +453,7 @@ window.boardChart = {
     const BC = window.boardChart;
     const chartEl = document.getElementById(chartElId);
     const runtime = chartEl?._boardRuntime;
-    const ctx = runtime?._lastBookOverlay;
-    if (runtime && ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice, ctx.symbol);
-    const liq = runtime?._lastLiqCtx;
-    if (runtime && liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
+    if (runtime) BC.syncChartOverlays(runtime);
   },
 
   bookSectionHtml(paneId) {
