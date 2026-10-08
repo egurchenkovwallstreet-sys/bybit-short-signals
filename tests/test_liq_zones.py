@@ -84,6 +84,20 @@ class LiqZonesTest(unittest.TestCase):
         self.assertTrue(hist_long)
         self.assertGreater(hist_long[0]["notional_cleared_usd"], 0)
 
+    def test_long_below_mark_stays_pending_without_drop(self) -> None:
+        mark = 0.04
+        now = 1_700_000_500_000
+        candles = [
+            {"timestamp": now - 3600_000, "high": 0.041, "low": 0.038, "close": 0.04},
+        ]
+        out = estimate_liquidation_zones(mark=mark, candles=candles, depth_pct=0.35, now_ms=now)
+        longs = [z for z in out["zones"] if z["side"] == "long" and z["price"] < mark * 0.99]
+        self.assertTrue(longs)
+        for z in longs:
+            if z["source"] == "model":
+                self.assertGreater(z["notional_pending_usd"], 0)
+                self.assertEqual(z["notional_cleared_usd"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

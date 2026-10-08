@@ -308,12 +308,12 @@ window.boardChart = {
       if (pending <= 0) continue;
       const price = Number(z.price);
       if (!price || Number.isNaN(price)) continue;
-      const color = z.side === "short" ? "rgba(255, 93, 115, 0.85)" : "rgba(61, 214, 140, 0.85)";
+      const color = z.side === "short" ? "rgba(255, 93, 115, 0.35)" : "rgba(61, 214, 140, 0.35)";
       runtime._liqPriceLines.push(
         runtime.series.createPriceLine({
           price,
           color,
-          lineWidth: 2,
+          lineWidth: 1,
           lineStyle: 0,
           axisLabelVisible: false,
           title: "",

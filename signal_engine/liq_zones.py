@@ -152,17 +152,33 @@ def _merge_bins(*parts: dict[tuple[str, float], float]) -> dict[tuple[str, float
     return out
 
 
-def _level_touched(side: str, price: float, candles: list[dict[str, Any]], since_ms: int | None = None) -> bool:
-    """Цена уже заходила на уровень (low/high свечей)."""
+def _swept_to_liquidate(
+    side: str,
+    price: float,
+    mark: float,
+    candles: list[dict[str, Any]],
+    since_ms: int | None = None,
+) -> bool:
+    """Long — снятие при падении к уровню; short — при росте. Проход снизу вверь не считаем."""
+    if side == "long":
+        if mark > price * 1.0015:
+            return False
+        for c in candles:
+            t = _ts_ms(c.get("timestamp") or c.get("time"))
+            if since_ms is not None and t is not None and t < since_ms:
+                continue
+            lo = _num(c.get("low"))
+            if lo is not None and lo <= price * 1.0015:
+                return True
+        return False
+    if mark < price * 0.9985:
+        return False
     for c in candles:
         t = _ts_ms(c.get("timestamp") or c.get("time"))
         if since_ms is not None and t is not None and t < since_ms:
             continue
-        lo = _num(c.get("low"))
         hi = _num(c.get("high"))
-        if side == "long" and lo is not None and lo <= price * 1.0015:
-            return True
-        if side == "short" and hi is not None and hi >= price * 0.9985:
+        if hi is not None and hi >= price * 0.9985:
             return True
     return False
 
@@ -171,6 +187,7 @@ def _split_notional(
     side: str,
     price: float,
     notional: float,
+    mark: float,
     hist_bins: dict[tuple[str, float], float],
     model_bins: dict[tuple[str, float], float],
     candles: list[dict[str, Any]] | None,
@@ -183,7 +200,7 @@ def _split_notional(
     cleared = hist_n
     pending = 0.0
     window_start = (now_ms if now_ms is not None else int(time.time() * 1000)) - HIST_WINDOW_MS
-    touched = _level_touched(side, price, candles or [], since_ms=window_start)
+    touched = _swept_to_liquidate(side, price, mark, candles or [], since_ms=window_start)
     if model_n > 0:
         if touched:
             cleared += model_n
@@ -255,7 +272,7 @@ def estimate_liquidation_zones(
         elif not hist_bins and not model_bins:
             src = "model"
         pending, cleared = _split_notional(
-            side, price, notional, hist_bins, model_bins, candles, now_ms
+            side, price, notional, mark, hist_bins, model_bins, candles, now_ms
         )
         zones.append(
             {
