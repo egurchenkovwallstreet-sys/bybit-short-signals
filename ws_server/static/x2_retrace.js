@@ -135,6 +135,9 @@ function mergeX2LiveDetail(data) {
     liquidations: data.liquidations ?? prev.liquidations,
     funding_rate: data.funding_rate ?? prev.funding_rate,
   };
+  if (x2State.selected && x2State.chart?._lastBars?.length) {
+    window.boardChart.setChartLiquidations(x2State.chart, x2State.detail.liquidations);
+  }
 }
 
 function onX2Detail(symbol, data) {

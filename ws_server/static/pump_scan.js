@@ -149,6 +149,9 @@ function mergePumpLiveDetail(data) {
     funding_rate: data.funding_rate ?? prev.funding_rate,
     taker_ratio: data.taker_ratio ?? prev.taker_ratio,
   };
+  if (pumpState.selected && pumpState.chart?._lastBars?.length) {
+    window.boardChart.setChartLiquidations(pumpState.chart, pumpState.detail.liquidations);
+  }
 }
 
 function onPumpScanDetail(symbol, data) {

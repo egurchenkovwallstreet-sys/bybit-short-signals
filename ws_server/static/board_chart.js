@@ -392,6 +392,26 @@ window.boardChart = {
     BC.renderLiqCandleLabels(runtime);
   },
 
+  scheduleThrottledOverlaySync(runtime) {
+    const BC = window.boardChart;
+    if (!runtime) return;
+    const minMs = 72;
+    const now = performance.now();
+    const last = runtime._lastOverlaySyncMs || 0;
+    if (now - last >= minMs) {
+      runtime._lastOverlaySyncMs = now;
+      runtime._overlaySyncTrailing = 0;
+      BC.syncChartOverlaysNow(runtime);
+      return;
+    }
+    if (runtime._overlaySyncTrailing) return;
+    runtime._overlaySyncTrailing = window.setTimeout(() => {
+      runtime._overlaySyncTrailing = 0;
+      runtime._lastOverlaySyncMs = performance.now();
+      BC.syncChartOverlaysNow(runtime);
+    }, minMs);
+  },
+
   resetChartSession(runtime, symbol) {
     const BC = window.boardChart;
     if (!runtime) return;
@@ -421,6 +441,20 @@ window.boardChart = {
     last.close = p;
     last.high = Math.max(last.high, p);
     last.low = Math.min(last.low, p);
+  },
+
+  /** Если live-цена вне видимой шкалы — вернуть autoScale (пока пользователь не зумил вручную). */
+  maybeFitLivePriceScale(runtime, livePrice) {
+    const series = runtime?.series;
+    const host = runtime?._chartContainer;
+    if (!series || !host || runtime._userChartView) return;
+    const p = Number(livePrice);
+    if (!p || p <= 0) return;
+    const y = series.priceToCoordinate(p);
+    const plotH = Math.max(1, host.clientHeight * 0.76);
+    if (y == null || Number.isNaN(y) || y < 8 || y > plotH - 8) {
+      series.priceScale().applyOptions({ autoScale: true });
+    }
   },
 
   chartOverlayReady(runtime, symbol) {
@@ -473,6 +507,10 @@ window.boardChart = {
           bucket = map.get(m.key);
           break;
         }
+      }
+      if (!bucket && meta.length) {
+        const lastM = meta[meta.length - 1];
+        if (ts >= lastM.startMs) bucket = map.get(lastM.key);
       }
       if (!bucket) continue;
       const row = {
@@ -547,9 +585,10 @@ window.boardChart = {
     const BC = window.boardChart;
     const el = runtime?.liqCandleOverlayEl;
     const chart = runtime?.chart;
+    const series = runtime?.series;
     const bars = runtime._lastBars;
     const map = runtime._liqByBar;
-    if (!el || !chart || !bars?.length || !map) {
+    if (!el || !chart || !series || !bars?.length || !map) {
       if (el) el.innerHTML = "";
       return;
     }
@@ -559,7 +598,6 @@ window.boardChart = {
       return;
     }
     const offX = BC.overlayPlotOffsetX(runtime);
-    const minUsd = BC.LIQ_CANDLE.minUsd;
     const from = Math.max(0, Math.floor(range.from));
     const to = Math.min(bars.length - 1, Math.ceil(range.to));
     const parts = [];
@@ -573,11 +611,14 @@ window.boardChart = {
       if (!shortTxt && !longTxt) continue;
       const x = chart.timeScale().timeToCoordinate(bar.time);
       if (x == null || Number.isNaN(x)) continue;
+      const anchorY = series.priceToCoordinate(Math.max(bar.high, bar.open, bar.close));
+      if (anchorY == null || Number.isNaN(anchorY)) continue;
       const xPx = Math.round(x + offX);
+      const yPx = Math.round(anchorY - 4);
       const lines = [];
       if (shortTxt) lines.push(`<span class="psc-liq-c-sum short">${shortTxt}</span>`);
       if (longTxt) lines.push(`<span class="psc-liq-c-sum long">${longTxt}</span>`);
-      parts.push(`<div class="psc-liq-candle-tag" style="left:${xPx}px">${lines.join("")}</div>`);
+      parts.push(`<div class="psc-liq-candle-tag" style="left:${xPx}px;top:${yPx}px">${lines.join("")}</div>`);
     }
     el.innerHTML = parts.join("");
   },
@@ -636,7 +677,7 @@ window.boardChart = {
         const key = `${y == null ? "n" : Math.round(y * 16)}|${ax == null ? "x" : Math.round(ax)}`;
         if (key !== lastKey) {
           lastKey = key;
-          BC.syncChartOverlays(runtime);
+          BC.scheduleThrottledOverlaySync(runtime);
         }
       }
       runtime._overlayRafId = requestAnimationFrame(tick);
@@ -1072,7 +1113,7 @@ window.boardChart = {
       const chartEl = chartId ? document.getElementById(chartId) : null;
       if (chartEl?._boardRuntime) {
         if (sym) chartEl._boardRuntime._chartSymbol = sym;
-        BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym);
+        BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym, { skipLiqFetch: true });
       }
       BC.ensureBookPaneScroll(el);
       const sc = BC.bookScrollEl(el);
@@ -1361,6 +1402,7 @@ window.boardChart = {
       return ta - tb;
     });
     BC.patchLiveLastBar(bars, livePrice);
+    BC.maybeFitLivePriceScale(runtime, livePrice);
     runtime.series.setData(bars);
     if (runtime.volumeSeries) {
       runtime.volumeSeries.setData(
@@ -1383,6 +1425,8 @@ window.boardChart = {
     }
     if (runtime._liquidations?.length) {
       runtime._liqByBar = BC.aggregateLiqByBar(bars, runtime._liquidations, interval);
+    } else if (!runtime._liqByBar) {
+      runtime._liqByBar = null;
     }
     const container = document.getElementById(chartElId);
     if (container && runtime.chart && container.clientWidth > 0) {
