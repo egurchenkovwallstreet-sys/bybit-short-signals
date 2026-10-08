@@ -42,18 +42,20 @@ class X2RetraceTests(unittest.TestCase):
         now = 2_000_000_000_000
         bars = []
         ts = now - 50 * 3_600_000
-        pattern = [(100, 110), (105, 108), (102, 104), (98, 100)]
-        for o, h in pattern:
+        # Пик 110, затем понижающиеся вершины 107 и 105.
+        highs = [100, 105, 110, 106, 103, 104, 107, 104, 102, 100, 103, 105, 102, 100]
+        for h in highs:
+            o = h - 2
             bars.append(_bar(ts, o, h, o - 2, o))
             ts += 3_600_000
         for _ in range(40):
             bars.append(_bar(ts, 90, 92, 88, 90))
             ts += 3_600_000
         peaks = pivot_highs(bars, wing=2)
-        self.assertGreaterEqual(len(peaks), 2)
+        self.assertEqual([p["price"] for p in peaks], [110, 107, 105])
         pump_start = bars[0].timestamp
         count = lower_high_chain_count(bars, pump_start, "60", now, wing=2)
-        self.assertGreaterEqual(count, 1)
+        self.assertEqual(count, 2)
 
     def test_price_change_7d_positive(self) -> None:
         now = 3_000_000_000_000

@@ -5,7 +5,9 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import config
 from signal_engine.engine import Engine, _meets_turnover
 from signal_engine.evaluate import Reading
 from signal_engine.flow import (
@@ -371,9 +373,15 @@ class EngineTest(unittest.TestCase):
             updated = engine.scan(now + 1000)
             update = [item for item in updated if item["type"] == "signal"][0]
             self.assertEqual(update["data"]["event"], "update")
+            self.assertTrue(update["data"]["checks"]["liquidations_faded"])
+            # Колонка меняется только после подтверждения уровня.
+            self.assertEqual(update["data"]["strength"], 1)
+
+            with mock.patch.object(config, "WATCH_STAGE_CONFIRM_MS", 1000):
+                confirmed = engine.scan(now + 2000)
+            update = [item for item in confirmed if item["type"] == "signal"][0]
             self.assertEqual(update["data"]["strength"], 2)
             self.assertEqual(update["data"]["status"], "ФОРМИРОВАНИЕ")
-            self.assertTrue(update["data"]["checks"]["liquidations_faded"])
 
             entry = update["data"]["entry_price"]
             engine.ingest(
