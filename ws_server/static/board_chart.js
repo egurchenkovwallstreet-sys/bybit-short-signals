@@ -389,7 +389,8 @@ window.boardChart = {
       const y = series.priceToCoordinate(Number(z.price));
       if (y == null) continue;
       const yPx = Math.round(y);
-      const bar = Math.min(100, Math.max(10, Math.round(((Number(z.notional_usd) || 0) / maxN) * 100)));
+      const ratio = (Number(z.notional_usd) || 0) / maxN;
+      const bar = Math.min(96, Math.max(14, Math.round(ratio * 96)));
       const side = z.side === "short" ? "short" : "long";
       const src = z.source === "hist" ? "факт" : z.source === "model" ? "модель" : "смесь";
       parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · ~$${BC.formatBookSize(z.notional_usd)} · ${src}">
