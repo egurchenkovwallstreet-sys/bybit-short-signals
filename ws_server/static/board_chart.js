@@ -269,6 +269,39 @@ window.boardChart = {
     return chartEl || null;
   },
 
+  /** Pan/zoom по времени и цене; оверлеи синхронизируются в ensureBookOverlayHooks. */
+  chartInteractionDefaults() {
+    return {
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: { time: true, price: true },
+        mouseWheel: true,
+        pinch: true,
+      },
+      timeScale: {
+        timeVisible: true,
+        secondsVisible: false,
+        rightOffset: 8,
+        barSpacing: 7,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+      },
+      rightPriceScale: { borderColor: "#2c3544", autoScale: true },
+    };
+  },
+
+  markUserChartView(runtime) {
+    if (!runtime?.series || runtime._programmaticChartView) return;
+    runtime._userChartView = true;
+    runtime.series.priceScale().applyOptions({ autoScale: false });
+  },
+
   /** Горизонталь последней (формирующейся) свечи — правый край max-полоски liq. */
   lastCandleAnchorX(runtime) {
     const chart = runtime?.chart;
@@ -348,12 +381,23 @@ window.boardChart = {
     const BC = window.boardChart;
     if (!runtime?.chart || runtime._bookOverlayHooks) return;
     runtime._bookOverlayHooks = true;
-    const redraw = () => BC.syncChartOverlays(runtime);
+    const redraw = () => {
+      BC.markUserChartView(runtime);
+      BC.syncChartOverlays(runtime);
+    };
     runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
     if (typeof runtime.chart.timeScale().subscribeSizeChange === "function") {
       runtime.chart.timeScale().subscribeSizeChange(redraw);
     }
     BC.startOverlayPriceSync(runtime);
+    const host = runtime.chart?.chartElement?.() || runtime.bookOverlayEl?.parentElement;
+    if (host && !runtime._chartInputHooks) {
+      runtime._chartInputHooks = true;
+      const mark = () => BC.markUserChartView(runtime);
+      for (const ev of ["wheel", "mousedown", "touchstart"]) {
+        host.addEventListener(ev, mark, { passive: true });
+      }
+    }
   },
 
   renderBookChartOverlay(runtime, book, refPrice, symbol, options) {
@@ -903,14 +947,14 @@ window.boardChart = {
   },
 
   mount(runtime, chartElId) {
+    const BC = window.boardChart;
     if (runtime.chart) return;
     const container = document.getElementById(chartElId);
     if (!container || !window.LightweightCharts) return;
     runtime.chart = LightweightCharts.createChart(container, {
       layout: { background: { color: "#10141b" }, textColor: "#c5d0de" },
       grid: { vertLines: { color: "#222a36" }, horzLines: { color: "#222a36" } },
-      timeScale: { timeVisible: true, secondsVisible: false, rightOffset: 8, barSpacing: 7 },
-      rightPriceScale: { borderColor: "#2c3544" },
+      ...BC.chartInteractionDefaults(),
     });
     runtime.series = runtime.chart.addCandlestickSeries({
       upColor: "#3dd68c",
@@ -947,8 +991,16 @@ window.boardChart = {
   },
 
   drawCandles(runtime, candles, interval, resetScale, chartElId) {
+    const BC = window.boardChart;
     if (!runtime.series) return;
     runtime._chartInterval = interval;
+    if (resetScale) {
+      runtime._programmaticChartView = true;
+      runtime._userChartView = false;
+      runtime.series.priceScale().applyOptions({ autoScale: true });
+    } else if (runtime._userChartView) {
+      runtime.series.priceScale().applyOptions({ autoScale: false });
+    }
     const byTime = new Map();
     for (const candle of candles || []) {
       const time = window.boardChart.candleTime(candle.timestamp ?? candle.time, interval);
@@ -993,12 +1045,17 @@ window.boardChart = {
       runtime.chart.resize(container.clientWidth, container.clientHeight || 420);
     }
     if (resetScale && bars.length && runtime.chart) {
-      const step = window.boardChart.INTERVAL_SEC[interval] || 3600;
+      const step = BC.INTERVAL_SEC[interval] || 3600;
       const last = bars[bars.length - 1].time;
       const to = typeof last === "object" ? last : last + step;
       runtime.chart.timeScale().setVisibleRange({ from: bars[0].time, to });
     }
-    window.boardChart.syncBookOverlayForChart(chartElId);
+    if (resetScale) {
+      queueMicrotask(() => {
+        runtime._programmaticChartView = false;
+      });
+    }
+    BC.syncBookOverlayForChart(chartElId);
   },
 
   renderWalls(containerId, book) {
