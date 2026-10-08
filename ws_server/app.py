@@ -236,6 +236,17 @@ async def chart_liquidations(symbol: str) -> dict[str, Any]:
     return {"symbol": symbol, "liquidations": rows}
 
 
+@app.get("/api/liquidations-by-bar/{symbol}")
+async def liquidations_by_bar(symbol: str, interval: str = "60", bars: int = 10) -> dict[str, Any]:
+    """Суммы ликвидаций long/short по последним N свечам (быстро для графика)."""
+    if not _SYMBOL.fullmatch(symbol or ""):
+        raise HTTPException(status_code=400, detail="Некорректный тикер")
+    if interval not in {"1", "5", "15", "30", "60", "240", "D"}:
+        raise HTTPException(status_code=400, detail="Некорректный интервал")
+    hub: Hub = app.state.hub
+    return hub.cache.liquidations_by_bar(symbol, interval, bars)
+
+
 @app.get("/api/liquidation-zones/{symbol}")
 async def liquidation_zones(symbol: str, interval: str = "60") -> dict[str, Any]:
     """Оценочные зоны ликвидации (модель OI + история), не официальные данные Bybit."""

@@ -13,6 +13,16 @@ from typing import Any
 import config
 from signal_engine.outcomes import short_pnl_pct
 
+_KLINE_INTERVAL_MS: dict[str, int] = {
+    "1": 60_000,
+    "5": 300_000,
+    "15": 900_000,
+    "30": 1_800_000,
+    "60": 3_600_000,
+    "240": 14_400_000,
+    "D": 86_400_000,
+}
+
 
 def _ts_ms(raw: Any) -> int | None:
     try:
@@ -220,6 +230,62 @@ class MarketCache:
     def liquidations_for_chart(self, symbol: str) -> list[dict[str, Any]]:
         """Все ликвидации символа в окне DETAIL_CHART_WINDOW (без урезания до последних N событий)."""
         return _trim_time_window(self.liquidations.get(symbol, []), "time")
+
+    def liquidations_by_bar(self, symbol: str, interval: str = "60", bar_count: int = 10) -> dict[str, Any]:
+        """Суммы long/short ликвидаций по последним N свечам выбранного интервала."""
+        bar_count = max(1, min(int(bar_count or 10), 120))
+        candles = self.klines.get((symbol, interval), [])
+        if not candles:
+            for fallback in (interval, "15", "60", "240"):
+                candles = self.klines.get((symbol, fallback), [])
+                if candles:
+                    break
+        step_ms = _KLINE_INTERVAL_MS.get(interval, 3_600_000)
+        events = self.liquidations_for_chart(symbol)
+        tail = candles[-bar_count:] if candles else []
+        bars_out: list[dict[str, Any]] = []
+        for idx, candle in enumerate(tail):
+            start_ms = _ts_ms(candle.get("timestamp"))
+            if start_ms is None:
+                continue
+            end_ms = start_ms + step_ms
+            if idx + 1 < len(tail):
+                nxt = _ts_ms(tail[idx + 1].get("timestamp"))
+                if nxt is not None:
+                    end_ms = nxt
+            long_usd = 0.0
+            short_usd = 0.0
+            for ev in events:
+                ts = _ts_ms(ev.get("time"))
+                if ts is None or ts < start_ms or ts >= end_ms:
+                    continue
+                price = float(ev.get("price") or 0)
+                size = float(ev.get("size") or 0)
+                if price <= 0 or size <= 0:
+                    continue
+                usd = price * size
+                side = str(ev.get("side") or "")
+                if side == "Buy":
+                    long_usd += usd
+                elif side == "Sell":
+                    short_usd += usd
+            bar_time: int | dict[str, int]
+            sec = start_ms // 1000
+            if interval == "D":
+                from datetime import datetime, timezone
+
+                d = datetime.fromtimestamp(sec, tz=timezone.utc)
+                bar_time = {"year": d.year, "month": d.month, "day": d.day}
+            else:
+                bar_time = sec
+            bars_out.append(
+                {
+                    "time": bar_time,
+                    "long_usd": round(long_usd, 2),
+                    "short_usd": round(short_usd, 2),
+                }
+            )
+        return {"symbol": symbol, "interval": interval, "bars": bars_out}
 
     def view_board(self) -> list[dict[str, Any]]:
         """Колонки для браузера: мини-график и живой P&L шорта."""

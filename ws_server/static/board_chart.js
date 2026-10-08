@@ -21,10 +21,10 @@ window.boardChart = {
   _prefetchInflight: new Set(),
   /** Стакан в боковой панели: глубина ±10% от текущей цены. */
   BOOK_DEPTH_PCT: 0.1,
-  /** Стакан на графике: шире диапазон, крупнее бины. */
+  /** Стакан на графике — те же ±10% и бины, что в панели справа. */
   BOOK_CHART: {
-    depthPct: 0.35,
-    binTicks: 30,
+    depthPct: 0.1,
+    binTicks: 5,
   },
   /** Оценочные зоны ликвидации на графике (слева). */
   LIQ_CHART: {
@@ -36,12 +36,11 @@ window.boardChart = {
   /** Суммы ликвидаций у свечей (Buy=long, Sell=short). */
   LIQ_CANDLE: {
     minUsd: 500,
-    maxTooltipRows: 48,
-    /** Всегда подписывать последние N свечей (если есть данные ≥ minUsd). */
+    /** Подписи только на последних N свечах (любая сумма > 0). */
     recentBars: 10,
-    fetchMs: 20_000,
+    barFetchMs: 8_000,
   },
-  _liqChartFetch: new Map(),
+  _liqBarFetch: new Map(),
   _liqZonesFetch: new Map(),
   BOOK_PANEL: {
     maxGridRowsPerSide: 320,
@@ -427,6 +426,10 @@ window.boardChart = {
     runtime._liqByBar = null;
     runtime._lastBars = [];
     runtime._liqFetchGen = (runtime._liqFetchGen || 0) + 1;
+    if (runtime._bookOverlayTimer) clearTimeout(runtime._bookOverlayTimer);
+    runtime._bookOverlayTimer = 0;
+    if (runtime._liqBarLoadTimer) clearTimeout(runtime._liqBarLoadTimer);
+    runtime._liqBarLoadTimer = 0;
     if (runtime.bookOverlayEl) runtime.bookOverlayEl.innerHTML = "";
     if (runtime.liqOverlayEl) runtime.liqOverlayEl.innerHTML = "";
     if (runtime.liqCandleOverlayEl) runtime.liqCandleOverlayEl.innerHTML = "";
@@ -538,66 +541,86 @@ window.boardChart = {
     return map;
   },
 
-  mergeLiquidationEvents(existing, incoming) {
-    const BC = window.boardChart;
-    const byKey = new Map();
-    for (const ev of [...(existing || []), ...(incoming || [])]) {
-      const ts = BC.liqEventMs(ev.time ?? ev.timestamp);
-      if (!ts) continue;
-      const k = `${ts}|${ev.side}|${ev.price}|${ev.size}`;
-      byKey.set(k, ev);
-    }
-    return [...byKey.values()];
-  },
-
   setChartLiquidations(runtime, liquidations) {
     const BC = window.boardChart;
     if (!runtime) return;
-    if (!runtime._lastBars?.length) {
-      runtime._liquidations = Array.isArray(liquidations) ? liquidations : [];
-      return;
-    }
     runtime._liquidations = Array.isArray(liquidations) ? liquidations : [];
+    if (!runtime._lastBars?.length) return;
+    BC.scheduleLoadLiqBarSums(runtime);
+  },
+
+  scheduleLoadLiqBarSums(runtime) {
+    const BC = window.boardChart;
+    if (!runtime) return;
+    if (runtime._liqBarLoadTimer) clearTimeout(runtime._liqBarLoadTimer);
+    runtime._liqBarLoadTimer = setTimeout(() => {
+      runtime._liqBarLoadTimer = 0;
+      const sym = runtime._activeSymbol || runtime._chartSymbol;
+      void BC.loadLiqBarSums(runtime, sym, runtime._chartInterval);
+    }, 280);
+  },
+
+  applyLiqBarSums(runtime, barRows, interval) {
+    const BC = window.boardChart;
+    const iv = interval || runtime._chartInterval || "60";
+    const map = new Map();
+    for (const row of barRows || []) {
+      const time = BC.candleTime(row.time, iv);
+      if (!time) continue;
+      map.set(BC.barTimeKey(time), {
+        longUsd: Number(row.long_usd) || 0,
+        shortUsd: Number(row.short_usd) || 0,
+        events: [],
+        time,
+      });
+    }
     const bars = runtime._lastBars || [];
-    const iv = runtime._chartInterval || "60";
-    runtime._liqByBar = BC.aggregateLiqByBar(bars, runtime._liquidations, iv);
+    if (runtime._liquidations?.length && bars.length) {
+      const lastBar = bars[bars.length - 1];
+      const lastKey = BC.barTimeKey(lastBar.time);
+      const liveMap = BC.aggregateLiqByBar([lastBar], runtime._liquidations, iv);
+      const live = liveMap.get(lastKey);
+      if (live && (live.longUsd > 0 || live.shortUsd > 0)) {
+        map.set(lastKey, { longUsd: live.longUsd, shortUsd: live.shortUsd, events: [], time: lastBar.time });
+      }
+    }
+    runtime._liqByBar = map;
     BC.renderLiqCandleLabels(runtime);
   },
 
-  async ensureChartLiquidations(runtime, symbol) {
+  async loadLiqBarSums(runtime, symbol, interval) {
     const BC = window.boardChart;
     const sym = String(symbol || "").toUpperCase();
-    if (!sym || !runtime) return;
+    const iv = interval || runtime?._chartInterval || "60";
+    if (!sym || !runtime?._lastBars?.length) return;
     if (runtime._activeSymbol && sym !== runtime._activeSymbol) return;
+    const n = BC.LIQ_CANDLE.recentBars || 10;
+    const key = `${sym}|${iv}|${n}`;
     const now = Date.now();
-    const hit = BC._liqChartFetch.get(sym);
-    if (hit?.data && now - hit.ts < BC.LIQ_CANDLE.fetchMs) {
-      BC.setChartLiquidations(runtime, BC.mergeLiquidationEvents(runtime._liquidations, hit.data));
+    const hit = BC._liqBarFetch.get(key);
+    if (hit?.bars && now - hit.ts < BC.LIQ_CANDLE.barFetchMs) {
+      BC.applyLiqBarSums(runtime, hit.bars, iv);
       return;
     }
-    if (hit?.pending) {
-      await hit.pending;
-      return;
-    }
-    const job = fetch(`/api/liquidations/${encodeURIComponent(sym)}`)
+    if (hit?.pending) return;
+    const job = fetch(
+      `/api/liquidations-by-bar/${encodeURIComponent(sym)}?interval=${encodeURIComponent(iv)}&bars=${n}`,
+    )
       .then((r) => (r.ok ? r.json() : null))
       .then((body) => {
-        const rows = body?.liquidations;
-        if (Array.isArray(rows) && rows.length) {
-          BC._liqChartFetch.set(sym, { data: rows, ts: Date.now(), pending: null });
-          if (!runtime._activeSymbol || runtime._activeSymbol === sym) {
-            BC.setChartLiquidations(runtime, BC.mergeLiquidationEvents(runtime._liquidations, rows));
-          }
-        } else {
-          BC._liqChartFetch.set(sym, { data: hit?.data || [], ts: Date.now(), pending: null });
+        const rows = body?.bars;
+        if (!Array.isArray(rows)) return;
+        BC._liqBarFetch.set(key, { bars: rows, ts: Date.now(), pending: null });
+        if (!runtime._activeSymbol || runtime._activeSymbol === sym) {
+          BC.applyLiqBarSums(runtime, rows, iv);
         }
       })
       .catch(() => {})
       .finally(() => {
-        const c = BC._liqChartFetch.get(sym);
+        const c = BC._liqBarFetch.get(key);
         if (c) c.pending = null;
       });
-    BC._liqChartFetch.set(sym, { ...(hit || {}), pending: job });
+    BC._liqBarFetch.set(key, { ...(hit || {}), pending: job });
     await job;
   },
 
@@ -658,19 +681,16 @@ window.boardChart = {
     }
     const offX = BC.overlayPlotOffsetX(runtime);
     const recentN = BC.LIQ_CANDLE.recentBars || 10;
-    const visFrom = Math.max(0, Math.floor(range.from));
-    const visTo = Math.min(bars.length - 1, Math.ceil(range.to));
-    const recentStart = Math.max(0, bars.length - recentN);
-    const from = Math.min(visFrom, recentStart);
-    const to = Math.max(visTo, bars.length - 1);
+    const from = Math.max(0, bars.length - recentN);
+    const to = bars.length - 1;
     const parts = [];
     for (let i = from; i <= to; i++) {
       const bar = bars[i];
       const key = BC.barTimeKey(bar.time);
       const agg = map.get(key);
       if (!agg) continue;
-      const shortTxt = BC.formatLiqUsd(agg.shortUsd);
-      const longTxt = BC.formatLiqUsd(agg.longUsd);
+      const shortTxt = agg.shortUsd > 0 ? BC.formatBookSize(agg.shortUsd) : "";
+      const longTxt = agg.longUsd > 0 ? BC.formatBookSize(agg.longUsd) : "";
       if (!shortTxt && !longTxt) continue;
       const x = chart.timeScale().timeToCoordinate(bar.time);
       if (x == null || Number.isNaN(x)) continue;
@@ -696,25 +716,12 @@ window.boardChart = {
     }
     const key = BC.barTimeKey(param.time);
     const agg = map.get(key);
-    if (!agg?.events?.length) {
+    if (!agg || (agg.shortUsd <= 0 && agg.longUsd <= 0)) {
       tip.hidden = true;
       return;
     }
-    const host = tip.parentElement;
     const offX = BC.overlayPlotOffsetX(runtime);
-    const maxR = BC.LIQ_CANDLE.maxTooltipRows;
-    const rows = agg.events
-      .slice()
-      .sort((a, b) => b.usd - a.usd)
-      .slice(0, maxR)
-      .map((e) => {
-        const side = e.side === "Buy" ? "long" : e.side === "Sell" ? "short" : e.position || "?";
-        const cls = side === "short" ? "short" : "long";
-        return `<li class="${cls}">${BC.formatBookPrice(e.price)} · ${BC.formatBookSize(e.size)} · ~$${BC.formatBookSize(e.usd)}</li>`;
-      })
-      .join("");
-    const more = agg.events.length > maxR ? `<li class="quiet">+${agg.events.length - maxR} ещё</li>` : "";
-    tip.innerHTML = `<div class="psc-liq-candle-tip-head">Short $${BC.formatBookSize(agg.shortUsd)} · Long $${BC.formatBookSize(agg.longUsd)}</div><ul>${rows}${more}</ul>`;
+    tip.innerHTML = `<div class="psc-liq-candle-tip-head">Short $${BC.formatBookSize(agg.shortUsd)} · Long $${BC.formatBookSize(agg.longUsd)}</div>`;
     tip.hidden = false;
     const hostRect = host?.getBoundingClientRect();
     const left = Math.max(8, Math.min((host?.clientWidth || 400) - 220, param.point.x + offX + 12));
@@ -723,29 +730,17 @@ window.boardChart = {
     tip.style.top = `${top}px`;
   },
 
-  startOverlayPriceSync(runtime) {
+  scheduleBookChartOverlay(runtime, book, refPrice, symbol) {
     const BC = window.boardChart;
-    if (!runtime || runtime._overlayPriceSync) return;
-    runtime._overlayPriceSync = true;
-    let lastKey = "";
-    const tick = () => {
-      if (!runtime.series) {
-        runtime._overlayRafId = requestAnimationFrame(tick);
-        return;
-      }
-      const probe = runtime._overlayProbePrice;
-      if (probe != null && probe > 0) {
-        const y = runtime.series.priceToCoordinate(probe);
-        const ax = BC.lastCandleAnchorX(runtime);
-        const key = `${y == null ? "n" : Math.round(y * 16)}|${ax == null ? "x" : Math.round(ax)}`;
-        if (key !== lastKey) {
-          lastKey = key;
-          BC.scheduleThrottledOverlaySync(runtime);
-        }
-      }
-      runtime._overlayRafId = requestAnimationFrame(tick);
-    };
-    runtime._overlayRafId = requestAnimationFrame(tick);
+    if (!runtime) return;
+    runtime._pendingBookOverlay = { book, refPrice, symbol };
+    if (runtime._bookOverlayTimer) return;
+    runtime._bookOverlayTimer = setTimeout(() => {
+      runtime._bookOverlayTimer = 0;
+      const p = runtime._pendingBookOverlay;
+      runtime._pendingBookOverlay = null;
+      if (p) BC.renderBookChartOverlay(runtime, p.book, p.refPrice, p.symbol, { skipLiqFetch: true });
+    }, 320);
   },
 
   ensureBookOverlay(runtime, chartEl) {
@@ -784,15 +779,18 @@ window.boardChart = {
     const BC = window.boardChart;
     if (!runtime?.chart || runtime._bookOverlayHooks) return;
     runtime._bookOverlayHooks = true;
+    let rangeTimer = 0;
     const redraw = () => {
-      BC.markUserChartView(runtime);
-      BC.syncChartOverlays(runtime);
+      if (rangeTimer) clearTimeout(rangeTimer);
+      rangeTimer = setTimeout(() => {
+        rangeTimer = 0;
+        BC.syncChartOverlays(runtime);
+      }, 150);
     };
     runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
     if (typeof runtime.chart.timeScale().subscribeSizeChange === "function") {
       runtime.chart.timeScale().subscribeSizeChange(redraw);
     }
-    BC.startOverlayPriceSync(runtime);
     BC.ensureLiqCandleHooks(runtime);
     const host = runtime.chart?.chartElement?.() || runtime.bookOverlayEl?.parentElement;
     if (host && !runtime._chartInputHooks) {
@@ -819,7 +817,12 @@ window.boardChart = {
     if (sym) runtime._chartSymbol = sym;
     runtime._lastBookOverlay = { book, refPrice, symbol: sym };
     const chartCfg = BC.BOOK_CHART;
-    const data = BC.prepareBookDepth(book, refPrice, chartCfg.depthPct, chartCfg.binTicks);
+    const data = BC.prepareBookDepth(
+      book,
+      refPrice,
+      chartCfg.depthPct ?? BC.BOOK_DEPTH_PCT,
+      chartCfg.binTicks ?? BC.BOOK_PANEL.binTicks,
+    );
     const { mid, asks, bids } = data;
     if (!mid) {
       el.innerHTML = "";
@@ -896,13 +899,9 @@ window.boardChart = {
     BC.clearLiqPriceLines(runtime);
     const pendingOnly = (zones || [])
       .map((z) => {
-        const pending = Number(z.notional_pending_usd);
-        const vol =
-          pending > 0
-            ? pending
-            : Number(z.notional_cleared_usd) > 0
-              ? 0
-              : Number(z.notional_usd) || 0;
+        const pending = Number(z.notional_pending_usd) || 0;
+        const total = Number(z.notional_usd) || 0;
+        const vol = pending > 0 ? pending : total;
         return { ...z, _vol: vol };
       })
       .filter((z) => z._vol > 0);
@@ -1176,7 +1175,11 @@ window.boardChart = {
       const chartEl = chartId ? document.getElementById(chartId) : null;
       if (chartEl?._boardRuntime) {
         if (sym) chartEl._boardRuntime._chartSymbol = sym;
-        BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym, { skipLiqFetch: true });
+        if (isNewOpen || options?.centerMid) {
+          BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym, { skipLiqFetch: true });
+        } else {
+          BC.scheduleBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym);
+        }
       }
       BC.ensureBookPaneScroll(el);
       const sc = BC.bookScrollEl(el);
@@ -1486,11 +1489,6 @@ window.boardChart = {
     } else {
       runtime._lastCandleTime = null;
     }
-    if (runtime._liquidations?.length) {
-      runtime._liqByBar = BC.aggregateLiqByBar(bars, runtime._liquidations, interval);
-    } else if (!runtime._liqByBar) {
-      runtime._liqByBar = null;
-    }
     const container = document.getElementById(chartElId);
     if (container && runtime.chart && container.clientWidth > 0) {
       runtime.chart.resize(container.clientWidth, container.clientHeight || 420);
@@ -1511,8 +1509,7 @@ window.boardChart = {
       const ref = bars.length ? bars[bars.length - 1].close : runtime._overlayProbePrice;
       BC.refreshLiqZonesOverlay(runtime, runtime._chartSymbol, ref);
     }
-    const liqSym = runtime._activeSymbol || runtime._chartSymbol;
-    if (liqSym) void BC.ensureChartLiquidations(runtime, liqSym);
+    BC.scheduleLoadLiqBarSums(runtime);
   },
 
   renderWalls(containerId, book) {
