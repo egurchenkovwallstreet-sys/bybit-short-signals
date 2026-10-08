@@ -16,6 +16,11 @@ window.boardChart = {
   PREFETCH_CONCURRENCY: 3,
   /** Стакан в боковой панели: глубина ±10% от текущей цены. */
   BOOK_DEPTH_PCT: 0.1,
+  /** Стакан на графике: шире диапазон, крупнее бины. */
+  BOOK_CHART: {
+    depthPct: 0.35,
+    binTicks: 30,
+  },
   BOOK_PANEL: {
     maxGridRowsPerSide: 320,
     /** Объединение уровней: N тиков цены в одну строку (сумма объёма). */
@@ -152,7 +157,7 @@ window.boardChart = {
     return out;
   },
 
-  prepareBookDepth(book, refPrice, depthPct) {
+  prepareBookDepth(book, refPrice, depthPct, binTicksOverride) {
     const BC = window.boardChart;
     const band = depthPct ?? BC.BOOK_DEPTH_PCT;
     const mid = BC.bookMidPrice(book, refPrice);
@@ -164,7 +169,7 @@ window.boardChart = {
     const inBand = (p) => p >= lo - 1e-12 && p <= hi + 1e-12;
     const bidsRaw = BC.normalizeBookSide(book?.bids).filter(([p]) => inBand(p));
     const asksRaw = BC.normalizeBookSide(book?.asks).filter(([p]) => inBand(p));
-    const binTicks = BC.BOOK_PANEL.binTicks ?? 10;
+    const binTicks = binTicksOverride ?? BC.BOOK_PANEL.binTicks ?? 10;
     const step = BC.bookBinSize(mid, binTicks);
     const bidsAgg = BC.aggregateBookLevels(bidsRaw, true, mid, binTicks);
     const asksAgg = BC.aggregateBookLevels(asksRaw, false, mid, binTicks);
@@ -282,32 +287,28 @@ window.boardChart = {
     const series = runtime?.series;
     if (!el || !series) return;
     runtime._lastBookOverlay = { book, refPrice };
-    const data = BC.prepareBookDepth(book, refPrice);
+    const chartCfg = BC.BOOK_CHART;
+    const data = BC.prepareBookDepth(book, refPrice, chartCfg.depthPct, chartCfg.binTicks);
     const { mid, asks, bids } = data;
     if (!mid) {
       el.innerHTML = "";
       return;
     }
-    const levels = [
-      ...asks.map((r) => ({ ...r, side: "ask" })),
-      ...bids.map((r) => ({ ...r, side: "bid" })),
+    const withVol = [
+      ...asks.filter((r) => r.size > 0).map((r) => ({ ...r, side: "ask" })),
+      ...bids.filter((r) => r.size > 0).map((r) => ({ ...r, side: "bid" })),
     ];
-    const withVol = levels.filter((r) => r.size > 0);
     const maxVol = Math.max(...withVol.map((r) => r.size), 1);
     const parts = [];
     const midY = series.priceToCoordinate(mid);
     if (midY != null) {
       parts.push(`<div class="psc-book-chart-mid" style="top:${Math.round(midY)}px"></div>`);
     }
-    for (const r of levels) {
+    for (const r of withVol) {
       const y = series.priceToCoordinate(r.price);
       if (y == null) continue;
       const yPx = Math.round(y);
-      if (r.size <= 0) {
-        parts.push(`<div class="psc-book-chart-row empty ${r.side}" style="top:${yPx}px"></div>`);
-        continue;
-      }
-      const bar = Math.max(10, Math.round((r.size / maxVol) * 100));
+      const bar = Math.min(100, Math.max(12, Math.round((r.size / maxVol) * 50) * 2));
       parts.push(`<div class="psc-book-chart-row ${r.side}" style="top:${yPx}px" title="${BC.formatBookPrice(r.price)} · ${BC.formatBookSize(r.size)}">
         <span class="psc-book-chart-bar" style="width:${bar}%"></span>
         <span class="psc-book-chart-lbl">${BC.formatBookPrice(r.price)}</span>
