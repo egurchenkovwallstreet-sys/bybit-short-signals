@@ -273,6 +273,50 @@ window.boardChart = {
     if (!overlayEl || !host) return;
     if (overlayEl.parentElement !== host) {
       host.insertBefore(overlayEl, beforeEl || null);
+    } else if (beforeEl && overlayEl.nextElementSibling !== beforeEl) {
+      host.insertBefore(overlayEl, beforeEl);
+    }
+  },
+
+  overlayPlotOffsetX(runtime) {
+    const chartEl = runtime?._chartContainer;
+    const host = runtime?.liqOverlayEl?.parentElement;
+    if (!chartEl || !host) return 0;
+    return chartEl.getBoundingClientRect().left - host.getBoundingClientRect().left;
+  },
+
+  clearLiqPriceLines(runtime) {
+    if (!runtime?.series || !runtime._liqPriceLines?.length) return;
+    for (const pl of runtime._liqPriceLines) {
+      try {
+        runtime.series.removePriceLine(pl);
+      } catch (_e) {
+        /* ignore */
+      }
+    }
+    runtime._liqPriceLines = [];
+  },
+
+  syncLiqPriceLines(runtime, list) {
+    const BC = window.boardChart;
+    if (!runtime?.series) return;
+    BC.clearLiqPriceLines(runtime);
+    if (!list?.length) return;
+    runtime._liqPriceLines = [];
+    for (const z of list.slice(0, 20)) {
+      const price = Number(z.price);
+      if (!price || Number.isNaN(price)) continue;
+      const color = z.side === "short" ? "rgba(255, 93, 115, 0.5)" : "rgba(61, 214, 140, 0.5)";
+      runtime._liqPriceLines.push(
+        runtime.series.createPriceLine({
+          price,
+          color,
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: false,
+          title: "",
+        }),
+      );
     }
   },
 
@@ -453,9 +497,9 @@ window.boardChart = {
     const key = `${symbol}|${iv}`;
     const bucket = BC.getAssetBucket(symbol);
     const now = Date.now();
-    if (bucket.liq && now - bucket.liqAt < BC.LIQ_CHART.refreshMs) return bucket.liq;
+    if (bucket.liq?.zones?.length && now - bucket.liqAt < BC.LIQ_CHART.refreshMs) return bucket.liq;
     const cached = BC._liqZonesFetch.get(key);
-    if (cached?.data && now - cached.ts < BC.LIQ_CHART.refreshMs) return cached.data;
+    if (cached?.data?.zones?.length && now - cached.ts < BC.LIQ_CHART.refreshMs) return cached.data;
     if (cached?.pending) return cached.pending;
     const job = BC._fetchLiqZonesRaw(symbol, iv)
       .catch(() => null)
@@ -464,8 +508,11 @@ window.boardChart = {
         if (c) c.pending = null;
       });
     BC._liqZonesFetch.set(key, { ...(cached || {}), pending: job });
-    const data = await job;
-    if (data) {
+    let data = await job;
+    if (data && !data.zones?.length) {
+      data = await BC._fetchLiqZonesRaw(symbol, iv);
+    }
+    if (data?.zones?.length) {
       bucket.liq = data;
       bucket.liqAt = now;
       BC._liqZonesFetch.set(key, { data, ts: now, pending: null });
@@ -482,19 +529,23 @@ window.boardChart = {
     const list = zones || [];
     if (!list.length) {
       el.innerHTML = "";
+      BC.clearLiqPriceLines(runtime);
       return;
     }
+    BC.syncLiqPriceLines(runtime, list);
     const maxN = Math.max(...list.map((z) => Number(z.notional_usd) || 0), 1);
     const anchorX = BC.lastCandleAnchorX(runtime);
     const hostW = el.parentElement?.clientWidth || el.clientWidth || 640;
-    const maxPx = anchorX != null ? Math.round(anchorX) : Math.round(hostW * 0.78);
+    const offX = BC.overlayPlotOffsetX(runtime);
+    const rawAnchor = anchorX != null ? Math.round(anchorX + offX) : null;
+    const maxPx = rawAnchor != null && rawAnchor > 12 ? rawAnchor : Math.round(hostW * 0.82);
     const parts = [];
     for (const z of list) {
       const y = series.priceToCoordinate(Number(z.price));
       if (y == null) continue;
       const yPx = Math.round(y);
       const ratio = (Number(z.notional_usd) || 0) / maxN;
-      const widthPx = Math.max(10, Math.round(ratio * maxPx));
+      const widthPx = Math.max(16, Math.round(ratio * maxPx));
       const side = z.side === "short" ? "short" : "long";
       const src = z.source === "hist" ? "факт" : z.source === "model" ? "модель" : "смесь";
       parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · ~$${BC.formatBookSize(z.notional_usd)} · ${src}">
@@ -509,8 +560,9 @@ window.boardChart = {
     if (!symbol || !runtime) return;
     const interval = runtime._chartInterval || "60";
     void BC.fetchLiqZones(symbol, interval).then((data) => {
-      if (!data?.zones) return;
+      if (!data?.zones?.length) return;
       const mark = Number(data.mark) || Number(refPrice);
+      if (!mark) return;
       runtime._lastLiqCtx = { zones: data.zones, mark };
       BC.renderLiqChartOverlay(runtime, data.zones, mark);
     });
@@ -747,7 +799,10 @@ window.boardChart = {
       el._bookCtx = { book: b, refPrice, symbol: sym };
       const chartId = BC.bookChartIdForPane(containerId);
       const chartEl = chartId ? document.getElementById(chartId) : null;
-      if (chartEl?._boardRuntime) BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym);
+      if (chartEl?._boardRuntime) {
+        if (sym) chartEl._boardRuntime._chartSymbol = sym;
+        BC.renderBookChartOverlay(chartEl._boardRuntime, b, refPrice, sym);
+      }
       BC.ensureBookPaneScroll(el);
       const sc = BC.bookScrollEl(el);
       if (options?.centerMid || isNewOpen) BC.scrollBookToMid(el);
@@ -957,9 +1012,13 @@ window.boardChart = {
 
   mount(runtime, chartElId) {
     const BC = window.boardChart;
-    if (runtime.chart) return;
     const container = document.getElementById(chartElId);
     if (!container || !window.LightweightCharts) return;
+    runtime._chartContainer = container;
+    if (runtime.chart) {
+      BC.ensureBookOverlay(runtime, container);
+      return;
+    }
     runtime.chart = LightweightCharts.createChart(container, {
       layout: { background: { color: "#10141b" }, textColor: "#c5d0de" },
       grid: { vertLines: { color: "#222a36" }, horzLines: { color: "#222a36" } },

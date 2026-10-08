@@ -152,6 +152,17 @@ def _merge_bins(*parts: dict[tuple[str, float], float]) -> dict[tuple[str, float
     return out
 
 
+def _anchor_bins_from_mark(mark: float) -> dict[tuple[str, float], float]:
+    """Типовые уровни isolated-liq от текущей mark, если нет OI/истории."""
+    bins: dict[tuple[str, float], float] = {}
+    base = max(mark * 6000.0, 500.0)
+    for lev, w in LEVERAGE_WEIGHTS:
+        n = base * w
+        _add_bin(bins, "long", isolated_liq_long(mark, lev), mark, n)
+        _add_bin(bins, "short", isolated_liq_short(mark, lev), mark, n * 0.9)
+    return bins
+
+
 def estimate_liquidation_zones(
     *,
     mark: float,
@@ -179,6 +190,8 @@ def estimate_liquidation_zones(
     model_bins = _model_from_oi(oi_rows or [], candles or [], mark, long_w, short_w)
     hist_bins = _hist_from_liquidations(liquidations or [], mark, now_ms)
     merged = _merge_bins(model_bins, hist_bins)
+    if not merged:
+        merged = _anchor_bins_from_mark(mark)
 
     zones: list[dict[str, Any]] = []
     for (side, price), notional in merged.items():
@@ -192,6 +205,8 @@ def estimate_liquidation_zones(
         if (side, price) in hist_bins and (side, price) not in model_bins:
             src = "hist"
         elif (side, price) in model_bins and (side, price) not in hist_bins:
+            src = "model"
+        elif not hist_bins and not model_bins:
             src = "model"
         zones.append(
             {
