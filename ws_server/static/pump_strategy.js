@@ -88,6 +88,12 @@ function togglePumpStrategySymbol(symbol) {
   if (window.signalSocket && window.signalSocket.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "select_pump_strategy", symbol }));
   }
+  window.boardChart.scheduleAssetsPrefetch([symbol], {
+    intervals: [pumpStrategyState.interval, "60"],
+    book: true,
+    liq: true,
+    priority: "high",
+  });
   void refreshPumpStrategyChart(true);
 }
 
@@ -187,66 +193,18 @@ function findPumpStrategyRow(symbol) {
 
 function schedulePrefetchForAll() {
   const symbols = [...new Set(pumpStrategyState.signals.map((r) => r.symbol).filter(Boolean))];
-  for (const symbol of symbols) {
-    enqueuePrefetch(symbol, pumpStrategyState.interval);
-    enqueuePrefetch(symbol, "60");
-  }
-  drainPrefetchQueue();
-}
-
-function enqueuePrefetch(symbol, interval) {
-  const key = `${symbol}:${interval}`;
-  const bucket = pumpStrategyState.prefetch.get(symbol) || { intervals: new Map(), book: null };
-  if (bucket.intervals.has(interval)) return;
-  if (pumpStrategyState.prefetchQueue.some((job) => job.key === key)) return;
-  pumpStrategyState.prefetchQueue.push({ symbol, interval, key });
-  pumpStrategyState.prefetch.set(symbol, bucket);
-}
-
-function drainPrefetchQueue() {
-  while (
-    pumpStrategyState.prefetchActive < PSC_PREFETCH_CONCURRENCY &&
-    pumpStrategyState.prefetchQueue.length
-  ) {
-    const job = pumpStrategyState.prefetchQueue.shift();
-    if (!job) break;
-    pumpStrategyState.prefetchActive += 1;
-    void prefetchKlines(job.symbol, job.interval).finally(() => {
-      pumpStrategyState.prefetchActive -= 1;
-      drainPrefetchQueue();
-    });
-  }
-}
-
-async function prefetchKlines(symbol, interval) {
-  try {
-    const q = new URLSearchParams({
-      interval,
-      days: String(PSC_FETCH_DAYS),
-      refresh: "1",
-    });
-    const res = await fetch(`/api/klines/${encodeURIComponent(symbol)}?${q}`);
-    if (!res.ok) return;
-    const payload = await res.json();
-    const candles = payload.candles || [];
-    const bucket = pumpStrategyState.prefetch.get(symbol) || { intervals: new Map(), book: null };
-    bucket.intervals.set(interval, candles);
-    pumpStrategyState.prefetch.set(symbol, bucket);
-  } catch (_e) {
-    /* ignore */
-  }
+  window.boardChart.scheduleAssetsPrefetch(symbols, {
+    intervals: [pumpStrategyState.interval, "60"],
+    book: true,
+    liq: true,
+    priority: "low",
+  });
 }
 
 async function ensurePumpStrategyCandles(symbol, interval) {
-  const bucket = pumpStrategyState.prefetch.get(symbol);
-  const cached = bucket?.intervals?.get(interval);
-  if (cached && cached.length >= 20) return cached;
-  await prefetchKlines(symbol, interval);
-  const again = pumpStrategyState.prefetch.get(symbol)?.intervals?.get(interval);
-  if (again?.length) return again;
-  const detail = pumpStrategyState.detail;
-  if (detail?.candles?.length && detail.interval === interval) return detail.candles;
-  return [];
+  return window.boardChart.ensureCandles(null, symbol, interval, pumpStrategyState.detail, {
+    refreshFallback: pumpStrategyState.selected === symbol,
+  });
 }
 
 function renderPumpStrategyBoard() {
@@ -386,9 +344,21 @@ function mountPumpStrategyChart() {
 
 async function refreshPumpStrategyChart(resetScale) {
   const symbol = pumpStrategyState.selected;
-  if (!symbol || !pumpStrategyState.series) return;
+  if (!symbol) return;
+  mountPumpStrategyChart();
+  if (!pumpStrategyState.series) return;
+  const BC = window.boardChart;
+  if (!resetScale) {
+    updatePumpStrategyLiveFields();
+    const now = Date.now();
+    if (pumpStrategyState._chartPullAt && now - pumpStrategyState._chartPullAt < 15_000) return;
+    pumpStrategyState._chartPullAt = now;
+  }
   const gen = ++pumpStrategyState.chartGen;
   const interval = pumpStrategyState.interval;
+  BC.scheduleAssetsPrefetch([symbol], { intervals: [interval], book: true, liq: true, priority: "high" });
+  const cached = BC.getCachedCandles(symbol, interval);
+  if (cached.length >= 24) drawPumpStrategyCandles(cached, interval, resetScale);
   const candles = await ensurePumpStrategyCandles(symbol, interval);
   if (gen !== pumpStrategyState.chartGen) return;
   if (pumpStrategyState.detail) pumpStrategyState.detail.candles = candles;

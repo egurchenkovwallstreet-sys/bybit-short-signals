@@ -47,6 +47,12 @@ function toggleX2Symbol(symbol) {
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "select_x2_retrace", symbol }));
   }
+  window.boardChart.scheduleAssetsPrefetch([symbol], {
+    intervals: [x2State.interval, "60", "240"],
+    book: true,
+    liq: true,
+    priority: "high",
+  });
   void refreshX2Chart(true);
 }
 
@@ -146,15 +152,21 @@ function scheduleX2Prefetch() {
 
 async function refreshX2Chart(resetScale) {
   const symbol = x2State.selected;
-  if (!symbol || !x2State.chart.series) return;
+  if (!symbol) return;
+  if (!x2State.chart.series) window.boardChart.mount(x2State.chart, X2_CHART.chart);
+  if (!x2State.chart.series) return;
+  const BC = window.boardChart;
+  if (!resetScale) {
+    updateX2Live();
+    const now = Date.now();
+    if (x2State._chartPullAt && now - x2State._chartPullAt < 15_000) return;
+    x2State._chartPullAt = now;
+  }
   const gen = ++x2State.chart.chartGen;
   const interval = x2State.interval;
-  const candles = await window.boardChart.ensureCandles(
-    x2State.prefetch,
-    symbol,
-    interval,
-    x2State.detail,
-  );
+  BC.scheduleAssetsPrefetch([symbol], { intervals: [interval], book: true, liq: true, priority: "high" });
+  BC.paintCandlesFromCache(x2State.chart, symbol, interval, resetScale, X2_CHART.chart);
+  const candles = await BC.ensureCandles(null, symbol, interval, x2State.detail, { refreshFallback: resetScale });
   if (gen !== x2State.chart.chartGen) return;
   if (x2State.detail) {
     x2State.detail.candles = candles;

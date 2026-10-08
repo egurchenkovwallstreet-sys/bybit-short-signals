@@ -56,6 +56,12 @@ function togglePumpScanSymbol(symbol) {
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "select_pump_scan", symbol }));
   }
+  window.boardChart.scheduleAssetsPrefetch([symbol], {
+    intervals: [pumpState.interval, "15", "60"],
+    book: true,
+    liq: true,
+    priority: "high",
+  });
   void refreshPumpScanChart(true);
 }
 
@@ -160,15 +166,21 @@ function schedulePumpScanPrefetch() {
 
 async function refreshPumpScanChart(resetScale) {
   const symbol = pumpState.selected;
-  if (!symbol || !pumpState.chart.series) return;
+  if (!symbol) return;
+  if (!pumpState.chart.series) window.boardChart.mount(pumpState.chart, PUMP_CHART.chart);
+  if (!pumpState.chart.series) return;
+  const BC = window.boardChart;
+  if (!resetScale) {
+    updatePumpScanLive();
+    const now = Date.now();
+    if (pumpState._chartPullAt && now - pumpState._chartPullAt < 15_000) return;
+    pumpState._chartPullAt = now;
+  }
   const gen = ++pumpState.chart.chartGen;
   const interval = pumpState.interval;
-  const candles = await window.boardChart.ensureCandles(
-    pumpState.prefetch,
-    symbol,
-    interval,
-    pumpState.detail,
-  );
+  BC.scheduleAssetsPrefetch([symbol], { intervals: [interval], book: true, liq: true, priority: "high" });
+  BC.paintCandlesFromCache(pumpState.chart, symbol, interval, resetScale, PUMP_CHART.chart);
+  const candles = await BC.ensureCandles(null, symbol, interval, pumpState.detail, { refreshFallback: resetScale });
   if (gen !== pumpState.chart.chartGen) return;
   if (pumpState.detail) {
     pumpState.detail.candles = candles;

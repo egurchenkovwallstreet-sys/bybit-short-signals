@@ -13,7 +13,12 @@ window.boardChart = {
   FETCH_DAYS: 30,
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
-  PREFETCH_CONCURRENCY: 3,
+  PREFETCH_CONCURRENCY: 4,
+  PREFETCH_COOLDOWN_MS: 90_000,
+  _assetCache: new Map(),
+  _prefetchQueue: [],
+  _prefetchActive: 0,
+  _prefetchInflight: new Set(),
   /** Стакан в боковой панели: глубина ±10% от текущей цены. */
   BOOK_DEPTH_PCT: 0.1,
   /** Стакан на графике: шире диапазон, крупнее бины. */
@@ -344,13 +349,15 @@ window.boardChart = {
 
   async fetchLiqZones(symbol, interval) {
     const BC = window.boardChart;
-    const key = `${symbol}|${interval || "60"}`;
-    const cached = BC._liqZonesFetch.get(key);
+    const iv = interval || "60";
+    const key = `${symbol}|${iv}`;
+    const bucket = BC.getAssetBucket(symbol);
     const now = Date.now();
+    if (bucket.liq && now - bucket.liqAt < BC.LIQ_CHART.refreshMs) return bucket.liq;
+    const cached = BC._liqZonesFetch.get(key);
     if (cached?.data && now - cached.ts < BC.LIQ_CHART.refreshMs) return cached.data;
     if (cached?.pending) return cached.pending;
-    const job = fetch(`/api/liquidation-zones/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval || "60")}`)
-      .then((res) => (res.ok ? res.json() : null))
+    const job = BC._fetchLiqZonesRaw(symbol, iv)
       .catch(() => null)
       .finally(() => {
         const c = BC._liqZonesFetch.get(key);
@@ -358,7 +365,11 @@ window.boardChart = {
       });
     BC._liqZonesFetch.set(key, { ...(cached || {}), pending: job });
     const data = await job;
-    if (data) BC._liqZonesFetch.set(key, { data, ts: now, pending: null });
+    if (data) {
+      bucket.liq = data;
+      bucket.liqAt = now;
+      BC._liqZonesFetch.set(key, { data, ts: now, pending: null });
+    }
     return data;
   },
 
@@ -472,12 +483,144 @@ window.boardChart = {
     return BC.normalizeBookSide(book?.bids).length + BC.normalizeBookSide(book?.asks).length;
   },
 
-  async fetchBookFromApi(symbol) {
+  getAssetBucket(symbol) {
+    const BC = window.boardChart;
+    if (!symbol) return { intervals: new Map(), book: null, liq: null };
+    let bucket = BC._assetCache.get(symbol);
+    if (!bucket) {
+      bucket = { intervals: new Map(), intervalAt: new Map(), book: null, bookAt: 0, liq: null, liqAt: 0 };
+      BC._assetCache.set(symbol, bucket);
+    }
+    return bucket;
+  },
+
+  getCachedCandles(symbol, interval) {
+    return window.boardChart.getAssetBucket(symbol).intervals.get(interval) || [];
+  },
+
+  paintCandlesFromCache(runtime, symbol, interval, resetScale, chartElId) {
+    const BC = window.boardChart;
+    const candles = BC.getCachedCandles(symbol, interval);
+    if (candles.length < 24 || !runtime?.series) return false;
+    BC.drawCandles(runtime, candles, interval, resetScale, chartElId);
+    return true;
+  },
+
+  scheduleAssetsPrefetch(symbols, options) {
+    const BC = window.boardChart;
+    const list = [...new Set((symbols || []).filter(Boolean))];
+    if (!list.length) return;
+    const ivList =
+      options?.intervals === undefined ? ["15", "60"] : Array.isArray(options.intervals) ? options.intervals : ["15", "60"];
+    const priority = options?.priority === "high" ? 0 : 1;
+    const wantBook = options?.book !== false;
+    const wantLiq = options?.liq !== false;
+    for (const symbol of list) {
+      for (const interval of ivList) {
+        BC._enqueueAssetJob({ kind: "klines", symbol, interval, priority, key: `k:${symbol}:${interval}` });
+      }
+      if (wantBook) BC._enqueueAssetJob({ kind: "book", symbol, priority, key: `b:${symbol}` });
+      if (wantLiq && ivList.length) {
+        const iv = ivList[0] || "60";
+        BC._enqueueAssetJob({ kind: "liq", symbol, interval: iv, priority, key: `l:${symbol}:${iv}` });
+      }
+    }
+    BC._drainAssetPrefetch();
+  },
+
+  _enqueueAssetJob(job) {
+    const BC = window.boardChart;
+    if (BC._prefetchInflight.has(job.key)) return;
+    const bucket = BC.getAssetBucket(job.symbol);
+    const now = Date.now();
+    if (job.kind === "klines") {
+      const candles = bucket.intervals.get(job.interval) || [];
+      const at = bucket.intervalAt.get(job.interval) || 0;
+      const need = BC.minBarsForDays(job.interval, BC.FETCH_DAYS);
+      if (candles.length >= Math.min(need, 120) && now - at < BC.PREFETCH_COOLDOWN_MS) return;
+      if (BC._prefetchQueue.some((j) => j.key === job.key)) return;
+    } else if (job.kind === "book") {
+      if (bucket.book && BC.bookLevelCount(bucket.book) >= 3 && now - bucket.bookAt < BC.PREFETCH_COOLDOWN_MS) return;
+      if (BC._prefetchQueue.some((j) => j.key === job.key)) return;
+    } else if (job.kind === "liq") {
+      if (bucket.liq && now - bucket.liqAt < BC.LIQ_CHART.refreshMs) return;
+      if (BC._prefetchQueue.some((j) => j.key === job.key)) return;
+    }
+    if (job.priority === 0) BC._prefetchQueue.unshift(job);
+    else BC._prefetchQueue.push(job);
+  },
+
+  _drainAssetPrefetch() {
+    const BC = window.boardChart;
+    while (BC._prefetchActive < BC.PREFETCH_CONCURRENCY && BC._prefetchQueue.length) {
+      const job = BC._prefetchQueue.shift();
+      if (!job) break;
+      BC._prefetchActive += 1;
+      BC._prefetchInflight.add(job.key);
+      void BC._runPrefetchJob(job)
+        .catch(() => {})
+        .finally(() => {
+          BC._prefetchInflight.delete(job.key);
+          BC._prefetchActive -= 1;
+          BC._drainAssetPrefetch();
+        });
+    }
+  },
+
+  async _runPrefetchJob(job) {
+    const BC = window.boardChart;
+    const bucket = BC.getAssetBucket(job.symbol);
+    if (job.kind === "klines") {
+      const candles = await BC._fetchKlines(job.symbol, job.interval, false);
+      if (candles.length) {
+        bucket.intervals.set(job.interval, candles);
+        bucket.intervalAt.set(job.interval, Date.now());
+      }
+      return;
+    }
+    if (job.kind === "book") {
+      const book = await BC.fetchBookFromApi(job.symbol, false);
+      if (book && BC.bookLevelCount(book) >= 3) {
+        bucket.book = book;
+        bucket.bookAt = Date.now();
+      }
+      return;
+    }
+    if (job.kind === "liq") {
+      const data = await BC._fetchLiqZonesRaw(job.symbol, job.interval || "60");
+      if (data) {
+        bucket.liq = data;
+        bucket.liqAt = Date.now();
+      }
+    }
+  },
+
+  async fetchBookFromApi(symbol, refresh) {
+    const force = refresh === true;
     try {
-      const res = await fetch(`/api/orderbook/${encodeURIComponent(symbol)}?refresh=1`);
+      const q = force ? "?refresh=1" : "";
+      const res = await fetch(`/api/orderbook/${encodeURIComponent(symbol)}${q}`);
       if (!res.ok) return null;
       const payload = await res.json();
-      return payload.book || null;
+      const book = payload.book || null;
+      if (book && window.boardChart.bookLevelCount(book) >= 3) {
+        const bucket = window.boardChart.getAssetBucket(symbol);
+        bucket.book = book;
+        bucket.bookAt = Date.now();
+      }
+      return book;
+    } catch (_e) {
+      return null;
+    }
+  },
+
+  async _fetchLiqZonesRaw(symbol, interval) {
+    try {
+      const res = await fetch(
+        `/api/liquidation-zones/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval || "60")}`,
+      );
+      if (!res.ok) return null;
+      return await res.json();
     } catch (_e) {
       return null;
     }
@@ -508,24 +651,31 @@ window.boardChart = {
       if (options?.centerMid || isNewOpen) BC.scrollBookToMid(el);
       else if (el._bookUserScrolled) sc.scrollTop = prevScroll;
     };
-    if (book && window.boardChart.bookLevelCount(book) >= 3) {
+    const cached = sym ? BC.getAssetBucket(sym).book : null;
+    if ((!book || BC.bookLevelCount(book) < 3) && cached && BC.bookLevelCount(cached) >= 3) {
+      book = cached;
+    }
+    if (book && BC.bookLevelCount(book) >= 3) {
       paint(book);
+      BC.scheduleAssetsPrefetch([sym], { intervals: [], book: true, liq: false, priority: "low" });
       return;
     }
-    el.innerHTML = '<p class="quiet">Загрузка стакана с биржи…</p>';
+    el.innerHTML = '<p class="quiet">Загрузка стакана…</p>';
     if (!sym) return;
-    const pending = window.boardChart._bookFetch.get(sym);
+    const pending = BC._bookFetch.get(sym);
     if (pending) {
       void pending.then((b) => b && paint(b));
       return;
     }
-    const job = window.boardChart.fetchBookFromApi(sym).finally(() => {
-      window.boardChart._bookFetch.delete(sym);
-    });
-    window.boardChart._bookFetch.set(sym, job);
+    const job = BC.fetchBookFromApi(sym, false)
+      .then((b) => b || BC.fetchBookFromApi(sym, true))
+      .finally(() => {
+        BC._bookFetch.delete(sym);
+      });
+    BC._bookFetch.set(sym, job);
     void job.then((b) => {
       if (b) paint(b);
-      else el.innerHTML = '<p class="quiet">Не удалось получить стакан. Повтор через несколько секунд.</p>';
+      else el.innerHTML = '<p class="quiet">Стакан пока недоступен — идёт фоновая загрузка.</p>';
     });
   },
 
@@ -540,7 +690,7 @@ window.boardChart = {
   },
 
   createPrefetchStore() {
-    return { map: new Map(), queue: [], active: 0 };
+    return { map: window.boardChart._assetCache, queue: [], active: 0 };
   },
 
   minBarsForDays(interval, days) {
@@ -647,49 +797,22 @@ window.boardChart = {
     });
   },
 
-  schedulePrefetch(store, symbols, intervals) {
-    const list = intervals?.length ? intervals : ["15"];
-    for (const symbol of symbols) {
-      for (const interval of list) {
-        window.boardChart._enqueuePrefetch(store, symbol, interval);
-      }
-    }
-    window.boardChart._drainPrefetch(store);
+  schedulePrefetch(_store, symbols, intervals) {
+    window.boardChart.scheduleAssetsPrefetch(symbols, {
+      intervals: intervals?.length ? intervals : ["15", "60"],
+      book: true,
+      liq: true,
+      priority: "low",
+    });
   },
 
-  _enqueuePrefetch(store, symbol, interval) {
-    const key = `${symbol}:${interval}`;
-    const bucket = store.map.get(symbol) || { intervals: new Map() };
-    store.map.set(symbol, bucket);
-    if (bucket.intervals.has(interval)) return;
-    if (store.queue.some((j) => j.key === key)) return;
-    store.queue.push({ symbol, interval, key });
-  },
-
-  _drainPrefetch(store) {
-    const BC = window.boardChart;
-    while (store.active < BC.PREFETCH_CONCURRENCY && store.queue.length) {
-      const job = store.queue.shift();
-      if (!job) break;
-      store.active += 1;
-      void BC._fetchKlines(job.symbol, job.interval).then((candles) => {
-        const bucket = store.map.get(job.symbol) || { intervals: new Map() };
-        bucket.intervals.set(job.interval, candles);
-        store.map.set(job.symbol, bucket);
-      }).finally(() => {
-        store.active -= 1;
-        BC._drainPrefetch(store);
-      });
-    }
-  },
-
-  async _fetchKlines(symbol, interval) {
+  async _fetchKlines(symbol, interval, refresh) {
     try {
       const q = new URLSearchParams({
         interval,
         days: String(window.boardChart.FETCH_DAYS),
-        refresh: "1",
       });
+      if (refresh) q.set("refresh", "1");
       const res = await fetch(`/api/klines/${encodeURIComponent(symbol)}?${q}`);
       if (!res.ok) return [];
       const payload = await res.json();
@@ -699,19 +822,33 @@ window.boardChart = {
     }
   },
 
-  async ensureCandles(store, symbol, interval, detail) {
+  async ensureCandles(_store, symbol, interval, detail, options) {
     const BC = window.boardChart;
     const need = BC.minBarsForDays(interval, BC.FETCH_DAYS);
-    const bucket = store.map.get(symbol);
-    const cached = bucket?.intervals?.get(interval);
-    if (cached && cached.length >= need) return cached;
-    const candles = await BC._fetchKlines(symbol, interval);
+    const bucket = BC.getAssetBucket(symbol);
+    let cached = bucket.intervals.get(interval) || [];
+    if (detail?.candles?.length && detail.interval === interval) {
+      cached = detail.candles;
+      bucket.intervals.set(interval, cached);
+      bucket.intervalAt.set(interval, Date.now());
+    }
+    if (cached.length >= need) return cached;
+    if (cached.length >= 24) return cached;
+    let candles = await BC._fetchKlines(symbol, interval, false);
     if (candles.length) {
-      const b = store.map.get(symbol) || { intervals: new Map() };
-      b.intervals.set(interval, candles);
-      store.map.set(symbol, b);
+      bucket.intervals.set(interval, candles);
+      bucket.intervalAt.set(interval, Date.now());
       return candles;
     }
+    if (options?.refreshFallback) {
+      candles = await BC._fetchKlines(symbol, interval, true);
+      if (candles.length) {
+        bucket.intervals.set(interval, candles);
+        bucket.intervalAt.set(interval, Date.now());
+        return candles;
+      }
+    }
+    if (cached.length) return cached;
     if (detail?.candles?.length && detail.interval === interval) return detail.candles;
     return [];
   },
