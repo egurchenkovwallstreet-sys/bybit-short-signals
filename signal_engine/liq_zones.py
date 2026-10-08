@@ -152,6 +152,52 @@ def _merge_bins(*parts: dict[tuple[str, float], float]) -> dict[tuple[str, float
     return out
 
 
+def _level_touched(side: str, price: float, candles: list[dict[str, Any]], since_ms: int | None = None) -> bool:
+    """Цена уже заходила на уровень (low/high свечей)."""
+    for c in candles:
+        t = _ts_ms(c.get("timestamp") or c.get("time"))
+        if since_ms is not None and t is not None and t < since_ms:
+            continue
+        lo = _num(c.get("low"))
+        hi = _num(c.get("high"))
+        if side == "long" and lo is not None and lo <= price * 1.0015:
+            return True
+        if side == "short" and hi is not None and hi >= price * 0.9985:
+            return True
+    return False
+
+
+def _split_notional(
+    side: str,
+    price: float,
+    notional: float,
+    hist_bins: dict[tuple[str, float], float],
+    model_bins: dict[tuple[str, float], float],
+    candles: list[dict[str, Any]] | None,
+    now_ms: int | None,
+) -> tuple[float, float]:
+    """pending (впереди), cleared (уже проходили / факт liq)."""
+    key = (side, price)
+    hist_n = hist_bins.get(key, 0.0)
+    model_n = model_bins.get(key, 0.0)
+    cleared = hist_n
+    pending = 0.0
+    window_start = (now_ms if now_ms is not None else int(time.time() * 1000)) - HIST_WINDOW_MS
+    touched = _level_touched(side, price, candles or [], since_ms=window_start)
+    if model_n > 0:
+        if touched:
+            cleared += model_n
+        else:
+            pending += model_n
+    anchor_n = notional - hist_n - model_n
+    if anchor_n > 1e-6:
+        if touched:
+            cleared += anchor_n
+        else:
+            pending += anchor_n
+    return pending, cleared
+
+
 def _anchor_bins_from_mark(mark: float) -> dict[tuple[str, float], float]:
     """Типовые уровни isolated-liq от текущей mark, если нет OI/истории."""
     bins: dict[tuple[str, float], float] = {}
@@ -208,11 +254,16 @@ def estimate_liquidation_zones(
             src = "model"
         elif not hist_bins and not model_bins:
             src = "model"
+        pending, cleared = _split_notional(
+            side, price, notional, hist_bins, model_bins, candles, now_ms
+        )
         zones.append(
             {
                 "price": price,
                 "side": side,
-                "notional_usd": round(notional, 2),
+                "notional_usd": round(pending + cleared, 2),
+                "notional_pending_usd": round(pending, 2),
+                "notional_cleared_usd": round(cleared, 2),
                 "source": src,
             }
         )

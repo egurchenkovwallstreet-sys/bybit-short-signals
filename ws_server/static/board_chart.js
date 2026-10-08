@@ -544,12 +544,32 @@ window.boardChart = {
       const y = series.priceToCoordinate(Number(z.price));
       if (y == null) continue;
       const yPx = Math.round(y);
-      const ratio = (Number(z.notional_usd) || 0) / maxN;
-      const widthPx = Math.max(16, Math.round(ratio * maxPx));
+      const pending = Number(z.notional_pending_usd);
+      const cleared = Number(z.notional_cleared_usd);
+      const totalN =
+        (pending > 0 || cleared > 0 ? pending + cleared : Number(z.notional_usd)) || 0;
+      if (totalN <= 0) continue;
+      const pPending = pending > 0 ? pending : Math.max(0, totalN - (cleared > 0 ? cleared : 0));
+      const pCleared = cleared > 0 ? cleared : Math.max(0, totalN - pPending);
+      const ratio = totalN / maxN;
+      const widthTotal = Math.max(16, Math.round(ratio * maxPx));
+      let wPending = Math.round((pPending / totalN) * widthTotal);
+      let wCleared = Math.round((pCleared / totalN) * widthTotal);
+      if (pPending > 0 && wPending < 6) wPending = 6;
+      if (pCleared > 0 && wCleared < 6) wCleared = 6;
+      const segSum = wPending + wCleared;
+      if (segSum > widthTotal) {
+        const scale = widthTotal / segSum;
+        wPending = Math.max(pPending > 0 ? 4 : 0, Math.round(wPending * scale));
+        wCleared = Math.max(pCleared > 0 ? 4 : 0, widthTotal - wPending);
+      }
       const side = z.side === "short" ? "short" : "long";
       const src = z.source === "hist" ? "факт" : z.source === "model" ? "модель" : "смесь";
-      parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · ~$${BC.formatBookSize(z.notional_usd)} · ${src}">
-        <span class="psc-liq-chart-bar" style="width:${widthPx}px"></span>
+      const segs = [];
+      if (wPending > 0) segs.push(`<span class="psc-liq-chart-bar pending" style="width:${wPending}px"></span>`);
+      if (wCleared > 0) segs.push(`<span class="psc-liq-chart-bar cleared" style="width:${wCleared}px"></span>`);
+      parts.push(`<div class="psc-liq-chart-row ${side}" style="top:${yPx}px" title="${BC.formatBookPrice(z.price)} · впереди ~$${BC.formatBookSize(pPending)} · снято ~$${BC.formatBookSize(pCleared)} · ${src}">
+        ${segs.join("")}
       </div>`);
     }
     el.innerHTML = parts.join("");

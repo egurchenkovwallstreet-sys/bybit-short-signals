@@ -202,35 +202,75 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  flex-wrap: nowrap;
   z-index: 1;
 }
 
 .psc-liq-chart-bar {
+  display: block;
   height: 9px;
-  min-width: 10px;
-  border-radius: 2px;
-  opacity: 0.92;
+  min-width: 4px;
+  flex: 0 0 auto;
   transform-origin: left center;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.35);
 }
 
-/* Слева направо; max объём — до X последней свечи на своей цене */
-.psc-liq-chart-row.long .psc-liq-chart-bar {
+/* Слева → свеча: яркий pending, затем приглушённый cleared */
+.psc-liq-chart-row.long .psc-liq-chart-bar.pending {
+  border-radius: 2px 0 0 2px;
+  opacity: 0.95;
+  box-shadow: 0 0 8px rgba(61, 214, 140, 0.35);
   background: linear-gradient(
     90deg,
-    rgba(61, 214, 140, 0.22) 0%,
-    rgba(61, 214, 140, 0.72) 65%,
-    rgba(61, 214, 140, 0.98) 100%
+    rgba(61, 214, 140, 0.35) 0%,
+    rgba(61, 214, 140, 0.88) 70%,
+    rgba(61, 214, 140, 1) 100%
   );
 }
 
-.psc-liq-chart-row.short .psc-liq-chart-bar {
+.psc-liq-chart-row.long .psc-liq-chart-bar.cleared {
+  border-radius: 0 2px 2px 0;
+  opacity: 0.55;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(61, 214, 140, 0.12) 0,
+    rgba(61, 214, 140, 0.12) 3px,
+    rgba(61, 214, 140, 0.38) 3px,
+    rgba(61, 214, 140, 0.38) 6px
+  );
+}
+
+.psc-liq-chart-row.long .psc-liq-chart-bar.pending:only-child,
+.psc-liq-chart-row.long .psc-liq-chart-bar.cleared:only-child {
+  border-radius: 2px;
+}
+
+.psc-liq-chart-row.short .psc-liq-chart-bar.pending {
+  border-radius: 2px 0 0 2px;
+  opacity: 0.95;
+  box-shadow: 0 0 8px rgba(255, 93, 115, 0.35);
   background: linear-gradient(
     90deg,
-    rgba(255, 93, 115, 0.2) 0%,
-    rgba(255, 93, 115, 0.7) 65%,
-    rgba(255, 93, 115, 0.98) 100%
+    rgba(255, 93, 115, 0.32) 0%,
+    rgba(255, 93, 115, 0.82) 70%,
+    rgba(255, 93, 115, 1) 100%
   );
+}
+
+.psc-liq-chart-row.short .psc-liq-chart-bar.cleared {
+  border-radius: 0 2px 2px 0;
+  opacity: 0.55;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 93, 115, 0.1) 0,
+    rgba(255, 93, 115, 0.1) 3px,
+    rgba(255, 93, 115, 0.36) 3px,
+    rgba(255, 93, 115, 0.36) 6px
+  );
+}
+
+.psc-liq-chart-row.short .psc-liq-chart-bar.pending:only-child,
+.psc-liq-chart-row.short .psc-liq-chart-bar.cleared:only-child {
+  border-radius: 2px;
 }
 
 .psc-book-chart-overlay {

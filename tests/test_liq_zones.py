@@ -54,6 +54,36 @@ class LiqZonesTest(unittest.TestCase):
         out = estimate_liquidation_zones(mark=mark, oi_rows=oi, candles=candles, depth_pct=0.2, now_ms=2_000_000)
         self.assertTrue(out["zones"])
 
+    def test_pending_cleared_split(self) -> None:
+        mark = 1.0
+        now = 1_700_000_500_000
+        events = [
+            {"time": now - 3600_000, "price": 0.92, "size": 1000, "side": "Buy"},
+        ]
+        candles = [
+            {"timestamp": now - 7200_000, "high": 1.05, "low": 0.95, "close": 1.0},
+            {"timestamp": now - 3600_000, "high": 1.02, "low": 0.88, "close": 0.95},
+        ]
+        out = estimate_liquidation_zones(
+            mark=mark,
+            liquidations=events,
+            candles=candles,
+            depth_pct=0.35,
+            now_ms=now,
+        )
+        self.assertTrue(out["zones"])
+        for z in out["zones"]:
+            self.assertIn("notional_pending_usd", z)
+            self.assertIn("notional_cleared_usd", z)
+            self.assertAlmostEqual(
+                z["notional_usd"],
+                z["notional_pending_usd"] + z["notional_cleared_usd"],
+                places=1,
+            )
+        hist_long = [z for z in out["zones"] if z["side"] == "long" and z["source"] == "hist"]
+        self.assertTrue(hist_long)
+        self.assertGreater(hist_long[0]["notional_cleared_usd"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
