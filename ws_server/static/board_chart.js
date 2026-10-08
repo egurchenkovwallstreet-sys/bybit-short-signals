@@ -33,6 +33,11 @@ window.boardChart = {
     /** Макс. ширина полоски — доля ширины графика от левого края. */
     widthPct: 0.3,
   },
+  /** Суммы ликвидаций у свечей (Buy=long, Sell=short). */
+  LIQ_CANDLE: {
+    minUsd: 500,
+    maxTooltipRows: 48,
+  },
   _liqZonesFetch: new Map(),
   BOOK_PANEL: {
     maxGridRowsPerSide: 320,
@@ -374,6 +379,193 @@ window.boardChart = {
     if (ctx) BC.renderBookChartOverlay(runtime, ctx.book, ctx.refPrice, ctx.symbol, { skipLiqFetch: true });
     const liq = runtime._lastLiqCtx;
     if (liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
+    BC.renderLiqCandleLabels(runtime);
+  },
+
+  barTimeKey(time) {
+    return typeof time === "object" ? JSON.stringify(time) : String(time);
+  },
+
+  barTimeToSec(time) {
+    if (typeof time === "object") {
+      return Math.floor(Date.UTC(time.year, time.month - 1, time.day) / 1000);
+    }
+    return Number(time) || 0;
+  },
+
+  liqEventMs(raw) {
+    const n = Number(raw);
+    if (!n || Number.isNaN(n)) return 0;
+    return n > 1e12 ? n : n * 1000;
+  },
+
+  aggregateLiqByBar(bars, liquidations, interval) {
+    const BC = window.boardChart;
+    const stepMs = (BC.INTERVAL_SEC[interval] || 3600) * 1000;
+    const meta = (bars || []).map((b, idx) => {
+      const startMs = BC.barTimeToSec(b.time) * 1000;
+      const next = bars[idx + 1];
+      const endMs = next ? BC.barTimeToSec(next.time) * 1000 : startMs + stepMs;
+      return { key: BC.barTimeKey(b.time), time: b.time, startMs, endMs };
+    });
+    const map = new Map();
+    for (const m of meta) {
+      map.set(m.key, { longUsd: 0, shortUsd: 0, events: [], time: m.time });
+    }
+    for (const ev of liquidations || []) {
+      const ts = BC.liqEventMs(ev.time ?? ev.timestamp);
+      if (!ts) continue;
+      const price = Number(ev.price);
+      const size = Number(ev.size);
+      if (!price || !size) continue;
+      const usd = price * size;
+      const side = String(ev.side || "");
+      let bucket = null;
+      for (const m of meta) {
+        if (ts >= m.startMs && ts < m.endMs) {
+          bucket = map.get(m.key);
+          break;
+        }
+      }
+      if (!bucket) continue;
+      const row = {
+        side,
+        price,
+        size,
+        usd,
+        time: ts,
+        position: side === "Buy" ? "long" : side === "Sell" ? "short" : ev.position || "",
+      };
+      bucket.events.push(row);
+      if (side === "Buy") bucket.longUsd += usd;
+      else if (side === "Sell") bucket.shortUsd += usd;
+    }
+    return map;
+  },
+
+  setChartLiquidations(runtime, liquidations) {
+    const BC = window.boardChart;
+    if (!runtime) return;
+    runtime._liquidations = Array.isArray(liquidations) ? liquidations : [];
+    const bars = runtime._lastBars || [];
+    const iv = runtime._chartInterval || "60";
+    runtime._liqByBar = BC.aggregateLiqByBar(bars, runtime._liquidations, iv);
+    BC.renderLiqCandleLabels(runtime);
+  },
+
+  ensureLiqCandleOverlay(runtime, chartEl) {
+    const BC = window.boardChart;
+    if (!runtime || !chartEl) return;
+    const host = BC.overlayHost(chartEl);
+    if (!host) return;
+    if (!runtime.liqCandleOverlayEl) {
+      const ov = document.createElement("div");
+      ov.className = "psc-liq-candle-overlay";
+      ov.setAttribute("aria-hidden", "true");
+      runtime.liqCandleOverlayEl = ov;
+    }
+    if (!runtime.liqCandleTipEl) {
+      const tip = document.createElement("div");
+      tip.className = "psc-liq-candle-tip";
+      tip.hidden = true;
+      runtime.liqCandleTipEl = tip;
+    }
+    BC.attachOverlayToHost(runtime.liqCandleOverlayEl, host, runtime.bookOverlayEl || null);
+    if (runtime.liqCandleTipEl.parentElement !== host) {
+      host.appendChild(runtime.liqCandleTipEl);
+    }
+  },
+
+  ensureLiqCandleHooks(runtime) {
+    const BC = window.boardChart;
+    if (!runtime?.chart || runtime._liqCandleHooks) return;
+    runtime._liqCandleHooks = true;
+    runtime.chart.subscribeCrosshairMove((param) => {
+      BC.updateLiqCandleTip(runtime, param);
+    });
+  },
+
+  formatLiqUsd(usd) {
+    const BC = window.boardChart;
+    const n = Number(usd);
+    if (!n || n < BC.LIQ_CANDLE.minUsd) return "";
+    return BC.formatBookSize(n);
+  },
+
+  renderLiqCandleLabels(runtime) {
+    const BC = window.boardChart;
+    const el = runtime?.liqCandleOverlayEl;
+    const chart = runtime?.chart;
+    const bars = runtime._lastBars;
+    const map = runtime._liqByBar;
+    if (!el || !chart || !bars?.length || !map) {
+      if (el) el.innerHTML = "";
+      return;
+    }
+    const range = chart.timeScale().getVisibleLogicalRange();
+    if (!range) {
+      el.innerHTML = "";
+      return;
+    }
+    const offX = BC.overlayPlotOffsetX(runtime);
+    const minUsd = BC.LIQ_CANDLE.minUsd;
+    const from = Math.max(0, Math.floor(range.from));
+    const to = Math.min(bars.length - 1, Math.ceil(range.to));
+    const parts = [];
+    for (let i = from; i <= to; i++) {
+      const bar = bars[i];
+      const key = BC.barTimeKey(bar.time);
+      const agg = map.get(key);
+      if (!agg) continue;
+      const shortTxt = BC.formatLiqUsd(agg.shortUsd);
+      const longTxt = BC.formatLiqUsd(agg.longUsd);
+      if (!shortTxt && !longTxt) continue;
+      const x = chart.timeScale().timeToCoordinate(bar.time);
+      if (x == null || Number.isNaN(x)) continue;
+      const xPx = Math.round(x + offX);
+      const lines = [];
+      if (shortTxt) lines.push(`<span class="psc-liq-c-sum short">${shortTxt}</span>`);
+      if (longTxt) lines.push(`<span class="psc-liq-c-sum long">${longTxt}</span>`);
+      parts.push(`<div class="psc-liq-candle-tag" style="left:${xPx}px">${lines.join("")}</div>`);
+    }
+    el.innerHTML = parts.join("");
+  },
+
+  updateLiqCandleTip(runtime, param) {
+    const BC = window.boardChart;
+    const tip = runtime?.liqCandleTipEl;
+    const map = runtime?._liqByBar;
+    if (!tip || !map || !param?.time || param.point?.x == null) {
+      if (tip) tip.hidden = true;
+      return;
+    }
+    const key = BC.barTimeKey(param.time);
+    const agg = map.get(key);
+    if (!agg?.events?.length) {
+      tip.hidden = true;
+      return;
+    }
+    const host = tip.parentElement;
+    const offX = BC.overlayPlotOffsetX(runtime);
+    const maxR = BC.LIQ_CANDLE.maxTooltipRows;
+    const rows = agg.events
+      .slice()
+      .sort((a, b) => b.usd - a.usd)
+      .slice(0, maxR)
+      .map((e) => {
+        const side = e.side === "Buy" ? "long" : e.side === "Sell" ? "short" : e.position || "?";
+        const cls = side === "short" ? "short" : "long";
+        return `<li class="${cls}">${BC.formatBookPrice(e.price)} · ${BC.formatBookSize(e.size)} · ~$${BC.formatBookSize(e.usd)}</li>`;
+      })
+      .join("");
+    const more = agg.events.length > maxR ? `<li class="quiet">+${agg.events.length - maxR} ещё</li>` : "";
+    tip.innerHTML = `<div class="psc-liq-candle-tip-head">Short $${BC.formatBookSize(agg.shortUsd)} · Long $${BC.formatBookSize(agg.longUsd)}</div><ul>${rows}${more}</ul>`;
+    tip.hidden = false;
+    const hostRect = host?.getBoundingClientRect();
+    const left = Math.max(8, Math.min((host?.clientWidth || 400) - 220, param.point.x + offX + 12));
+    const top = Math.max(8, param.point.y - 8);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
   },
 
   startOverlayPriceSync(runtime) {
@@ -430,6 +622,7 @@ window.boardChart = {
       runtime.liqOverlayEl = ov;
     }
     BC.attachOverlayToHost(runtime.liqOverlayEl, host, runtime.bookOverlayEl || null);
+    BC.ensureLiqCandleOverlay(runtime, chartEl);
   },
 
   ensureBookOverlayHooks(runtime) {
@@ -445,6 +638,7 @@ window.boardChart = {
       runtime.chart.timeScale().subscribeSizeChange(redraw);
     }
     BC.startOverlayPriceSync(runtime);
+    BC.ensureLiqCandleHooks(runtime);
     const host = runtime.chart?.chartElement?.() || runtime.bookOverlayEl?.parentElement;
     if (host && !runtime._chartInputHooks) {
       runtime._chartInputHooks = true;
@@ -1107,6 +1301,7 @@ window.boardChart = {
         })),
       );
     }
+    runtime._lastBars = bars;
     if (bars.length) {
       runtime._lastCandleTime = bars[bars.length - 1].time;
       runtime.priceRange = {
@@ -1115,6 +1310,9 @@ window.boardChart = {
       };
     } else {
       runtime._lastCandleTime = null;
+    }
+    if (runtime._liquidations?.length) {
+      runtime._liqByBar = BC.aggregateLiqByBar(bars, runtime._liquidations, interval);
     }
     const container = document.getElementById(chartElId);
     if (container && runtime.chart && container.clientWidth > 0) {
@@ -1132,6 +1330,7 @@ window.boardChart = {
       });
     }
     BC.syncBookOverlayForChart(chartElId);
+    BC.renderLiqCandleLabels(runtime);
     if (runtime._chartSymbol && runtime.liqOverlayEl) {
       const ref = bars.length ? bars[bars.length - 1].close : runtime._overlayProbePrice;
       BC.refreshLiqZonesOverlay(runtime, runtime._chartSymbol, ref);

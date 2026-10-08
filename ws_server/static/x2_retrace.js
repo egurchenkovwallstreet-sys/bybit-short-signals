@@ -130,6 +130,7 @@ function mergeX2LiveDetail(data) {
     ...data,
     signal: data.signal ?? prev.signal,
     book: data.book ?? prev.book,
+    liquidations: data.liquidations ?? prev.liquidations,
     funding_rate: data.funding_rate ?? prev.funding_rate,
   };
 }
@@ -137,6 +138,7 @@ function mergeX2LiveDetail(data) {
 function onX2Detail(symbol, data) {
   if (!x2State.selected || x2State.selected !== symbol) return;
   mergeX2LiveDetail(data);
+  window.boardChart.setChartLiquidations(x2State.chart, x2State.detail?.liquidations);
   void refreshX2Chart(false);
 }
 
@@ -173,6 +175,7 @@ async function refreshX2Chart(resetScale) {
     x2State.detail.interval = interval;
   }
   window.boardChart.drawCandles(x2State.chart, candles, interval, resetScale, X2_CHART.chart);
+  window.boardChart.setChartLiquidations(x2State.chart, x2State.detail?.liquidations);
   if (resetScale) renderX2Info(true);
   else updateX2Live();
 }

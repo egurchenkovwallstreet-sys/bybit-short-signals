@@ -143,6 +143,7 @@ function mergePumpLiveDetail(data) {
     ...data,
     signal: data.signal ?? prev.signal,
     book: data.book ?? prev.book,
+    liquidations: data.liquidations ?? prev.liquidations,
     funding_rate: data.funding_rate ?? prev.funding_rate,
     taker_ratio: data.taker_ratio ?? prev.taker_ratio,
   };
@@ -151,6 +152,7 @@ function mergePumpLiveDetail(data) {
 function onPumpScanDetail(symbol, data) {
   if (!pumpState.selected || pumpState.selected !== symbol) return;
   mergePumpLiveDetail(data);
+  window.boardChart.setChartLiquidations(pumpState.chart, pumpState.detail?.liquidations);
   void refreshPumpScanChart(false);
 }
 
@@ -187,6 +189,7 @@ async function refreshPumpScanChart(resetScale) {
     pumpState.detail.interval = interval;
   }
   window.boardChart.drawCandles(pumpState.chart, candles, interval, resetScale, PUMP_CHART.chart);
+  window.boardChart.setChartLiquidations(pumpState.chart, pumpState.detail?.liquidations);
   if (resetScale) renderPumpScanInfo(true);
   else updatePumpScanLive();
 }
