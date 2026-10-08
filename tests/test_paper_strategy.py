@@ -253,6 +253,24 @@ class StrategyCycleTest(unittest.TestCase):
             restarted.close()
 
 
+    def test_duplicate_active_candidates_collapse(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PaperStore(Path(tmp) / "paper.db")
+            store.open()
+            for peak_ts in (NOW - 5 * 3_600_000, NOW - 3_600_000):
+                store.insert_candidate(
+                    {"symbol": "DUPUSDT", "kind": "short", "status": "watching", "started_at": 1,
+                     "updated_at": 1, "peak_ts": peak_ts, "peak_price": 2.0, "valley_price": 1.0,
+                     "valley_ts": 1, "growth_pct": 100.0}
+                )
+            store.close()
+            strategy = PaperStrategy(PaperStore(Path(tmp) / "paper.db"))
+            strategy.open()
+            self.assertEqual(strategy.candidates["DUPUSDT"].pump.peak_ts, NOW - 3_600_000)
+            self.assertEqual(len(strategy.store.active_candidates()), 1)
+            strategy.close()
+
+
 class StrongTopTest(unittest.TestCase):
     @staticmethod
     def _bars(first: float, second: float, gap: int, after: int) -> list[Bar]:

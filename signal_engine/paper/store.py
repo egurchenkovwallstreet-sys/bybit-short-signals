@@ -264,7 +264,8 @@ class PaperStore:
     def revive_candidates(self, end_reason: str, since_ts: int) -> int:
         cur = self.db.execute(
             "UPDATE paper_candidates SET status = 'watching', ended_at = NULL, end_reason = NULL "
-            "WHERE status = 'expired' AND end_reason = ? AND peak_ts >= ?",
+            "WHERE status = 'expired' AND end_reason = ? AND peak_ts >= ? "
+            "AND symbol NOT IN (SELECT symbol FROM paper_candidates WHERE status = 'watching')",
             (end_reason, since_ts),
         )
         self.db.commit()

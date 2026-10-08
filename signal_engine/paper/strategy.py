@@ -153,7 +153,11 @@ class PaperStrategy:
                 candidate_id=row["candidate_id"],
                 last_check=now,
             )
-        for row in self.store.active_candidates():
+        active = sorted(self.store.active_candidates(), key=lambda r: (int(r["peak_ts"] or 0), int(r["id"])))
+        for row in active:
+            older = self.candidates.get(row["symbol"])
+            if older is not None:
+                self._end_candidate(older, "дубль после перезапуска", now)
             pump = _pump_from_row(row)
             last_eval = _loads(row["last_eval"]) or None
             self.candidates[row["symbol"]] = Candidate(
