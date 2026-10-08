@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import config
@@ -49,6 +50,7 @@ class CollectorService:
         self.universe = SymbolUniverse()
         self._owns_rest = rest is None
         self._owns_redis = redis_client is None
+        self._last_publish_mono: dict[tuple[str, str], float] = {}
 
     async def run(self) -> None:
         if self.publisher is None:
@@ -136,10 +138,32 @@ class CollectorService:
             tasks.append(asyncio.create_task(client.run(), name=f"ws-{index}"))
         return tasks
 
+    def _should_publish(self, message: dict[str, Any]) -> bool:
+        kind = str(message.get("type") or "")
+        symbol = str(message.get("symbol") or "")
+        if not symbol:
+            return True
+        if kind == "orderbook":
+            min_sec = config.COLLECTOR_ORDERBOOK_PUBLISH_MIN_SEC
+        elif kind == "ticker":
+            min_sec = config.COLLECTOR_TICKER_PUBLISH_MIN_SEC
+        else:
+            return True
+        if min_sec <= 0:
+            return True
+        now = time.monotonic()
+        key = (symbol, kind)
+        last = self._last_publish_mono.get(key, 0.0)
+        if now - last < min_sec:
+            return False
+        self._last_publish_mono[key] = now
+        return True
+
     async def _on_messages(self, messages: list[dict[str, Any]]) -> None:
         assert self.publisher is not None
         for message in messages:
-            self.publisher.publish(message)
+            if self._should_publish(message):
+                self.publisher.publish(message)
 
     async def _on_connected(self, symbols: list[str]) -> None:
         """Снапшот стакана, чтобы после разрыва книга не собиралась из одних дельт."""

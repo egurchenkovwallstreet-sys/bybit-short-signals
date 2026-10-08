@@ -93,7 +93,8 @@ WS_TOPIC_TICKER = "tickers.{symbol}"
 OI_INTERVALS = ("5min", "15min", "30min", "1h", "4h", "1d")
 
 # Коды интервалов свечей Bybit v5: 1, 5, 15, 60, 240, D.
-KLINE_INTERVALS = ("1", "5", "15", "30", "60", "240", "D")
+# REST-круг коллектора: без 5m/30m — движку достаточно 1/15/60/240/D.
+KLINE_INTERVALS = ("1", "15", "60", "240", "D")
 
 # Ссылка на график. Открывается только Bybit, решение о входе — вручную.
 BYBIT_TRADE_URL = "https://www.bybit.com/trade/usdt/{symbol}"
@@ -123,7 +124,10 @@ UNIVERSE_MIN_TURNOVER_24H_USDT = _env_float("UNIVERSE_MIN_TURNOVER_24H_USDT", 1_
 # Минимальный возраст листинга linear perpetual (дней).
 UNIVERSE_MIN_LISTING_AGE_DAYS = _env_int("UNIVERSE_MIN_LISTING_AGE_DAYS", 90)
 # Пауза после полного круга REST (OI и свечи). Сами запросы ещё тормозит ccxt.
-REST_CYCLE_PAUSE_SEC = _env_int("REST_CYCLE_PAUSE_SEC", 30)
+REST_CYCLE_PAUSE_SEC = _env_int("REST_CYCLE_PAUSE_SEC", 60)
+# Throttle публикации в Redis (снижает CPU на малых VPS). 0 = без ограничения.
+COLLECTOR_ORDERBOOK_PUBLISH_MIN_SEC = _env_float("COLLECTOR_ORDERBOOK_PUBLISH_MIN_SEC", 0.35)
+COLLECTOR_TICKER_PUBLISH_MIN_SEC = _env_float("COLLECTOR_TICKER_PUBLISH_MIN_SEC", 1.0)
 KLINE_FETCH_LIMIT = _env_int("KLINE_FETCH_LIMIT", 200)
 OI_FETCH_LIMIT = _env_int("OI_FETCH_LIMIT", 200)
 # Окно индикаторов в карточке сигнала (открытый интерес, CVD и т.д.), часы.
