@@ -102,6 +102,26 @@ async def pump_lab_episode(episode_id: int) -> dict[str, Any]:
     return detail
 
 
+def _apply_pump_lab_board(board: dict[str, Any]) -> dict[str, Any]:
+    app.state.hub.cache.pump_lab_board = board
+    app.state.hub.pump_lab_dirty = True
+    return board
+
+
+@app.post("/api/pump-lab/episode/{episode_id}/dismiss")
+async def pump_lab_dismiss_episode(episode_id: int) -> dict[str, Any]:
+    board = await asyncio.to_thread(pump_lab_api.dismiss_episode, episode_id)
+    if board is None:
+        raise HTTPException(status_code=404, detail="эпизод не найден")
+    return {"ok": True, "board": _apply_pump_lab_board(board)}
+
+
+@app.post("/api/pump-lab/dismiss-all")
+async def pump_lab_dismiss_all() -> dict[str, Any]:
+    board = await asyncio.to_thread(pump_lab_api.dismiss_all_active)
+    return {"ok": True, "board": _apply_pump_lab_board(board)}
+
+
 @app.get("/api/tooltips")
 async def tooltips() -> FileResponse:
     return FileResponse(STATIC_DIR / "tooltips.json", media_type="application/json")

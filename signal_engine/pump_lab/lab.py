@@ -56,9 +56,14 @@ class PumpLab:
     def close(self) -> None:
         self.store.close()
 
+    def request_full_scan(self) -> None:
+        """Сброс интервала — следующий maybe_scan пересоберёт эпизоды из рынка."""
+        self._last_scan_mono = 0.0
+
     def maybe_scan(self, symbols: dict[str, SymbolState], now_ms: int) -> dict[str, Any] | None:
         now_mono = time.monotonic()
         if self._last_board is not None and now_mono - self._last_scan_mono < config.PUMP_LAB_SCAN_INTERVAL_SEC:
+            self._last_board = self.build_board(now_ms)
             return self._last_board
         self._last_scan_mono = now_mono
         self._run(symbols, now_ms)

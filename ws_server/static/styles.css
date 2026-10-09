@@ -1492,6 +1492,25 @@ th { cursor: pointer; color: var(--muted); }
   overflow: auto;
   padding: 12px 16px 24px;
 }
+.pl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin-bottom: 10px;
+}
+.pl-btn-danger {
+  background: #c62828;
+  color: #fff;
+  border: 1px solid #e53935;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pl-btn-danger:hover:not(:disabled) { background: #b71c1c; }
+.pl-btn-danger:disabled { opacity: 0.6; cursor: wait; }
+.pl-toolbar-hint { font-size: 12px; max-width: 420px; }
 .pump-lab-intro { margin: 0 0 12px; max-width: 720px; }
 .pump-lab-layout {
   display: grid;
@@ -1527,18 +1546,48 @@ th { cursor: pointer; color: var(--muted); }
   gap: 8px;
 }
 .pl-card {
+  position: relative;
   text-align: left;
   border: 2px solid var(--line);
   border-radius: 10px;
-  padding: 10px;
+  padding: 10px 10px 10px 10px;
   background: var(--panel-2);
-  cursor: pointer;
   color: var(--text);
   display: flex;
   flex-direction: column;
   gap: 4px;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
+.pl-card-body {
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+.pl-card-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  z-index: 1;
+}
+.pl-card-dismiss:hover { background: rgba(198, 40, 40, 0.85); }
 .pl-card.pl-red {
   border-color: rgba(255, 93, 115, 0.75);
   background: linear-gradient(145deg, rgba(255, 93, 115, 0.28), rgba(255, 93, 115, 0.1));

@@ -156,6 +156,17 @@ class PumpLabStore:
         )
         self.conn.commit()
 
+    def close_all_active(self, now_ms: int, reason: str) -> int:
+        cur = self.conn.execute(
+            """
+            UPDATE lab_episodes SET status = 'closed', ended_at = ?, end_reason = ?, updated_at = ?
+            WHERE status = 'active'
+            """,
+            (now_ms, reason, now_ms),
+        )
+        self.conn.commit()
+        return int(cur.rowcount)
+
     def insert_snapshot(self, episode_id: int, ts: int, phase: str, price: float | None, dd: float | None, metrics: dict) -> None:
         self.conn.execute(
             """

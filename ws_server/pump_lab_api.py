@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import config
@@ -44,6 +45,29 @@ def board_from_db() -> dict[str, Any]:
     lab = PumpLab()
     lab.open()
     try:
-        return lab.build_board(int(__import__("time").time() * 1000))
+        return lab.build_board(int(time.time() * 1000))
     finally:
         lab.close()
+
+
+def dismiss_episode(episode_id: int) -> dict[str, Any] | None:
+    store = _store()
+    try:
+        ep = store.episode(episode_id)
+        if ep is None or ep.get("status") != "active":
+            return None
+        now_ms = int(time.time() * 1000)
+        store.close_episode(episode_id, now_ms, "dismissed")
+        return board_from_db()
+    finally:
+        store.close()
+
+
+def dismiss_all_active() -> dict[str, Any]:
+    store = _store()
+    try:
+        now_ms = int(time.time() * 1000)
+        store.close_all_active(now_ms, "dismissed_all")
+        return board_from_db()
+    finally:
+        store.close()

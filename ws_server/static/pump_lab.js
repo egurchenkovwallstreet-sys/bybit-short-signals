@@ -20,6 +20,14 @@ const plState = {
 };
 
 function initPumpLabTab() {
+  const dismissAll = document.getElementById("pl-dismiss-all");
+  if (dismissAll && !dismissAll.dataset.inited) {
+    dismissAll.dataset.inited = "1";
+    dismissAll.addEventListener("click", (e) => {
+      e.preventDefault();
+      dismissAllActive();
+    });
+  }
   const root = document.getElementById("pump-lab-sections");
   if (!root || root.dataset.inited) return;
   root.dataset.inited = "1";
@@ -61,17 +69,29 @@ function onPumpLabBoard(data) {
         const gr = c.growth_pct != null ? `+${Number(c.growth_pct).toFixed(1)}%` : "";
         const pro = c.summary ? (c.summary.for_short ?? c.summary.bearish) : 0;
         const anti = c.summary ? (c.summary.against_short ?? c.summary.bullish) : 0;
-        return `<button type="button" class="pl-card ${phaseClass}" data-episode-id="${c.episode_id}">
-          <span class="pl-card-symbol">${c.symbol}</span>
-          <span class="pl-card-phase">${c.phase_label || ""}</span>
-          <span class="pl-card-meta">${gr} · ${dd}</span>
-          <span class="pl-card-meta"><span class="pl-short-yes">за шорт: ${pro}</span> · <span class="pl-short-no">против: ${anti}</span></span>
-        </button>`;
+        return `<div class="pl-card ${phaseClass}" data-episode-id="${c.episode_id}">
+          <button type="button" class="pl-card-dismiss" title="Убрать с отслеживания" aria-label="Убрать">×</button>
+          <button type="button" class="pl-card-body">
+            <span class="pl-card-symbol">${c.symbol}</span>
+            <span class="pl-card-phase">${c.phase_label || ""}</span>
+            <span class="pl-card-meta">${gr} · ${dd}</span>
+            <span class="pl-card-meta"><span class="pl-short-yes">за шорт: ${pro}</span> · <span class="pl-short-no">против: ${anti}</span></span>
+          </button>
+        </div>`;
       })
       .join("");
   }
-  document.querySelectorAll(".pl-card").forEach((btn) => {
-    btn.addEventListener("click", () => loadEpisode(Number(btn.dataset.episodeId)));
+  document.querySelectorAll(".pl-card-body").forEach((btn) => {
+    const wrap = btn.closest(".pl-card");
+    btn.addEventListener("click", () => loadEpisode(Number(wrap.dataset.episodeId)));
+  });
+  document.querySelectorAll(".pl-card-dismiss").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const wrap = btn.closest(".pl-card");
+      dismissEpisode(Number(wrap.dataset.episodeId));
+    });
   });
   if (plState.selectedId) {
     const still = cardsFlat(data).find((c) => c.episode_id === plState.selectedId);
@@ -111,6 +131,38 @@ function cardsFlat(data) {
 function hideDetail() {
   const pane = document.getElementById("pump-lab-detail");
   if (pane) pane.hidden = true;
+}
+
+async function dismissEpisode(id) {
+  try {
+    const res = await fetch(`/api/pump-lab/episode/${id}/dismiss`, { method: "POST" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.board) onPumpLabBoard(data.board);
+    if (plState.selectedId === id) {
+      plState.selectedId = null;
+      hideDetail();
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function dismissAllActive() {
+  const btn = document.getElementById("pl-dismiss-all");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch("/api/pump-lab/dismiss-all", { method: "POST" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.board) onPumpLabBoard(data.board);
+    plState.selectedId = null;
+    hideDetail();
+  } catch {
+    /* ignore */
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function loadEpisode(id) {

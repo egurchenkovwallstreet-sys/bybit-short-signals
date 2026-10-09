@@ -23,7 +23,7 @@ from signal_engine.state import Bar, SymbolState
 class PumpLabPhaseTests(unittest.TestCase):
     def test_thresholds(self) -> None:
         self.assertEqual(min_growth_pct("fast"), 40.0)
-        self.assertEqual(min_growth_pct("medium"), 80.0)
+        self.assertEqual(min_growth_pct("medium"), 60.0)
         self.assertEqual(min_volume_ratio("fast"), 10.0)
         self.assertEqual(min_volume_ratio("long"), 10.0)
         self.assertEqual(passed_drawdown_pct("fast"), 20.0)
