@@ -62,8 +62,16 @@ HORIZON_LABELS = {"short": "Короткий", "mid": "Средний", "long": 
 LOOKBACK_MIN = {"short": (5, 15, 30), "mid": (60, 240, 24 * 60), "long": (3 * 24 * 60, 7 * 24 * 60, 14 * 24 * 60)}
 
 
-def _cell(value: float | None, signal: int = 0) -> dict[str, Any]:
-    return {"value": round(value, 4) if value is not None and math.isfinite(value) else None, "signal": signal}
+def _cell(value: float | None, short_favor: int = 0) -> dict[str, Any]:
+    """short_favor: 1 = за шорт (зелёный), -1 = против шорта (красный), 0 = нейтрально."""
+    favor = short_favor
+    if favor not in (-1, 0, 1):
+        favor = 0
+    return {
+        "value": round(value, 4) if value is not None and math.isfinite(value) else None,
+        "short_favor": favor,
+        "signal": favor,
+    }
 
 
 def _sum_window(bucket: dict[int, float], now_ms: int, minutes: int) -> float:
@@ -142,8 +150,8 @@ def compute_all_metrics(
 
     def pack_delta(h: dict) -> dict[str, Any]:
         v = h.get("cvd")
-        sig = -1 if v is not None and v < 0 else (1 if v and v > 0 else 0)
-        return _cell(v, sig)
+        favor = 1 if v is not None and v < 0 else (-1 if v and v > 0 else 0)
+        return _cell(v, favor)
 
     out["delta"] = {"short": pack_delta(short), "mid": pack_delta(mid), "long": pack_delta(long)}
 
@@ -158,7 +166,7 @@ def compute_all_metrics(
         if ts >= now_ms - 15 * MIN_MS and med and val > med * 3:
             large += val
     out["large_trades"] = {
-        "short": _cell(large, 1 if large > (med or 1) * 5 else 0),
+        "short": _cell(large, -1 if large > (med or 1) * 5 else 0),
         "mid": _cell(large * 2, 0),
         "long": _cell(large, 0),
     }
@@ -168,13 +176,13 @@ def compute_all_metrics(
     if short.get("price_chg") is not None and bs is not None:
         if abs(short["price_chg"]) < 1.0 and bs > 60:
             absorp = bs
-    out["absorption"] = {"short": _cell(absorp, -1 if absorp else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
+    out["absorption"] = {"short": _cell(absorp, 1 if absorp else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
 
     tape_n = len([ts for ts in state.taker_buy if ts >= now_ms - 5 * MIN_MS]) + len(
         [ts for ts in state.taker_sell if ts >= now_ms - 5 * MIN_MS]
     )
     out["tape_speed"] = {
-        "short": _cell(float(tape_n), 1 if tape_n > 20 else 0),
+        "short": _cell(float(tape_n), -1 if tape_n > 20 else 0),
         "mid": _cell(float(tape_n), 0),
         "long": _cell(float(tape_n), 0),
     }
@@ -183,7 +191,7 @@ def compute_all_metrics(
         bs = h.get("buy_share")
         if bs is None:
             return _cell(None, 0)
-        return _cell(bs - 50.0, -1 if bs < 45 else (1 if bs > 55 else 0))
+        return _cell(bs - 50.0, 1 if bs < 45 else (-1 if bs > 55 else 0))
 
     out["buy_sell_imbalance"] = {"short": imb(short), "mid": imb(mid), "long": imb(long)}
 
@@ -196,7 +204,7 @@ def compute_all_metrics(
         peak = max(vals) if vals else 0.0
         cur = vals[-1] if vals else 0.0
         ratio = (1.0 - cur / peak) if peak > 0 else None
-        return _cell(ratio, -1 if faded else 0)
+        return _cell(ratio, 1 if faded else 0)
 
     out["short_liq"] = {
         "short": liq_fade_short(15),
@@ -209,16 +217,16 @@ def compute_all_metrics(
         "long": _cell(long.get("long_liq"), 0),
     }
     cascade = max(window_notionals(state.liq_notional, now_ms, minutes=5) or [0.0])
-    out["liq_cascade"] = {"short": _cell(cascade, 1 if cascade > 50000 else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
+    out["liq_cascade"] = {"short": _cell(cascade, -1 if cascade > 50000 else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
 
     fr = state.funding_rate
     out["funding_high"] = {
-        "short": _cell(fr * 100 if fr is not None else None, -1 if funding_extreme(fr) and (fr or 0) > 0 else 0),
+        "short": _cell(fr * 100 if fr is not None else None, 1 if funding_extreme(fr) and (fr or 0) > 0 else 0),
         "mid": _cell(fr * 100 if fr is not None else None, 0),
         "long": _cell(fr * 100 if fr is not None else None, 0),
     }
     out["funding_low"] = {
-        "short": _cell(fr * 100 if fr is not None else None, 1 if fr is not None and fr < -0.0003 else 0),
+        "short": _cell(fr * 100 if fr is not None else None, -1 if fr is not None and fr < -0.0003 else 0),
         "mid": _cell(None, 0),
         "long": _cell(None, 0),
     }
@@ -229,18 +237,18 @@ def compute_all_metrics(
         if pc is None or oc is None:
             return _cell(None, 0)
         if up_price and pc > 0 and oc > 0:
-            return _cell(oc, 1)
-        if up_price and pc > 0 and oc < 0:
             return _cell(oc, -1)
+        if up_price and pc > 0 and oc < 0:
+            return _cell(oc, 1)
         if not up_price and pc < 0 and oc > 0:
             return _cell(oc, 1)
         if not up_price and pc < 0 and oc < 0:
-            return _cell(oc, -1)
+            return _cell(oc, 1)
         return _cell(oc, 0)
 
     out["price_up_oi_up"] = {"short": oi_combo(short, True), "mid": oi_combo(mid, True), "long": oi_combo(long, True)}
     out["price_up_oi_down"] = {
-        "short": oi_combo(short, True) if (short.get("price_chg") or 0) > 0 and (short.get("oi_chg") or 0) < 0 else _cell(short.get("oi_chg"), -1),
+        "short": oi_combo(short, True) if (short.get("price_chg") or 0) > 0 and (short.get("oi_chg") or 0) < 0 else _cell(short.get("oi_chg"), 1),
         "mid": oi_combo(mid, True),
         "long": oi_combo(long, True),
     }
@@ -248,7 +256,7 @@ def compute_all_metrics(
     out["price_down_oi_down"] = {"short": oi_combo(short, False), "mid": oi_combo(mid, False), "long": oi_combo(long, False)}
 
     oi_sp = short.get("oi_chg")
-    out["oi_spike"] = {"short": _cell(oi_sp, 1 if oi_sp is not None and abs(oi_sp) > 3 else 0), "mid": _cell(mid.get("oi_chg"), 0), "long": _cell(long.get("oi_chg"), 0)}
+    out["oi_spike"] = {"short": _cell(oi_sp, 0), "mid": _cell(mid.get("oi_chg"), 0), "long": _cell(long.get("oi_chg"), 0)}
 
     out["premium"] = {"short": _cell(None, 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
 
@@ -259,7 +267,7 @@ def compute_all_metrics(
             vol_ratio = vols[-1] / base
     brk = short.get("price_chg")
     out["breakout_vol"] = {
-        "short": _cell(vol_ratio, -1 if brk and brk > 2 and vol_ratio and vol_ratio < 2 else 0),
+        "short": _cell(vol_ratio, 1 if brk and brk > 2 and vol_ratio and vol_ratio < 2 else 0),
         "mid": _cell(vol_ratio, 0),
         "long": _cell(vol_ratio, 0),
     }
@@ -270,17 +278,17 @@ def compute_all_metrics(
         if candles:
             ok, _, _ = sweep_on_timeframe(candles, now_ms, ms)
             swept = swept or ok
-    out["sweep_reject"] = {"short": _cell(1.0 if swept else 0.0, -1 if swept else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
+    out["sweep_reject"] = {"short": _cell(1.0 if swept else 0.0, 1 if swept else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
 
     lh = 1.0 if (short.get("price_chg") or 0) < -1 else 0.0
-    out["structure_lh"] = {"short": _cell(lh, -1 if lh else 0), "mid": _cell(lh, 0), "long": _cell(lh, 0)}
+    out["structure_lh"] = {"short": _cell(lh, 1 if lh else 0), "mid": _cell(lh, 0), "long": _cell(lh, 0)}
 
     bear = cvd_bearish(state.cvd_delta, short.get("price_chg") or 0, now_ms)
-    out["cvd_div"] = {"short": _cell(1.0 if bear else 0.0, -1 if bear else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
+    out["cvd_div"] = {"short": _cell(1.0 if bear else 0.0, 1 if bear else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
 
     btc_chg = _price_change(btc, 240) if btc else None
     out["btc_shift"] = {
-        "short": _cell(btc_chg, -1 if btc_chg is not None and btc_chg <= -3 else 0),
+        "short": _cell(btc_chg, 1 if btc_chg is not None and btc_chg <= -3 else (-1 if btc_chg is not None and btc_chg >= 3 else 0)),
         "mid": _cell(btc_chg, 0),
         "long": _cell(btc_chg, 0),
     }
@@ -296,22 +304,31 @@ def compute_all_metrics(
 
     ratio = taker_ratio(state.taker_buy, state.taker_sell, now_ms)
     sellers = taker_sellers_control(ratio)
-    out["ema_break"] = {"short": _cell(1.0 if sellers else 0.0, -1 if sellers else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
+    out["ema_break"] = {"short": _cell(1.0 if sellers else 0.0, 1 if sellers else 0), "mid": _cell(None, 0), "long": _cell(None, 0)}
 
     return out
 
 
 def metrics_summary(metrics: dict[str, dict[str, dict[str, Any]]]) -> dict[str, Any]:
-    bearish = 0
-    bullish = 0
+    for_short = 0
+    against_short = 0
     filled = 0
     for horizons in metrics.values():
         for cell in horizons.values():
             if cell.get("value") is not None:
                 filled += 1
-            sig = cell.get("signal") or 0
-            if sig < 0:
-                bearish += 1
-            elif sig > 0:
-                bullish += 1
-    return {"bearish": bearish, "bullish": bullish, "filled": filled, "total_cells": len(METRIC_LABELS) * 3}
+            favor = cell.get("short_favor")
+            if favor is None:
+                favor = cell.get("signal") or 0
+            if favor > 0:
+                for_short += 1
+            elif favor < 0:
+                against_short += 1
+    return {
+        "for_short": for_short,
+        "against_short": against_short,
+        "bearish": for_short,
+        "bullish": against_short,
+        "filled": filled,
+        "total_cells": len(METRIC_LABELS) * 3,
+    }

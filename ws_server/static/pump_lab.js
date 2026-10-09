@@ -30,9 +30,9 @@ function initPumpLabTab() {
         <h2>${title}</h2>
         <span class="quiet">${hint}</span>
         <span class="pl-legend">
-          <span class="pl-dot pl-red"></span> рост
+          <span class="pl-dot pl-red"></span> ещё растёт
           <span class="pl-dot pl-yellow"></span> торможение
-          <span class="pl-dot pl-green"></span> снижение
+          <span class="pl-dot pl-green"></span> снижается
         </span>
       </header>
       <div class="pl-cards" id="pl-cards-${id}"></div>
@@ -57,12 +57,13 @@ function onPumpLabBoard(data) {
         const phaseClass = c.phase === "green" ? "pl-green" : c.phase === "yellow" ? "pl-yellow" : "pl-red";
         const dd = c.drawdown_pct != null ? `${c.drawdown_pct}% от пика` : "";
         const gr = c.growth_pct != null ? `+${Number(c.growth_pct).toFixed(1)}%` : "";
-        const bear = c.summary ? c.summary.bearish : 0;
+        const pro = c.summary ? (c.summary.for_short ?? c.summary.bearish) : 0;
+        const anti = c.summary ? (c.summary.against_short ?? c.summary.bullish) : 0;
         return `<button type="button" class="pl-card ${phaseClass}" data-episode-id="${c.episode_id}">
           <span class="pl-card-symbol">${c.symbol}</span>
           <span class="pl-card-phase">${c.phase_label || ""}</span>
           <span class="pl-card-meta">${gr} · ${dd}</span>
-          <span class="pl-card-meta quiet">медв. сигналы: ${bear}</span>
+          <span class="pl-card-meta"><span class="pl-short-yes">за шорт: ${pro}</span> · <span class="pl-short-no">против: ${anti}</span></span>
         </button>`;
       })
       .join("");
@@ -128,6 +129,7 @@ function renderDetail() {
   let html = `<div class="pl-detail-head">
     <h3>${ep.symbol}</h3>
     <p class="quiet">Пик ${ep.peak_price} · рост ${ep.growth_pct != null ? ep.growth_pct.toFixed(1) : "—"}%</p>
+    <p class="pl-metric-legend"><span class="pl-short-yes">■</span> за шорт · <span class="pl-short-no">■</span> против шорта</p>
     <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${ep.symbol}" target="_blank" rel="noopener">Bybit</a>
   </div>`;
   for (const g of groups.length ? groups : [{ id: "flow", title: "Метрики" }]) {
@@ -139,9 +141,9 @@ function renderDetail() {
       for (const [h] of HORIZONS) {
         const cell = row[h] || {};
         const v = cell.value;
-        const sig = cell.signal || 0;
-        const cls = sig < 0 ? "sig-bear" : sig > 0 ? "sig-bull" : "";
-        html += `<td class="${cls}">${v != null ? formatVal(v) : "—"}<canvas class="pl-spark" data-mid="${mid}" data-h="${h}" width="80" height="22"></canvas></td>`;
+        const favor = cell.short_favor != null ? cell.short_favor : cell.signal || 0;
+        const cls = favor > 0 ? "pl-short-yes" : favor < 0 ? "pl-short-no" : "";
+        html += `<td class="${cls}">${v != null ? formatVal(v) : "—"}<canvas class="pl-spark" data-favor="${favor}" data-mid="${mid}" data-h="${h}" width="80" height="22"></canvas></td>`;
       }
       html += `</tr>`;
     }
@@ -178,7 +180,8 @@ function drawSparks(history) {
     const min = Math.min(...series);
     const max = Math.max(...series);
     const span = max - min || 1;
-    ctx.strokeStyle = "#5dade2";
+    const favor = Number(canvas.dataset.favor || 0);
+    ctx.strokeStyle = favor > 0 ? "#3dd68c" : favor < 0 ? "#ff5d73" : "#8e9aab";
     ctx.beginPath();
     series.forEach((val, i) => {
       const x = (i / (series.length - 1)) * (canvas.width - 2) + 1;
