@@ -1537,10 +1537,23 @@ th { cursor: pointer; color: var(--muted); }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
-.pl-card.pl-red { border-color: rgba(255, 93, 115, 0.65); }
-.pl-card.pl-yellow { border-color: rgba(246, 211, 101, 0.65); }
-.pl-card.pl-green { border-color: rgba(61, 214, 140, 0.65); }
+.pl-card.pl-red {
+  border-color: rgba(255, 93, 115, 0.75);
+  background: linear-gradient(145deg, rgba(255, 93, 115, 0.28), rgba(255, 93, 115, 0.1));
+}
+.pl-card.pl-yellow {
+  border-color: rgba(246, 211, 101, 0.75);
+  background: linear-gradient(145deg, rgba(246, 211, 101, 0.22), rgba(246, 211, 101, 0.08));
+}
+.pl-card.pl-green {
+  border-color: rgba(61, 214, 140, 0.75);
+  background: linear-gradient(145deg, rgba(61, 214, 140, 0.26), rgba(61, 214, 140, 0.1));
+}
+.pl-card.pl-red .pl-card-phase { color: #ffb3be; }
+.pl-card.pl-yellow .pl-card-phase { color: #ffe9a8; }
+.pl-card.pl-green .pl-card-phase { color: #9ef0c8; }
 .pl-card.selected { box-shadow: 0 0 0 2px rgba(93, 173, 226, 0.5); }
 .pl-card-symbol { font-weight: 700; font-size: 15px; }
 .pl-card-phase { font-size: 12px; }

@@ -23,6 +23,19 @@ log = logging.getLogger(__name__)
 
 PHASE_COLORS = {"red": "#ff5d73", "yellow": "#f6d365", "green": "#3dd68c", "purple": "#b388ff"}
 CLASS_LABELS = {"fast": "Быстрый", "medium": "Средний", "long": "Длинный"}
+_PHASE_ORDER = {"green": 0, "yellow": 1, "red": 2}
+
+
+def _card_priority_sort(card: dict[str, Any]) -> tuple:
+    """Зелёные первые (больше «за шорт»), затем жёлтые, красные (больше «против»)."""
+    phase = card.get("phase") or "red"
+    order = _PHASE_ORDER.get(phase, 3)
+    summary = card.get("summary") or {}
+    pro = int(summary.get("for_short") or summary.get("bearish") or 0)
+    anti = int(summary.get("against_short") or summary.get("bullish") or 0)
+    if phase == "red":
+        return (order, -anti, -pro, card.get("symbol") or "")
+    return (order, -pro, -anti, card.get("symbol") or "")
 
 
 def _meets_turnover(state: SymbolState) -> bool:
@@ -211,7 +224,7 @@ class PumpLab:
             }
             sections[pump_class].append(card)
         for key in sections:
-            sections[key].sort(key=lambda c: (-(c.get("growth_pct") or 0), c.get("symbol") or ""))
+            sections[key].sort(key=_card_priority_sort)
         return {
             "updated_at": now_ms,
             "sections": sections,

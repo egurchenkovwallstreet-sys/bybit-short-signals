@@ -48,7 +48,8 @@ function onPumpLabBoard(data) {
   for (const [id] of PUMP_LAB_SECTIONS) {
     const wrap = document.getElementById(`pl-cards-${id}`);
     if (!wrap) continue;
-    const cards = (data.sections && data.sections[id]) || [];
+    let cards = [...((data.sections && data.sections[id]) || [])];
+    cards.sort(compareCardPriority);
     if (!cards.length) {
       wrap.innerHTML = `<p class="quiet pl-empty">Пампов этого типа пока нет.</p>`;
       continue;
@@ -79,6 +80,25 @@ function onPumpLabBoard(data) {
       hideDetail();
     }
   }
+}
+
+function compareCardPriority(a, b) {
+  const order = { green: 0, yellow: 1, red: 2 };
+  const pa = order[a.phase] ?? 3;
+  const pb = order[b.phase] ?? 3;
+  if (pa !== pb) return pa - pb;
+  const proA = a.summary ? (a.summary.for_short ?? a.summary.bearish ?? 0) : 0;
+  const proB = b.summary ? (b.summary.for_short ?? b.summary.bearish ?? 0) : 0;
+  const antiA = a.summary ? (a.summary.against_short ?? a.summary.bullish ?? 0) : 0;
+  const antiB = b.summary ? (b.summary.against_short ?? b.summary.bullish ?? 0) : 0;
+  if (a.phase === "red") {
+    if (antiB !== antiA) return antiB - antiA;
+    if (proB !== proA) return proB - proA;
+  } else {
+    if (proB !== proA) return proB - proA;
+    if (antiB !== antiA) return antiB - antiA;
+  }
+  return String(a.symbol || "").localeCompare(String(b.symbol || ""));
 }
 
 function cardsFlat(data) {
