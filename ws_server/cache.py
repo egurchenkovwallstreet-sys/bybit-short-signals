@@ -95,6 +95,7 @@ class MarketCache:
         self.x2_retrace_signals: dict[str, dict[str, Any]] = {}
         self.pump_strategy_signals: list[dict[str, Any]] = []
         self.pump_strategy_by_symbol: dict[str, dict[str, Any]] = {}
+        self.pump_lab_board: dict[str, Any] = {}
 
     def apply(self, message: dict[str, Any]) -> str | None:
         kind = message.get("type")
@@ -114,6 +115,9 @@ class MarketCache:
             self.pump_strategy_signals = list((message.get("data") or {}).get("signals") or [])
             self._reindex_pump_strategy()
             return "pump_strategy"
+        if kind == "pump_lab_board":
+            self.pump_lab_board = dict(message.get("data") or {})
+            return "pump_lab"
         if kind == "signal":
             self._upsert_signal(message.get("data") or {})
             return "board"
@@ -121,6 +125,9 @@ class MarketCache:
             self._market(message)
             return "market"
         return None
+
+    def view_pump_lab_board(self) -> dict[str, Any]:
+        return self.pump_lab_board or {"sections": {"fast": [], "medium": [], "long": []}}
 
     def view_pump_scan_board(self) -> list[dict[str, Any]]:
         view = []

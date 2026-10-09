@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ws_server import paper as paper_db
+from ws_server import pump_lab_api
 from ws_server.hub import Client, Hub
 
 
@@ -83,6 +84,22 @@ async def paper_trades(status: str = "closed", limit: int = 300, variant: str | 
 async def paper_candidates(limit: int = 300) -> dict[str, Any]:
     rows = await asyncio.to_thread(paper_db.candidates, max(1, min(limit, 2000)))
     return {"rows": rows}
+
+
+@app.get("/api/pump-lab/board")
+async def pump_lab_board() -> dict[str, Any]:
+    data = app.state.hub.cache.view_pump_lab_board()
+    if data.get("sections"):
+        return data
+    return await asyncio.to_thread(pump_lab_api.board_from_db)
+
+
+@app.get("/api/pump-lab/episode/{episode_id}")
+async def pump_lab_episode(episode_id: int) -> dict[str, Any]:
+    detail = await asyncio.to_thread(pump_lab_api.episode_detail, episode_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="эпизод не найден")
+    return detail
 
 
 @app.get("/api/tooltips")

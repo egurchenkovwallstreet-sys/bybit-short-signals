@@ -66,6 +66,8 @@ class SignalService:
                 await asyncio.gather(kline_task, return_exceptions=True)
             if self.engine.paper is not None:
                 self.engine.paper.close()
+            if self.engine.pump_lab is not None:
+                self.engine.pump_lab.close()
             await pubsub.unsubscribe(config.REDIS_CHANNEL_MARKET)
             await pubsub.aclose()
             if self._publisher is not None:

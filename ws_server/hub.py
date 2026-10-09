@@ -49,6 +49,7 @@ class Hub:
         self.pump_scan_dirty = False
         self.x2_retrace_dirty = False
         self.pump_strategy_dirty = False
+        self.pump_lab_dirty = False
         self.market_dirty = False
         self._stopped = False
         self._stats_cache: dict[str, Any] | None = None
@@ -115,6 +116,7 @@ class Hub:
                 else None
             ),
             "paper_test": self.paper.view(),
+            "pump_lab_board": self.cache.view_pump_lab_board(),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
@@ -235,6 +237,9 @@ class Hub:
                 elif kind == "pump_strategy":
                     self.demo = False
                     self.pump_strategy_dirty = True
+                elif kind == "pump_lab":
+                    self.demo = False
+                    self.pump_lab_dirty = True
                 elif kind == "market":
                     self.market_dirty = True
         finally:
@@ -260,12 +265,14 @@ class Hub:
             pump_strategy = (
                 self.cache.view_pump_strategy_board() if self.pump_strategy_dirty else None
             )
+            pump_lab = self.cache.view_pump_lab_board() if self.pump_lab_dirty else None
             send_detail = self.market_dirty
             paper = self.paper.view() if self.paper_dirty else None
             self.board_dirty = False
             self.pump_scan_dirty = False
             self.x2_retrace_dirty = False
             self.pump_strategy_dirty = False
+            self.pump_lab_dirty = False
             self.market_dirty = False
             self.paper_dirty = False
             pnl = None
@@ -300,6 +307,10 @@ class Hub:
                                 "data": pump_strategy,
                                 "demo": self.demo,
                             }
+                        )
+                    if pump_lab is not None:
+                        await client.websocket.send_json(
+                            {"type": "pump_lab_board", "data": pump_lab, "demo": self.demo}
                         )
                     if client.symbol and (send_detail or client.force_detail):
                         await client.websocket.send_json(

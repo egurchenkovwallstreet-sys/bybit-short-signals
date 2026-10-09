@@ -19,6 +19,7 @@ from signal_engine.pump_scan import build_pump_scan_board
 from signal_engine.x2_retrace import build_x2_retrace_board
 from signal_engine.pump_strategy import build_pump_strategy_board
 from signal_engine.paper.strategy import PaperStrategy
+from signal_engine.pump_lab.lab import PumpLab
 from signal_engine.store import SignalStore
 from signal_engine.watch_store import WatchStore
 
@@ -32,10 +33,12 @@ class Engine:
         store: SignalStore,
         watches: WatchStore | None = None,
         paper: PaperStrategy | None = None,
+        pump_lab: PumpLab | None = None,
     ) -> None:
         self.store = store
         self.watches = watches or WatchStore(config.SQLITE_PATH)
         self.paper = paper
+        self.pump_lab = pump_lab if pump_lab is not None else PumpLab()
         self.symbols: dict[str, SymbolState] = {}
         self.open_signals: dict[str, Signal] = {}
         self._signal_column_pending: dict[str, tuple[int, int]] = {}
@@ -44,6 +47,8 @@ class Engine:
         self.watches.open()
         if self.paper is not None:
             self.paper.open()
+        if self.pump_lab is not None:
+            self.pump_lab.open()
         for signal in self.store.load_open():
             self.open_signals[signal.symbol] = signal
             self.symbols.setdefault(signal.symbol, SymbolState(signal.symbol))
@@ -101,6 +106,13 @@ class Engine:
                 out.append(self.paper.scan(self.symbols, now_ms))
             except Exception:
                 log.exception("Тест стратегии: ошибка скана")
+        if self.pump_lab is not None:
+            try:
+                board = self.pump_lab.maybe_scan(self.symbols, now_ms)
+                if board is not None:
+                    out.append({"type": "pump_lab_board", "data": board})
+            except Exception:
+                log.exception("PumpLab: ошибка скана")
         return out
 
     def _try_open(self, state: SymbolState, now_ms: int, wins: int, total: int) -> Signal | None:

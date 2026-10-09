@@ -1484,3 +1484,103 @@ th { cursor: pointer; color: var(--muted); }
   .workspace, .gauges { grid-template-columns: 1fr; }
   .columns { grid-template-columns: repeat(5, 160px); }
 }
+
+/* --- Анализ пампа (лаборатория) --- */
+.pump-lab-view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 24px;
+}
+.pump-lab-intro { margin: 0 0 12px; max-width: 720px; }
+.pump-lab-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(280px, 420px);
+  gap: 16px;
+  align-items: start;
+}
+.pump-lab-sections { display: flex; flex-direction: column; gap: 20px; }
+.pl-section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.pl-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+}
+.pl-section-head h2 { margin: 0; font-size: 16px; }
+.pl-legend { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; gap: 10px; align-items: center; }
+.pl-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.pl-dot.pl-red { background: var(--red); }
+.pl-dot.pl-yellow { background: var(--yellow); }
+.pl-dot.pl-green { background: var(--green); }
+.pl-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.pl-card {
+  text-align: left;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--panel-2);
+  cursor: pointer;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pl-card.pl-red { border-color: rgba(255, 93, 115, 0.65); }
+.pl-card.pl-yellow { border-color: rgba(246, 211, 101, 0.65); }
+.pl-card.pl-green { border-color: rgba(61, 214, 140, 0.65); }
+.pl-card.selected { box-shadow: 0 0 0 2px rgba(93, 173, 226, 0.5); }
+.pl-card-symbol { font-weight: 700; font-size: 15px; }
+.pl-card-phase { font-size: 12px; }
+.pl-card-meta { font-size: 11px; }
+.pl-empty { margin: 0; padding: 8px 0; }
+.pump-lab-detail {
+  position: sticky;
+  top: 8px;
+  max-height: calc(100vh - 120px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+.pl-detail-head { margin-bottom: 12px; }
+.pl-detail-head h3 { margin: 0 0 4px; }
+.pl-metric-group { margin-bottom: 16px; }
+.pl-metric-group h4 { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.pl-metric-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.pl-metric-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pl-metric-table th, .pl-metric-table td { border-bottom: 1px solid var(--line); padding: 6px 4px; vertical-align: top; }
+.pl-m-name { min-width: 120px; max-width: 160px; }
+.pl-metric-table td.sig-bear { color: var(--green); }
+.pl-metric-table td.sig-bull { color: var(--red); }
+.pl-spark { display: block; margin-top: 4px; max-width: 100%; }
+
+@media (max-width: 900px) {
+  .topbar { flex-wrap: wrap; gap: 8px; }
+  .tabs { flex-wrap: wrap; max-width: 100%; }
+  .tab { padding: 8px 10px; font-size: 13px; }
+  .link-state { margin-left: 0; width: 100%; }
+  .pump-lab-layout { grid-template-columns: 1fr; }
+  .pump-lab-detail {
+    position: static;
+    max-height: none;
+  }
+  .pl-section-head .pl-legend { margin-left: 0; width: 100%; }
+  .pl-cards { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 480px) {
+  .pl-cards { grid-template-columns: 1fr; }
+  .brand { font-size: 14px; }
+}

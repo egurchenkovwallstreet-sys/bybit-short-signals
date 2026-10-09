@@ -36,6 +36,7 @@ class SymbolState:
     ticker_oi: float | None = None
     ticker_oi_ts: int | None = None
     liq_notional: dict[int, float] = field(default_factory=dict)
+    liq_long_notional: dict[int, float] = field(default_factory=dict)
     cvd_delta: dict[int, float] = field(default_factory=dict)
     taker_buy: dict[int, float] = field(default_factory=dict)
     taker_sell: dict[int, float] = field(default_factory=dict)
@@ -107,14 +108,19 @@ class SymbolState:
         self.bars_1m = self.bars_1m[-config.BAR_HISTORY_LIMIT :]
 
     def _liquidation(self, timestamp: int, data: dict) -> None:
-        if not is_short_liquidation(data.get("side")):
-            return
+        side = data.get("side")
         price = _float(data.get("price"))
         size = _float(data.get("size"))
         if price is None or size is None or price <= 0 or size <= 0:
             return
         minute = minute_start(timestamp)
-        self.liq_notional[minute] = self.liq_notional.get(minute, 0.0) + price * size
+        notional = price * size
+        if is_short_liquidation(side):
+            self.liq_notional[minute] = self.liq_notional.get(minute, 0.0) + notional
+        elif side == "Buy":
+            self.liq_long_notional[minute] = self.liq_long_notional.get(minute, 0.0) + notional
+        else:
+            return
         self._trim_buckets(timestamp)
 
     def _ticker(self, timestamp: int, data: dict) -> None:
@@ -174,7 +180,7 @@ class SymbolState:
 
     def _trim_buckets(self, timestamp: int) -> None:
         cutoff = minute_start(timestamp) - 180 * 60_000
-        for bucket in (self.liq_notional, self.cvd_delta, self.taker_buy, self.taker_sell):
+        for bucket in (self.liq_notional, self.liq_long_notional, self.cvd_delta, self.taker_buy, self.taker_sell):
             for key in list(bucket):
                 if key < cutoff:
                     del bucket[key]

@@ -184,6 +184,12 @@ function connectSocket() {
         message.pump_strategy_detail,
       );
     }
+    if (message.pump_lab_board && window.pumpLab) {
+      window.pumpLab.onPumpLabBoard(message.pump_lab_board);
+    }
+  } else if (message.type === "pump_lab_board" && window.pumpLab) {
+    setDemo(message.demo);
+    window.pumpLab.onPumpLabBoard(message.data);
   } else if (message.type === "paper_test" && window.paperTest) {
     window.paperTest.onSnapshot(message.data);
   } else if (message.type === "board") {
@@ -242,8 +248,13 @@ function showTab(name) {
   if (pumpStrategyView) pumpStrategyView.hidden = name !== "pump_strategy";
   document.getElementById("view-pending").hidden = name !== "pending";
   document.getElementById("view-stats").hidden = name !== "stats";
+  const pumpLabView = document.getElementById("view-pump-lab");
+  if (pumpLabView) pumpLabView.hidden = name !== "pump_lab";
   const paperView = document.getElementById("view-paper");
   if (paperView) paperView.hidden = name !== "paper";
+  if (name === "pump_lab" && window.pumpLab) {
+    window.pumpLab.onTab();
+  }
   if (name === "paper" && window.paperTest) {
     requestAnimationFrame(() => window.paperTest.onTab());
   }

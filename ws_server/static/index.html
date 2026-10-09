@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261008b">
+  <link rel="stylesheet" href="/static/styles.css?v=20261009a">
 </head>
 <body>
   <header class="topbar">
@@ -16,6 +16,7 @@
       <button type="button" class="tab" data-tab="pump_strategy">Поиск пампов</button>
       <button type="button" class="tab" data-tab="pending">Не отработанные</button>
       <button type="button" class="tab" data-tab="stats">Статистика</button>
+      <button type="button" class="tab" data-tab="pump_lab">Анализ пампа</button>
       <button type="button" class="tab" data-tab="paper">Тест стратегии</button>
     </nav>
     <div id="link-state" class="link-state">подключение…</div>
@@ -86,6 +87,19 @@
         <p class="quiet psc-chart-hint">Liq слева 30%. На 5 последних свечах — ⚡ и сумма short/long за свечу. Справа стакан ±30%.</p>
       </div>
       <aside class="psc-info-pane" id="pump-scan-info-pane"></aside>
+    </div>
+  </section>
+
+  <section id="view-pump-lab" class="pump-lab-view" hidden>
+    <p class="quiet pump-lab-intro">
+      Все активные пампы: быстрый (минуты–часы), средний (часы–3 дня), длинный (3–20 дней).
+      Красный — рост, жёлтый — торможение, зелёный — снижение. Снимок метрик каждые ~5 мин.
+    </p>
+    <div class="pump-lab-layout">
+      <div id="pump-lab-sections" class="pump-lab-sections"></div>
+      <aside id="pump-lab-detail" class="pump-lab-detail" hidden>
+        <p class="quiet">Выберите монету.</p>
+      </aside>
     </div>
   </section>
 
@@ -200,5 +214,6 @@
   <script src="/static/pump_scan.js?v=20251008v"></script>
   <script src="/static/x2_retrace.js?v=20251008v"></script>
   <script src="/static/pump_strategy.js?v=20251008h"></script>
+  <script src="/static/pump_lab.js?v=20261009a"></script>
 </body>
 </html>
