@@ -56,6 +56,79 @@ def drawdown_from_peak_pct(price: float, peak: float) -> float:
     return max(0.0, (1.0 - price / peak) * 100.0)
 
 
+def post_peak_correction_trough(
+    state: SymbolState,
+    peak_ts: int,
+    peak_price: float,
+) -> tuple[float | None, int | None, float]:
+    """Минимум цены после пика (дно коррекции) и откат пик→дно, %."""
+    bars = [b for b in merged_15m(state) if b.timestamp >= peak_ts]
+    if not bars:
+        return None, None, 0.0
+    trough_bar = min(bars, key=lambda b: b.low)
+    trough = trough_bar.low
+    if trough <= 0:
+        return None, None, 0.0
+    retrace = drawdown_from_peak_pct(trough, peak_price)
+    return trough, trough_bar.timestamp, retrace
+
+
+def _trough_confirmed(
+    state: SymbolState,
+    peak_ts: int,
+    trough: float,
+    trough_ts: int,
+    now_ms: int,
+) -> bool:
+    """Дно не «на лету»: прошло время и/или отскок, и после дна нет нового минимума."""
+    bars = [b for b in merged_15m(state) if b.timestamp >= peak_ts]
+    if not bars:
+        return False
+    age_min = max(0, int((now_ms - trough_ts) / MIN_MS))
+    if age_min < config.PUMP_LAB_TROUGH_CONFIRM_MIN:
+        return False
+    after = [b for b in bars if b.timestamp > trough_ts]
+    if not after:
+        return False
+    if not all(b.low >= trough * 0.997 for b in after):
+        return False
+    price = state.last_price or bars[-1].close
+    bounce = config.PUMP_LAB_TROUGH_BOUNCE_PCT
+    if price > trough * (1.0 + bounce / 100.0):
+        return True
+    return len(after) >= 1
+
+
+def is_pump_passed(
+    state: SymbolState,
+    pump_class: str,
+    peak_price: float,
+    peak_ts: int,
+    now_ms: int,
+) -> tuple[bool, dict]:
+    """Памп прошёл: откат от пика до сформированного дна коррекции (ориентир 20–40%)."""
+    price = state.last_price or peak_price
+    dd_now = drawdown_from_peak_pct(price, peak_price)
+    trough, trough_ts, trough_retrace = post_peak_correction_trough(state, peak_ts, peak_price)
+    meta: dict = {
+        "drawdown_pct": round(dd_now, 2),
+        "trough_retrace_pct": round(trough_retrace, 2),
+        "trough_price": trough,
+        "trough_ts": trough_ts,
+    }
+    if trough is None or trough_ts is None:
+        return False, meta
+    min_dd = passed_drawdown_pct(pump_class)
+    if trough_retrace < min_dd:
+        return False, meta
+    if not _trough_confirmed(state, peak_ts, trough, trough_ts, now_ms):
+        return False, meta
+    # Глубина дна: от min_dd до max_dd — типичная коррекция; глубже max_dd — тоже «прошёл».
+    meta["pump_passed"] = True
+    meta["minutes_since_high"] = minutes_since_high(state, now_ms, peak_ts, peak_price)
+    return True, meta
+
+
 def minutes_since_high(state: SymbolState, now_ms: int, peak_ts: int, peak_price: float) -> int:
     bars = merged_15m(state)
     if not bars:
@@ -112,16 +185,15 @@ def compute_phase(
     peak_ts: int,
     now_ms: int,
 ) -> tuple[str, dict]:
-    price = state.last_price or peak_price
-    dd = drawdown_from_peak_pct(price, peak_price)
-    if dd >= passed_drawdown_pct(pump_class):
+    passed, passed_meta = is_pump_passed(state, pump_class, peak_price, peak_ts, now_ms)
+    if passed:
         return "purple", {
-            "drawdown_pct": round(dd, 2),
-            "minutes_since_high": minutes_since_high(state, now_ms, peak_ts, peak_price),
+            **passed_meta,
             "range_since_peak_pct": None,
             "green_signals": 0,
-            "pump_passed": True,
         }
+    price = state.last_price or peak_price
+    dd = drawdown_from_peak_pct(price, peak_price)
     stall_min = _stall_minutes(pump_class)
     since_high = minutes_since_high(state, now_ms, peak_ts, peak_price)
     rng = _range_pct_since_peak(state, peak_ts)

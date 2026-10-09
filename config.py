@@ -277,11 +277,15 @@ PUMP_LAB_GROWTH_MIN_LONG = _env_float("PUMP_LAB_GROWTH_MIN_LONG", 100.0)
 PUMP_LAB_VOLUME_MIN_FAST = _env_float("PUMP_LAB_VOLUME_MIN_FAST", 10.0)
 PUMP_LAB_VOLUME_MIN_MEDIUM = _env_float("PUMP_LAB_VOLUME_MIN_MEDIUM", 20.0)
 PUMP_LAB_VOLUME_MIN_LONG = _env_float("PUMP_LAB_VOLUME_MIN_LONG", 20.0)
-# Откат от пика ≥ этого % — фаза «памп прошёл», эпизод снимается с доски.
-# «Памп прошёл» — откат от пика в диапазоне 20–40% по типу пампа.
+# «Памп прошёл»: откат от пика до минимума коррекции (дно, откуда мог пойти новый рост).
+# Минимум глубины дна по типу; типичный верх диапазона — 40%.
 PUMP_LAB_PASSED_DD_FAST = _env_float("PUMP_LAB_PASSED_DD_FAST", 20.0)
 PUMP_LAB_PASSED_DD_MEDIUM = _env_float("PUMP_LAB_PASSED_DD_MEDIUM", 30.0)
 PUMP_LAB_PASSED_DD_LONG = _env_float("PUMP_LAB_PASSED_DD_LONG", 40.0)
+PUMP_LAB_PASSED_DD_MAX = _env_float("PUMP_LAB_PASSED_DD_MAX", 40.0)
+# Дно коррекции считаем сформированным: столько минут после свечи-минимума и/или отскок %.
+PUMP_LAB_TROUGH_CONFIRM_MIN = _env_int("PUMP_LAB_TROUGH_CONFIRM_MIN", 15)
+PUMP_LAB_TROUGH_BOUNCE_PCT = _env_float("PUMP_LAB_TROUGH_BOUNCE_PCT", 1.0)
 PUMP_LAB_MAX_AGE_DAYS = _env_int("PUMP_LAB_MAX_AGE_DAYS", 20)
 # Длительность роста (дно → пик): быстрый ≤6 ч, средний ≤3 сут, иначе длинный (до 20 сут).
 PUMP_LAB_FAST_MAX_MS = _env_int("PUMP_LAB_FAST_MAX_MS", 6 * 3_600_000)

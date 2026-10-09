@@ -13,7 +13,7 @@ from signal_engine.pump_lab.metrics import METRIC_GROUPS, METRIC_LABELS, compute
 from signal_engine.pump_lab.phases import (
     compute_phase,
     drawdown_from_peak_pct,
-    passed_drawdown_pct,
+    is_pump_passed,
     pump_class_from_duration,
 )
 from signal_engine.pump_lab.store import PumpLabStore
@@ -61,11 +61,15 @@ class PumpLab:
         active = self.store.active_by_symbol()
         for ep in list(active.values()):
             state = symbols.get(ep["symbol"])
+            if state is None:
+                continue
             peak = float(ep.get("peak_price") or 0)
-            price = (state.last_price if state else None) or ep.get("last_price") or peak
+            peak_ts = int(ep.get("peak_ts") or 0)
             pc = ep.get("pump_class") or "fast"
-            if peak > 0 and price and drawdown_from_peak_pct(price, peak) >= passed_drawdown_pct(pc):
-                self.store.close_episode(int(ep["id"]), now_ms, "pump_passed")
+            if peak > 0 and peak_ts > 0:
+                passed, _ = is_pump_passed(state, pc, peak, peak_ts, now_ms)
+                if passed:
+                    self.store.close_episode(int(ep["id"]), now_ms, "pump_passed")
         active = self.store.active_by_symbol()
         seen: set[str] = set()
 

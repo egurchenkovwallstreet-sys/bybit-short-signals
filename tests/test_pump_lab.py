@@ -8,7 +8,14 @@ from pathlib import Path
 
 import config
 from signal_engine.pump_lab.detect import min_growth_pct, min_volume_ratio
-from signal_engine.pump_lab.phases import compute_phase, passed_drawdown_pct, pump_class_from_duration, drawdown_from_peak_pct
+from signal_engine.pump_lab.phases import (
+    compute_phase,
+    drawdown_from_peak_pct,
+    is_pump_passed,
+    passed_drawdown_pct,
+    post_peak_correction_trough,
+    pump_class_from_duration,
+)
 from signal_engine.pump_lab.store import PumpLabStore
 from signal_engine.state import Bar, SymbolState
 
@@ -29,6 +36,22 @@ class PumpLabPhaseTests(unittest.TestCase):
 
     def test_drawdown(self) -> None:
         self.assertAlmostEqual(drawdown_from_peak_pct(90, 100), 10.0)
+
+    def test_trough_retrace_not_passed_while_falling(self) -> None:
+        now = 1_700_000_000_000
+        peak_ts = now - 6 * 3_600_000
+        peak = 100.0
+        state = SymbolState("TUSDT", last_price=72.0)
+        for i in range(8):
+            ts = peak_ts + i * 15 * 60_000
+            low = 100 - i * 4
+            state.bars_htf.setdefault("15", []).append(
+                Bar(ts, low + 2, low + 3, low, low + 1, 1000)
+            )
+        _, _, retrace = post_peak_correction_trough(state, peak_ts, peak)
+        self.assertGreaterEqual(retrace, 20.0)
+        passed, _ = is_pump_passed(state, "fast", peak, peak_ts, now)
+        self.assertFalse(passed)
 
     def test_phase_red_on_fresh_pump(self) -> None:
         now = 1_700_000_000_000
