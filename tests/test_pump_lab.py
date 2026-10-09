@@ -7,7 +7,13 @@ import unittest
 from pathlib import Path
 
 import config
-from signal_engine.pump_lab.detect import detect_episodes, min_growth_pct, min_volume_ratio, window_ms
+from signal_engine.pump_lab.detect import (
+    detect_episodes,
+    min_growth_pct,
+    min_volume_ratio,
+    volume_ratio_min_to_peak,
+    window_ms,
+)
 from signal_engine.pump_lab.phases import (
     compute_phase,
     drawdown_from_peak_pct,
@@ -64,17 +70,35 @@ class PumpLabPhaseTests(unittest.TestCase):
 
 
 class PumpLabDetectTests(unittest.TestCase):
+    def test_volume_ratio_symmetric_sums(self) -> None:
+        step = 15 * 60_000
+        valley_ts = 1_000_000
+        peak_ts = valley_ts + step
+        bars = [
+            Bar(valley_ts - step, 1, 1, 1, 1, 100.0),
+            Bar(valley_ts, 1, 1, 1, 1, 1000.0),
+            Bar(peak_ts, 1, 1, 1, 1, 1000.0),
+        ]
+        ratio = volume_ratio_min_to_peak(bars, valley_ts, peak_ts, window_start_ms=0)
+        self.assertAlmostEqual(ratio or 0, 20.0)
+
     def test_detect_fast_window_valley_then_peak(self) -> None:
         now = 1_700_000_000_000
         state = SymbolState("PUMPUSDT", last_price=140.0)
         step = 15 * 60_000
         base_ts = now - window_ms("fast") + step
         n = int(window_ms("fast") / step)
+        valley_i = n - 4
         for i in range(n):
             ts = base_ts + i * step
-            low = 100.0 if i < n // 3 else 100.0 + (i - n // 3) * 2
-            high = low + (50.0 if i == n - 1 else 5.0)
-            vol = 100.0 if i != n - 1 else 50_000.0
+            if i < valley_i:
+                low, high = 110.0, 112.0
+            elif i == valley_i:
+                low, high = 100.0, 104.0
+            else:
+                low = 100.0 + (i - valley_i) * 3
+                high = low + (40.0 if i == n - 1 else 4.0)
+            vol = 50.0 if i < valley_i else (600.0 if valley_i <= i <= n - 1 else 50.0)
             state.bars_htf.setdefault("15", []).append(Bar(ts, low, high, low, (low + high) / 2, vol))
         drafts = detect_episodes(state, now)
         fast = [d for d in drafts if d.pump_class == "fast"]

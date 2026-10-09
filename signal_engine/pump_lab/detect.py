@@ -49,11 +49,26 @@ def min_volume_ratio(pump_class: str) -> float:
     return config.PUMP_LAB_VOLUME_MIN_LONG
 
 
-def _avg_volume(bars: list[Bar]) -> float | None:
-    vols = [b.volume for b in bars if b.volume > 0]
-    if not vols:
+def volume_ratio_min_to_peak(
+    bars: list[Bar],
+    valley_ts: int,
+    peak_ts: int,
+    window_start_ms: int,
+) -> float | None:
+    """Сумма объёма [дно→пик] / сумма за столько же времени до дна (внутри окна)."""
+    duration = peak_ts - valley_ts
+    if duration <= 0:
         return None
-    return sum(vols) / len(vols)
+    base_start = valley_ts - duration
+    if base_start < window_start_ms:
+        return None
+    leg_vol = sum(b.volume for b in bars if valley_ts <= b.timestamp <= peak_ts and b.volume > 0)
+    if leg_vol <= 0:
+        return None
+    base_vol = sum(b.volume for b in bars if base_start <= b.timestamp < valley_ts and b.volume > 0)
+    if base_vol <= 0:
+        return None
+    return leg_vol / base_vol
 
 
 def _draft_for_class(state: SymbolState, now_ms: int, pump_class: str) -> EpisodeDraft | None:
@@ -77,15 +92,9 @@ def _draft_for_class(state: SymbolState, now_ms: int, pump_class: str) -> Episod
     growth = (peak / valley_bar.low - 1.0) * 100.0
     if growth < min_growth_pct(pump_class):
         return None
-    base = _avg_volume(recent)
-    if base is None or base <= 0:
-        return None
-    leg = [b for b in after if b.timestamp <= peak_bar.timestamp]
-    peak_vol = max((b.volume for b in leg), default=0.0)
-    if peak_vol <= 0:
-        return None
-    vol_ratio = peak_vol / base
-    if vol_ratio < min_volume_ratio(pump_class):
+    window_start = now_ms - win
+    vol_ratio = volume_ratio_min_to_peak(bars, valley_bar.timestamp, peak_bar.timestamp, window_start)
+    if vol_ratio is None or vol_ratio < min_volume_ratio(pump_class):
         return None
     price = state.last_price or bars[-1].close
     if drawdown_from_peak_pct(price, peak) > config.PUMP_LAB_MAX_DRAWDOWN_PCT:

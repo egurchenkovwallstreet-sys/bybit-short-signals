@@ -273,7 +273,7 @@ PUMP_LAB_MAX_DRAWDOWN_PCT = _env_float("PUMP_LAB_MAX_DRAWDOWN_PCT", 45.0)
 PUMP_LAB_GROWTH_MIN_FAST = _env_float("PUMP_LAB_GROWTH_MIN_FAST", 40.0)
 PUMP_LAB_GROWTH_MIN_MEDIUM = _env_float("PUMP_LAB_GROWTH_MIN_MEDIUM", 60.0)
 PUMP_LAB_GROWTH_MIN_LONG = _env_float("PUMP_LAB_GROWTH_MIN_LONG", 100.0)
-# Пик объёма на ноге роста / средняя 20 баров до дна.
+# Сумма объёма дно→пик / сумма за такой же интервал до дна.
 PUMP_LAB_VOLUME_MIN_FAST = _env_float("PUMP_LAB_VOLUME_MIN_FAST", 10.0)
 PUMP_LAB_VOLUME_MIN_MEDIUM = _env_float("PUMP_LAB_VOLUME_MIN_MEDIUM", 20.0)
 PUMP_LAB_VOLUME_MIN_LONG = _env_float("PUMP_LAB_VOLUME_MIN_LONG", 10.0)
