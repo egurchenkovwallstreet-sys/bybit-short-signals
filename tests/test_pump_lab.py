@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 import config
-from signal_engine.pump_lab.detect import min_growth_pct, min_volume_ratio
+from signal_engine.pump_lab.detect import detect_episodes, min_growth_pct, min_volume_ratio, window_ms
 from signal_engine.pump_lab.phases import (
     compute_phase,
     drawdown_from_peak_pct,
@@ -25,13 +25,13 @@ class PumpLabPhaseTests(unittest.TestCase):
         self.assertEqual(min_growth_pct("fast"), 40.0)
         self.assertEqual(min_growth_pct("medium"), 80.0)
         self.assertEqual(min_volume_ratio("fast"), 10.0)
-        self.assertEqual(min_volume_ratio("long"), 20.0)
+        self.assertEqual(min_volume_ratio("long"), 10.0)
         self.assertEqual(passed_drawdown_pct("fast"), 20.0)
         self.assertEqual(passed_drawdown_pct("long"), 40.0)
 
     def test_pump_class_duration(self) -> None:
         self.assertEqual(pump_class_from_duration(2 * 3_600_000), "fast")
-        self.assertEqual(pump_class_from_duration(24 * 3_600_000), "medium")
+        self.assertEqual(pump_class_from_duration(36 * 3_600_000), "medium")
         self.assertEqual(pump_class_from_duration(5 * 24 * 3_600_000), "long")
 
     def test_drawdown(self) -> None:
@@ -61,6 +61,26 @@ class PumpLabPhaseTests(unittest.TestCase):
             state.bars_1m.append(Bar(ts, 90 + i * 0.3, 91 + i * 0.3, 89, 90 + i * 0.3, 1000))
         phase, _ = compute_phase(state, "fast", 100.0, now - 5 * 60_000, now)
         self.assertIn(phase, {"red", "yellow", "green"})
+
+
+class PumpLabDetectTests(unittest.TestCase):
+    def test_detect_fast_window_valley_then_peak(self) -> None:
+        now = 1_700_000_000_000
+        state = SymbolState("PUMPUSDT", last_price=140.0)
+        step = 15 * 60_000
+        base_ts = now - window_ms("fast") + step
+        n = int(window_ms("fast") / step)
+        for i in range(n):
+            ts = base_ts + i * step
+            low = 100.0 if i < n // 3 else 100.0 + (i - n // 3) * 2
+            high = low + (50.0 if i == n - 1 else 5.0)
+            vol = 100.0 if i != n - 1 else 50_000.0
+            state.bars_htf.setdefault("15", []).append(Bar(ts, low, high, low, (low + high) / 2, vol))
+        drafts = detect_episodes(state, now)
+        fast = [d for d in drafts if d.pump_class == "fast"]
+        self.assertEqual(len(fast), 1)
+        self.assertGreaterEqual(fast[0].growth_pct, 40.0)
+        self.assertGreaterEqual(fast[0].volume_ratio or 0, 10.0)
 
 
 class PumpLabStoreTests(unittest.TestCase):

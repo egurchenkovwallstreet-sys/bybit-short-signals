@@ -1,14 +1,15 @@
-"""Обнаружение эпизода пампа для лаборатории (жёсткие пороги роста и объёма)."""
+"""Обнаружение эпизода пампа: окно от «сейчас» назад по классу, дно → пик, объём."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 import config
-from signal_engine.indicators import sma
-from signal_engine.paper.detect import merged_15m
-from signal_engine.pump_lab.phases import drawdown_from_peak_pct, pump_class_from_duration
-from signal_engine.state import SymbolState
+from signal_engine.pump_lab.bars import merged_15m
+from signal_engine.pump_lab.phases import drawdown_from_peak_pct
+from signal_engine.state import Bar, SymbolState
+
+HOUR_MS = 3_600_000
 
 
 @dataclass
@@ -22,6 +23,14 @@ class EpisodeDraft:
     pump_class: str
     volume_ratio: float | None
     source: str
+
+
+def window_ms(pump_class: str) -> int:
+    if pump_class == "medium":
+        return config.PUMP_LAB_WINDOW_DAYS_MEDIUM * 24 * HOUR_MS
+    if pump_class == "long":
+        return config.PUMP_LAB_MAX_AGE_DAYS * 24 * HOUR_MS
+    return config.PUMP_LAB_WINDOW_HOURS_FAST * HOUR_MS
 
 
 def min_growth_pct(pump_class: str) -> float:
@@ -40,57 +49,51 @@ def min_volume_ratio(pump_class: str) -> float:
     return config.PUMP_LAB_VOLUME_MIN_LONG
 
 
-def _volume_spike_on_leg(state: SymbolState, valley_ts: int, peak_ts: int) -> float | None:
-    bars = merged_15m(state)
-    if not bars:
-        return None
-    leg = [b for b in bars if valley_ts <= b.timestamp <= peak_ts]
-    if not leg:
-        return None
-    before = [b for b in bars if b.timestamp < valley_ts]
-    if len(before) < 5:
-        return None
-    base_bars = before[-20:]
-    vols = [b.volume for b in base_bars if b.volume > 0]
+def _avg_volume(bars: list[Bar]) -> float | None:
+    vols = [b.volume for b in bars if b.volume > 0]
     if not vols:
         return None
-    base = sma(vols, min(20, len(vols)))
-    if base is None or base <= 0:
-        return None
-    peak_vol = max(b.volume for b in leg)
-    return peak_vol / base
+    return sum(vols) / len(vols)
 
 
-def _draft_from_bars(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
+def _draft_for_class(state: SymbolState, now_ms: int, pump_class: str) -> EpisodeDraft | None:
     bars = merged_15m(state)
-    if len(bars) < 12:
+    if len(bars) < 8:
         return None
-    window_ms = config.PUMP_LAB_MAX_AGE_DAYS * 24 * 3_600_000
-    recent = [b for b in bars if b.timestamp >= now_ms - window_ms]
-    if len(recent) < 8:
+    win = window_ms(pump_class)
+    recent = [b for b in bars if b.timestamp >= now_ms - win and b.timestamp <= now_ms]
+    if len(recent) < 4:
         return None
-    peak_bar = max(recent, key=lambda b: b.high)
+    valley_bar = min(recent, key=lambda b: b.low)
+    if valley_bar.low <= 0:
+        return None
+    after = [b for b in recent if b.timestamp >= valley_bar.timestamp]
+    if len(after) < 2:
+        return None
+    peak_bar = max(after, key=lambda b: b.high)
     peak = peak_bar.high
-    if peak <= 0:
+    if peak <= 0 or peak_bar.timestamp <= valley_bar.timestamp:
         return None
-    valley = min(recent, key=lambda b: b.low)
-    if valley.low <= 0 or valley.timestamp >= peak_bar.timestamp:
-        return None
-    growth = (peak / valley.low - 1.0) * 100.0
-    duration = max(0, peak_bar.timestamp - valley.timestamp)
-    pump_class = pump_class_from_duration(duration)
+    growth = (peak / valley_bar.low - 1.0) * 100.0
     if growth < min_growth_pct(pump_class):
         return None
-    vol_ratio = _volume_spike_on_leg(state, valley.timestamp, peak_bar.timestamp)
-    if vol_ratio is None or vol_ratio < min_volume_ratio(pump_class):
+    base = _avg_volume(recent)
+    if base is None or base <= 0:
+        return None
+    leg = [b for b in after if b.timestamp <= peak_bar.timestamp]
+    peak_vol = max((b.volume for b in leg), default=0.0)
+    if peak_vol <= 0:
+        return None
+    vol_ratio = peak_vol / base
+    if vol_ratio < min_volume_ratio(pump_class):
         return None
     price = state.last_price or bars[-1].close
     if drawdown_from_peak_pct(price, peak) > config.PUMP_LAB_MAX_DRAWDOWN_PCT:
         return None
     return EpisodeDraft(
         symbol=state.symbol,
-        valley_price=valley.low,
-        valley_ts=valley.timestamp,
+        valley_price=valley_bar.low,
+        valley_ts=valley_bar.timestamp,
         peak_price=peak,
         peak_ts=peak_bar.timestamp,
         growth_pct=growth,
@@ -100,5 +103,18 @@ def _draft_from_bars(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
     )
 
 
+def detect_episodes(state: SymbolState, now_ms: int) -> list[EpisodeDraft]:
+    out: list[EpisodeDraft] = []
+    for pump_class in ("fast", "medium", "long"):
+        draft = _draft_for_class(state, now_ms, pump_class)
+        if draft is not None:
+            out.append(draft)
+    return out
+
+
 def detect_episode(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
-    return _draft_from_bars(state, now_ms)
+    """Один «лучший» эпизод (макс. рост) — для обратной совместимости."""
+    drafts = detect_episodes(state, now_ms)
+    if not drafts:
+        return None
+    return max(drafts, key=lambda d: d.growth_pct)

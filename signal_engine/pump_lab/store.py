@@ -86,6 +86,9 @@ class PumpLabStore:
     def active_by_symbol(self) -> dict[str, dict[str, Any]]:
         return {row["symbol"]: row for row in self.active_episodes()}
 
+    def active_by_symbol_class(self) -> dict[tuple[str, str], dict[str, Any]]:
+        return {(row["symbol"], row["pump_class"]): row for row in self.active_episodes()}
+
     def insert_episode(self, row: dict[str, Any]) -> int:
         cur = self.conn.execute(
             """

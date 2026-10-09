@@ -8,13 +8,12 @@ import time
 from typing import Any
 
 import config
-from signal_engine.pump_lab.detect import detect_episode
+from signal_engine.pump_lab.detect import detect_episodes, window_ms
 from signal_engine.pump_lab.metrics import METRIC_GROUPS, METRIC_LABELS, compute_all_metrics, metrics_summary
 from signal_engine.pump_lab.phases import (
     compute_phase,
     drawdown_from_peak_pct,
     is_pump_passed,
-    pump_class_from_duration,
 )
 from signal_engine.pump_lab.store import PumpLabStore
 from signal_engine.state import SymbolState
@@ -83,56 +82,57 @@ class PumpLab:
                 passed, _ = is_pump_passed(state, pc, peak, peak_ts, now_ms)
                 if passed:
                     self.store.close_episode(int(ep["id"]), now_ms, "pump_passed")
-        active = self.store.active_by_symbol()
-        seen: set[str] = set()
+        active = self.store.active_by_symbol_class()
+        seen: set[tuple[str, str]] = set()
 
         for symbol, state in symbols.items():
             if not _meets_turnover(state):
                 continue
-            draft = detect_episode(state, now_ms)
-            if draft is None:
-                continue
-            seen.add(symbol)
-            ep = active.get(symbol)
-            if ep is None:
-                phase, phase_meta = compute_phase(state, draft.pump_class, draft.peak_price, draft.peak_ts, now_ms)
-                if phase == "purple":
+            for draft in detect_episodes(state, now_ms):
+                key = (symbol, draft.pump_class)
+                seen.add(key)
+                ep = active.get(key)
+                if ep is None:
+                    phase, phase_meta = compute_phase(
+                        state, draft.pump_class, draft.peak_price, draft.peak_ts, now_ms
+                    )
+                    if phase == "purple":
+                        continue
+                    metrics = compute_all_metrics(state, btc, draft.peak_price, draft.peak_ts, now_ms)
+                    eid = self.store.insert_episode(
+                        {
+                            "symbol": symbol,
+                            "pump_class": draft.pump_class,
+                            "phase": phase,
+                            "valley_price": draft.valley_price,
+                            "valley_ts": draft.valley_ts,
+                            "peak_price": draft.peak_price,
+                            "peak_ts": draft.peak_ts,
+                            "growth_pct": draft.growth_pct,
+                            "started_at": now_ms,
+                            "updated_at": now_ms,
+                            "phase_since": now_ms,
+                            "last_price": state.last_price,
+                            "drawdown_pct": phase_meta.get("drawdown_pct"),
+                            "metrics": metrics,
+                        }
+                    )
+                    self._snapshot(eid, now_ms, phase, state, metrics)
+                    log.info("PumpLab: новый эпизод %s %s %s", symbol, draft.pump_class, phase)
                     continue
-                metrics = compute_all_metrics(state, btc, draft.peak_price, draft.peak_ts, now_ms)
-                eid = self.store.insert_episode(
-                    {
-                        "symbol": symbol,
-                        "pump_class": draft.pump_class,
-                        "phase": phase,
-                        "valley_price": draft.valley_price,
-                        "valley_ts": draft.valley_ts,
-                        "peak_price": draft.peak_price,
-                        "peak_ts": draft.peak_ts,
-                        "growth_pct": draft.growth_pct,
-                        "started_at": now_ms,
-                        "updated_at": now_ms,
-                        "phase_since": now_ms,
-                        "last_price": state.last_price,
-                        "drawdown_pct": phase_meta.get("drawdown_pct"),
-                        "metrics": metrics,
-                    }
-                )
-                self._snapshot(eid, now_ms, phase, state, metrics)
-                log.info("PumpLab: новый эпизод %s %s %s", symbol, draft.pump_class, phase)
-                continue
 
-            self._update_episode(ep, state, btc, draft, now_ms)
+                self._update_episode(ep, state, btc, draft, now_ms)
 
-        max_age = config.PUMP_LAB_MAX_AGE_DAYS * 24 * 3_600_000
-        for symbol, ep in list(active.items()):
-            if symbol in seen:
+        for key, ep in list(active.items()):
+            if key in seen:
                 continue
+            symbol, pump_class = key
             state = symbols.get(symbol)
             price = state.last_price if state else ep.get("last_price")
             peak = ep.get("peak_price") or 0.0
             if price and peak and drawdown_from_peak_pct(price, peak) > config.PUMP_LAB_MAX_DRAWDOWN_PCT:
                 self.store.close_episode(ep["id"], now_ms, "drawdown")
-            elif now_ms - int(ep.get("peak_ts") or now_ms) > max_age:
+            elif now_ms - int(ep.get("peak_ts") or now_ms) > window_ms(pump_class):
                 self.store.close_episode(ep["id"], now_ms, "age")
 
     def _update_episode(
@@ -144,9 +144,12 @@ class PumpLab:
         now_ms: int,
     ) -> None:
         peak_price = max(float(ep.get("peak_price") or 0), draft.peak_price)
-        peak_ts = draft.peak_ts if draft.peak_price >= float(ep.get("peak_price") or 0) else int(ep.get("peak_ts") or draft.peak_ts)
-        duration = max(0, peak_ts - int(ep.get("valley_ts") or draft.valley_ts))
-        pump_class = pump_class_from_duration(duration)
+        peak_ts = (
+            draft.peak_ts
+            if draft.peak_price >= float(ep.get("peak_price") or 0)
+            else int(ep.get("peak_ts") or draft.peak_ts)
+        )
+        pump_class = draft.pump_class
         phase, phase_meta = compute_phase(state, pump_class, peak_price, peak_ts, now_ms)
         if phase == "purple":
             self.store.close_episode(int(ep["id"]), now_ms, "pump_passed")

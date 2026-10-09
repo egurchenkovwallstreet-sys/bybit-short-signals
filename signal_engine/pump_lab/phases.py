@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import config
-from signal_engine.paper.detect import merged_15m
+from signal_engine.pump_lab.bars import bar_interval_ms, is_bar_open, merged_15m, merged_5m
 from signal_engine.state import SymbolState
 
 MIN_MS = 60_000
@@ -151,6 +151,34 @@ def _range_pct_since_peak(state: SymbolState, peak_ts: int) -> float | None:
     return (hi - lo) / lo * 100.0
 
 
+def peak_on_unclosed_15m(
+    state: SymbolState,
+    peak_ts: int,
+    peak_price: float,
+    now_ms: int,
+) -> bool:
+    """Пик на формирующейся 15m свече — памп ещё идёт."""
+    bars = merged_15m(state)
+    if not bars:
+        return False
+    last = bars[-1]
+    iv = bar_interval_ms("15")
+    if not is_bar_open(last.timestamp, iv, now_ms):
+        return False
+    if last.timestamp != peak_ts and last.high < peak_price * 0.999:
+        return False
+    return True
+
+
+def highs_contracting(state: SymbolState) -> bool:
+    """High последних 5m и 15m ниже предыдущих — затухание."""
+    b5 = merged_5m(state)
+    b15 = merged_15m(state)
+    if len(b5) < 2 or len(b15) < 2:
+        return False
+    return b5[-1].high < b5[-2].high and b15[-1].high < b15[-2].high
+
+
 def _lower_low(state: SymbolState, peak_ts: int) -> bool:
     bars = [b for b in merged_15m(state) if b.timestamp >= peak_ts]
     if len(bars) < 3:
@@ -206,6 +234,9 @@ def compute_phase(
     if _sells_dominate(state, now_ms):
         green_hits += 1
 
+    continuing = peak_on_unclosed_15m(state, peak_ts, peak_price, now_ms)
+    fading = highs_contracting(state)
+
     if green_hits >= 2:
         phase = "green"
     elif since_high >= stall_min and dd < _dd_yellow(pump_class):
@@ -214,7 +245,12 @@ def compute_phase(
         phase = "yellow"
     elif dd >= _dd_yellow(pump_class) and green_hits >= 1:
         phase = "green"
+    elif fading and green_hits < 2 and dd < _dd_yellow(pump_class):
+        phase = "yellow"
     else:
+        phase = "red"
+
+    if continuing and green_hits < 2:
         phase = "red"
 
     meta = {
@@ -222,5 +258,7 @@ def compute_phase(
         "minutes_since_high": since_high,
         "range_since_peak_pct": round(rng, 2) if rng is not None else None,
         "green_signals": green_hits,
+        "pump_continuing": continuing,
+        "highs_fading": fading,
     }
     return phase, meta

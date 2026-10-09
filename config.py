@@ -276,7 +276,7 @@ PUMP_LAB_GROWTH_MIN_LONG = _env_float("PUMP_LAB_GROWTH_MIN_LONG", 100.0)
 # Пик объёма на ноге роста / средняя 20 баров до дна.
 PUMP_LAB_VOLUME_MIN_FAST = _env_float("PUMP_LAB_VOLUME_MIN_FAST", 10.0)
 PUMP_LAB_VOLUME_MIN_MEDIUM = _env_float("PUMP_LAB_VOLUME_MIN_MEDIUM", 20.0)
-PUMP_LAB_VOLUME_MIN_LONG = _env_float("PUMP_LAB_VOLUME_MIN_LONG", 20.0)
+PUMP_LAB_VOLUME_MIN_LONG = _env_float("PUMP_LAB_VOLUME_MIN_LONG", 10.0)
 # «Памп прошёл»: откат от пика до минимума коррекции (дно, откуда мог пойти новый рост).
 # Минимум глубины дна по типу; типичный верх диапазона — 40%.
 PUMP_LAB_PASSED_DD_FAST = _env_float("PUMP_LAB_PASSED_DD_FAST", 20.0)
@@ -287,9 +287,12 @@ PUMP_LAB_PASSED_DD_MAX = _env_float("PUMP_LAB_PASSED_DD_MAX", 40.0)
 PUMP_LAB_TROUGH_CONFIRM_MIN = _env_int("PUMP_LAB_TROUGH_CONFIRM_MIN", 15)
 PUMP_LAB_TROUGH_BOUNCE_PCT = _env_float("PUMP_LAB_TROUGH_BOUNCE_PCT", 1.0)
 PUMP_LAB_MAX_AGE_DAYS = _env_int("PUMP_LAB_MAX_AGE_DAYS", 20)
-# Длительность роста (дно → пик): быстрый ≤6 ч, средний ≤3 сут, иначе длинный (до 20 сут).
+# Окна истории от «сейчас» назад для детекта по классу.
+PUMP_LAB_WINDOW_HOURS_FAST = _env_int("PUMP_LAB_WINDOW_HOURS_FAST", 6)
+PUMP_LAB_WINDOW_DAYS_MEDIUM = _env_int("PUMP_LAB_WINDOW_DAYS_MEDIUM", 2)
+# Длительность роста (дно → пик) для подписи: быстрый ≤6 ч, средний ≤2 сут, иначе длинный.
 PUMP_LAB_FAST_MAX_MS = _env_int("PUMP_LAB_FAST_MAX_MS", 6 * 3_600_000)
-PUMP_LAB_MEDIUM_MAX_MS = _env_int("PUMP_LAB_MEDIUM_MAX_MS", 3 * 24 * 3_600_000)
+PUMP_LAB_MEDIUM_MAX_MS = _env_int("PUMP_LAB_MEDIUM_MAX_MS", 2 * 24 * 3_600_000)
 # Фазы: откат от пика (%), «нет нового хая» (мин), подтверждение дампа (%).
 PUMP_LAB_PHASE_STALL_MIN_FAST = _env_int("PUMP_LAB_PHASE_STALL_MIN_FAST", 20)
 PUMP_LAB_PHASE_STALL_MIN_MED = _env_int("PUMP_LAB_PHASE_STALL_MIN_MED", 120)
