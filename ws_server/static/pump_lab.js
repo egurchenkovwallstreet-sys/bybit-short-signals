@@ -30,9 +30,10 @@ function initPumpLabTab() {
         <h2>${title}</h2>
         <span class="quiet">${hint}</span>
         <span class="pl-legend">
-          <span class="pl-dot pl-red"></span> ещё растёт
+          <span class="pl-dot pl-red"></span> рост
           <span class="pl-dot pl-yellow"></span> торможение
-          <span class="pl-dot pl-green"></span> снижается
+          <span class="pl-dot pl-green"></span> снижение
+          <span class="pl-dot pl-purple"></span> прошёл — скрыт
         </span>
       </header>
       <div class="pl-cards" id="pl-cards-${id}"></div>
@@ -129,11 +130,12 @@ function renderDetail() {
   let html = `<div class="pl-detail-head">
     <h3>${ep.symbol}</h3>
     <p class="quiet">Пик ${ep.peak_price} · рост ${ep.growth_pct != null ? ep.growth_pct.toFixed(1) : "—"}%</p>
-    <p class="pl-metric-legend"><span class="pl-short-yes">■</span> за шорт · <span class="pl-short-no">■</span> против шорта</p>
+    <p class="pl-metric-legend"><span class="pl-short-yes">■</span> за шорт · <span class="pl-short-neutral">■</span> нейтрально · <span class="pl-short-no">■</span> против</p>
     <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${ep.symbol}" target="_blank" rel="noopener">Bybit</a>
   </div>`;
   for (const g of groups.length ? groups : [{ id: "flow", title: "Метрики" }]) {
-    const ids = byGroup[g.id] || Object.keys(labels);
+    let ids = byGroup[g.id] || Object.keys(labels);
+    ids = sortMetricIds(ids, metrics);
     html += `<div class="pl-metric-group"><h4>${g.title}</h4><div class="pl-metric-table-wrap"><table class="pl-metric-table"><thead><tr><th></th>${HORIZONS.map(([, t]) => `<th>${t}</th>`).join("")}</tr></thead><tbody>`;
     for (const mid of ids) {
       const row = metrics[mid] || {};
@@ -142,7 +144,7 @@ function renderDetail() {
         const cell = row[h] || {};
         const v = cell.value;
         const favor = cell.short_favor != null ? cell.short_favor : cell.signal || 0;
-        const cls = favor > 0 ? "pl-short-yes" : favor < 0 ? "pl-short-no" : "";
+        const cls = favor > 0 ? "pl-short-yes" : favor < 0 ? "pl-short-no" : "pl-short-neutral";
         html += `<td class="${cls}">${v != null ? formatVal(v) : "—"}<canvas class="pl-spark" data-favor="${favor}" data-mid="${mid}" data-h="${h}" width="80" height="22"></canvas></td>`;
       }
       html += `</tr>`;
@@ -151,6 +153,29 @@ function renderDetail() {
   }
   pane.innerHTML = html;
   drawSparks(d.history || {});
+}
+
+function metricRowRank(mid, metrics) {
+  const row = metrics[mid] || {};
+  let hasPro = false;
+  let hasAnti = false;
+  for (const [h] of HORIZONS) {
+    const favor = (row[h] || {}).short_favor ?? (row[h] || {}).signal ?? 0;
+    if (favor > 0) hasPro = true;
+    if (favor < 0) hasAnti = true;
+  }
+  if (hasPro) return 0;
+  if (!hasAnti) return 1;
+  return 2;
+}
+
+function sortMetricIds(ids, metrics) {
+  return [...ids].sort((a, b) => {
+    const ra = metricRowRank(a, metrics);
+    const rb = metricRowRank(b, metrics);
+    if (ra !== rb) return ra - rb;
+    return String(a).localeCompare(String(b));
+  });
 }
 
 function metricGroupId(id) {
@@ -181,7 +206,7 @@ function drawSparks(history) {
     const max = Math.max(...series);
     const span = max - min || 1;
     const favor = Number(canvas.dataset.favor || 0);
-    ctx.strokeStyle = favor > 0 ? "#3dd68c" : favor < 0 ? "#ff5d73" : "#8e9aab";
+    ctx.strokeStyle = favor > 0 ? "#3dd68c" : favor < 0 ? "#ff5d73" : "#f6d365";
     ctx.beginPath();
     series.forEach((val, i) => {
       const x = (i / (series.length - 1)) * (canvas.width - 2) + 1;

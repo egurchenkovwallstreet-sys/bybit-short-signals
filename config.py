@@ -268,8 +268,19 @@ PUMP_LAB_SQLITE_PATH = Path(_env("PUMP_LAB_SQLITE_PATH", str(DATA_DIR / "pump_la
 PUMP_LAB_SCAN_INTERVAL_SEC = _env_int("PUMP_LAB_SCAN_INTERVAL_SEC", 300)
 PUMP_LAB_SNAPSHOT_INTERVAL_SEC = _env_int("PUMP_LAB_SNAPSHOT_INTERVAL_SEC", 300)
 PUMP_LAB_HISTORY_POINTS = _env_int("PUMP_LAB_HISTORY_POINTS", 48)
-PUMP_LAB_MIN_GROWTH_PCT = _env_float("PUMP_LAB_MIN_GROWTH_PCT", 18.0)
 PUMP_LAB_MAX_DRAWDOWN_PCT = _env_float("PUMP_LAB_MAX_DRAWDOWN_PCT", 25.0)
+# Минимальный рост дно→пик по классу пампа (%).
+PUMP_LAB_GROWTH_MIN_FAST = _env_float("PUMP_LAB_GROWTH_MIN_FAST", 40.0)
+PUMP_LAB_GROWTH_MIN_MEDIUM = _env_float("PUMP_LAB_GROWTH_MIN_MEDIUM", 80.0)
+PUMP_LAB_GROWTH_MIN_LONG = _env_float("PUMP_LAB_GROWTH_MIN_LONG", 100.0)
+# Пик объёма на ноге роста / средняя 20 баров до дна.
+PUMP_LAB_VOLUME_MIN_FAST = _env_float("PUMP_LAB_VOLUME_MIN_FAST", 10.0)
+PUMP_LAB_VOLUME_MIN_MEDIUM = _env_float("PUMP_LAB_VOLUME_MIN_MEDIUM", 20.0)
+PUMP_LAB_VOLUME_MIN_LONG = _env_float("PUMP_LAB_VOLUME_MIN_LONG", 20.0)
+# Откат от пика ≥ этого % — фаза «памп прошёл», эпизод снимается с доски.
+PUMP_LAB_PASSED_DD_FAST = _env_float("PUMP_LAB_PASSED_DD_FAST", 10.0)
+PUMP_LAB_PASSED_DD_MEDIUM = _env_float("PUMP_LAB_PASSED_DD_MEDIUM", 12.0)
+PUMP_LAB_PASSED_DD_LONG = _env_float("PUMP_LAB_PASSED_DD_LONG", 15.0)
 PUMP_LAB_MAX_AGE_DAYS = _env_int("PUMP_LAB_MAX_AGE_DAYS", 20)
 # Длительность роста (дно → пик): быстрый ≤6 ч, средний ≤3 сут, иначе длинный (до 20 сут).
 PUMP_LAB_FAST_MAX_MS = _env_int("PUMP_LAB_FAST_MAX_MS", 6 * 3_600_000)

@@ -8,23 +8,28 @@ import time
 from typing import Any
 
 import config
+from signal_engine.pump_lab.detect import detect_episode
+from signal_engine.pump_lab.metrics import METRIC_GROUPS, METRIC_LABELS, compute_all_metrics, metrics_summary
+from signal_engine.pump_lab.phases import (
+    compute_phase,
+    drawdown_from_peak_pct,
+    passed_drawdown_pct,
+    pump_class_from_duration,
+)
+from signal_engine.pump_lab.store import PumpLabStore
+from signal_engine.state import SymbolState
+
+log = logging.getLogger(__name__)
+
+PHASE_COLORS = {"red": "#ff5d73", "yellow": "#f6d365", "green": "#3dd68c", "purple": "#b388ff"}
+CLASS_LABELS = {"fast": "Быстрый", "medium": "Средний", "long": "Длинный"}
+
 
 def _meets_turnover(state: SymbolState) -> bool:
     turnover = state.turnover_24h_usdt
     if turnover is None:
         return True
     return turnover >= config.UNIVERSE_MIN_TURNOVER_24H_USDT
-
-from signal_engine.pump_lab.detect import detect_episode
-from signal_engine.pump_lab.metrics import METRIC_GROUPS, METRIC_LABELS, compute_all_metrics, metrics_summary
-from signal_engine.pump_lab.phases import compute_phase, drawdown_from_peak_pct, pump_class_from_duration
-from signal_engine.pump_lab.store import PumpLabStore
-from signal_engine.state import SymbolState
-
-log = logging.getLogger(__name__)
-
-PHASE_COLORS = {"red": "#ff5d73", "yellow": "#f6d365", "green": "#3dd68c"}
-CLASS_LABELS = {"fast": "Быстрый", "medium": "Средний", "long": "Длинный"}
 
 
 class PumpLab:
@@ -54,6 +59,14 @@ class PumpLab:
     def _run(self, symbols: dict[str, SymbolState], now_ms: int) -> None:
         btc = self._btc(symbols)
         active = self.store.active_by_symbol()
+        for ep in list(active.values()):
+            state = symbols.get(ep["symbol"])
+            peak = float(ep.get("peak_price") or 0)
+            price = (state.last_price if state else None) or ep.get("last_price") or peak
+            pc = ep.get("pump_class") or "fast"
+            if peak > 0 and price and drawdown_from_peak_pct(price, peak) >= passed_drawdown_pct(pc):
+                self.store.close_episode(int(ep["id"]), now_ms, "pump_passed")
+        active = self.store.active_by_symbol()
         seen: set[str] = set()
 
         for symbol, state in symbols.items():
@@ -66,6 +79,8 @@ class PumpLab:
             ep = active.get(symbol)
             if ep is None:
                 phase, phase_meta = compute_phase(state, draft.pump_class, draft.peak_price, draft.peak_ts, now_ms)
+                if phase == "purple":
+                    continue
                 metrics = compute_all_metrics(state, btc, draft.peak_price, draft.peak_ts, now_ms)
                 eid = self.store.insert_episode(
                     {
@@ -116,6 +131,10 @@ class PumpLab:
         duration = max(0, peak_ts - int(ep.get("valley_ts") or draft.valley_ts))
         pump_class = pump_class_from_duration(duration)
         phase, phase_meta = compute_phase(state, pump_class, peak_price, peak_ts, now_ms)
+        if phase == "purple":
+            self.store.close_episode(int(ep["id"]), now_ms, "pump_passed")
+            log.info("PumpLab: %s памп прошёл (откат %.1f%%)", ep.get("symbol"), phase_meta.get("drawdown_pct"))
+            return
         phase_since = int(ep.get("phase_since") or now_ms)
         if phase != ep.get("phase"):
             phase_since = now_ms
@@ -154,6 +173,9 @@ class PumpLab:
     def build_board(self, now_ms: int) -> dict[str, Any]:
         sections: dict[str, list[dict[str, Any]]] = {"fast": [], "medium": [], "long": []}
         for ep in self.store.active_episodes():
+            phase = ep.get("phase") or "red"
+            if phase == "purple":
+                continue
             pump_class = ep.get("pump_class") or "fast"
             if pump_class not in sections:
                 pump_class = "fast"
@@ -163,7 +185,6 @@ class PumpLab:
             except json.JSONDecodeError:
                 metrics = {}
             summary = metrics_summary(metrics) if metrics else {"bearish": 0, "bullish": 0, "filled": 0, "total_cells": 90}
-            phase = ep.get("phase") or "red"
             card = {
                 "episode_id": ep["id"],
                 "symbol": ep["symbol"],
@@ -171,7 +192,12 @@ class PumpLab:
                 "pump_class_label": CLASS_LABELS.get(pump_class, pump_class),
                 "phase": phase,
                 "phase_color": PHASE_COLORS.get(phase, "#8d97a8"),
-                "phase_label": {"red": "Рост", "yellow": "Торможение", "green": "Снижение"}.get(phase, phase),
+                "phase_label": {
+                    "red": "Рост",
+                    "yellow": "Торможение",
+                    "green": "Снижение",
+                    "purple": "Памп прошёл",
+                }.get(phase, phase),
                 "growth_pct": ep.get("growth_pct"),
                 "drawdown_pct": ep.get("drawdown_pct"),
                 "last_price": ep.get("last_price"),

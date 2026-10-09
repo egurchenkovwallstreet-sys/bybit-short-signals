@@ -1519,6 +1519,8 @@ th { cursor: pointer; color: var(--muted); }
 .pl-dot.pl-red { background: var(--red); }
 .pl-dot.pl-yellow { background: var(--yellow); }
 .pl-dot.pl-green { background: var(--green); }
+.pl-dot.pl-purple { background: #b388ff; }
+.pl-card.pl-purple { border-color: rgba(179, 136, 255, 0.75); }
 .pl-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -1563,8 +1565,10 @@ th { cursor: pointer; color: var(--muted); }
 .pl-metric-table th, .pl-metric-table td { border-bottom: 1px solid var(--line); padding: 6px 4px; vertical-align: top; }
 .pl-m-name { min-width: 120px; max-width: 160px; }
 .pl-short-yes { color: var(--green); }
+.pl-short-neutral { color: var(--yellow); }
 .pl-short-no { color: var(--red); }
 .pl-metric-table td.pl-short-yes { color: var(--green); font-weight: 600; }
+.pl-metric-table td.pl-short-neutral { color: var(--yellow); }
 .pl-metric-table td.pl-short-no { color: var(--red); font-weight: 600; }
 .pl-metric-legend { font-size: 12px; margin: 4px 0 8px; }
 .pl-spark { display: block; margin-top: 4px; max-width: 100%; }

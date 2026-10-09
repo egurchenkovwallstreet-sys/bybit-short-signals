@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261009b">
+  <link rel="stylesheet" href="/static/styles.css?v=20261009c">
 </head>
 <body>
   <header class="topbar">
@@ -93,7 +93,8 @@
   <section id="view-pump-lab" class="pump-lab-view" hidden>
     <p class="quiet pump-lab-intro">
       Все активные пампы: быстрый (минуты–часы), средний (часы–3 дня), длинный (3–20 дней).
-      Красный — рост, жёлтый — торможение, зелёный — снижение. Снимок метрик каждые ~5 мин.
+      Памп: быстрый ≥40% и объём ×10, средний/длинный ≥80%/100% и объём ×20. Красный — рост, жёлтый — торможение,
+      зелёный — снижение; откат от пика — монета снимается (памп прошёл). Метрики: зелёный за шорт, жёлтый нейтрально, красный против.
     </p>
     <div class="pump-lab-layout">
       <div id="pump-lab-sections" class="pump-lab-sections"></div>
@@ -214,6 +215,6 @@
   <script src="/static/pump_scan.js?v=20251008v"></script>
   <script src="/static/x2_retrace.js?v=20251008v"></script>
   <script src="/static/pump_strategy.js?v=20251008h"></script>
-  <script src="/static/pump_lab.js?v=20261009b"></script>
+  <script src="/static/pump_lab.js?v=20261009c"></script>
 </body>
 </html>

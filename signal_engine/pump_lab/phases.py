@@ -1,4 +1,4 @@
-"""Фазы пампа: red (рост), yellow (торможение), green (снижение)."""
+"""Фазы пампа: red, yellow, green, purple (памп прошёл — снимаем с доски)."""
 
 from __future__ import annotations
 
@@ -32,6 +32,14 @@ def _dd_yellow(pump_class: str) -> float:
     if pump_class == "medium":
         return config.PUMP_LAB_PHASE_DD_YELLOW_MED
     return config.PUMP_LAB_PHASE_DD_YELLOW_LONG
+
+
+def passed_drawdown_pct(pump_class: str) -> float:
+    if pump_class == "medium":
+        return config.PUMP_LAB_PASSED_DD_MEDIUM
+    if pump_class == "long":
+        return config.PUMP_LAB_PASSED_DD_LONG
+    return config.PUMP_LAB_PASSED_DD_FAST
 
 
 def _dd_green(pump_class: str) -> float:
@@ -106,6 +114,14 @@ def compute_phase(
 ) -> tuple[str, dict]:
     price = state.last_price or peak_price
     dd = drawdown_from_peak_pct(price, peak_price)
+    if dd >= passed_drawdown_pct(pump_class):
+        return "purple", {
+            "drawdown_pct": round(dd, 2),
+            "minutes_since_high": minutes_since_high(state, now_ms, peak_ts, peak_price),
+            "range_since_peak_pct": None,
+            "green_signals": 0,
+            "pump_passed": True,
+        }
     stall_min = _stall_minutes(pump_class)
     since_high = minutes_since_high(state, now_ms, peak_ts, peak_price)
     rng = _range_pct_since_peak(state, peak_ts)

@@ -7,12 +7,20 @@ import unittest
 from pathlib import Path
 
 import config
-from signal_engine.pump_lab.phases import compute_phase, pump_class_from_duration, drawdown_from_peak_pct
+from signal_engine.pump_lab.detect import min_growth_pct, min_volume_ratio
+from signal_engine.pump_lab.phases import compute_phase, passed_drawdown_pct, pump_class_from_duration, drawdown_from_peak_pct
 from signal_engine.pump_lab.store import PumpLabStore
 from signal_engine.state import Bar, SymbolState
 
 
 class PumpLabPhaseTests(unittest.TestCase):
+    def test_thresholds(self) -> None:
+        self.assertEqual(min_growth_pct("fast"), 40.0)
+        self.assertEqual(min_growth_pct("medium"), 80.0)
+        self.assertEqual(min_volume_ratio("fast"), 10.0)
+        self.assertEqual(min_volume_ratio("long"), 20.0)
+        self.assertEqual(passed_drawdown_pct("fast"), 10.0)
+
     def test_pump_class_duration(self) -> None:
         self.assertEqual(pump_class_from_duration(2 * 3_600_000), "fast")
         self.assertEqual(pump_class_from_duration(24 * 3_600_000), "medium")
