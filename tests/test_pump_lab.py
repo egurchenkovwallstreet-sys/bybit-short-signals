@@ -19,7 +19,8 @@ class PumpLabPhaseTests(unittest.TestCase):
         self.assertEqual(min_growth_pct("medium"), 80.0)
         self.assertEqual(min_volume_ratio("fast"), 10.0)
         self.assertEqual(min_volume_ratio("long"), 20.0)
-        self.assertEqual(passed_drawdown_pct("fast"), 10.0)
+        self.assertEqual(passed_drawdown_pct("fast"), 20.0)
+        self.assertEqual(passed_drawdown_pct("long"), 40.0)
 
     def test_pump_class_duration(self) -> None:
         self.assertEqual(pump_class_from_duration(2 * 3_600_000), "fast")
