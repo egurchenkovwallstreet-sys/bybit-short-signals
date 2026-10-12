@@ -147,6 +147,9 @@ class PumpLab:
                 self.store.close_episode(ep["id"], now_ms, "drawdown")
             elif now_ms - int(ep.get("peak_ts") or now_ms) > window_ms(pump_class):
                 self.store.close_episode(ep["id"], now_ms, "age")
+            elif state is not None:
+                # Детектор больше не видит памп, карточка ещё на доске — журнал всё равно пишем.
+                self._refresh_tracked(ep, state, btc, now_ms)
 
     def _update_episode(
         self,
@@ -202,6 +205,54 @@ class PumpLab:
         price = state.last_price or peak_price
         if drawdown_from_peak_pct(price, peak_price) > config.PUMP_LAB_MAX_DRAWDOWN_PCT:
             self.store.close_episode(int(ep["id"]), now_ms, "drawdown")
+
+    def _refresh_tracked(
+        self,
+        ep: dict[str, Any],
+        state: SymbolState,
+        btc: SymbolState | None,
+        now_ms: int,
+    ) -> None:
+        fresh = self.store.episode(int(ep["id"]))
+        if fresh is None or fresh.get("status") != "active":
+            return
+        peak_price = float(ep.get("peak_price") or 0)
+        peak_ts = int(ep.get("peak_ts") or 0)
+        pump_class = ep.get("pump_class") or "fast"
+        if peak_price <= 0 or peak_ts <= 0:
+            return
+        phase, phase_meta = compute_phase(state, pump_class, peak_price, peak_ts, now_ms)
+        if phase == "purple":
+            self.store.close_episode(int(ep["id"]), now_ms, "pump_passed")
+            return
+        phase_since = int(ep.get("phase_since") or now_ms)
+        if phase != ep.get("phase"):
+            phase_since = now_ms
+        metrics = compute_all_metrics(state, btc, peak_price, peak_ts, now_ms)
+        self.store.update_episode(
+            int(ep["id"]),
+            {
+                "pump_class": pump_class,
+                "phase": phase,
+                "updated_at": now_ms,
+                "peak_price": peak_price,
+                "peak_ts": peak_ts,
+                "growth_pct": ep.get("growth_pct"),
+                "phase_since": phase_since,
+                "last_price": state.last_price,
+                "drawdown_pct": phase_meta.get("drawdown_pct"),
+                "metrics": metrics,
+                "valley_price": ep.get("valley_price"),
+                "valley_ts": ep.get("valley_ts"),
+            },
+        )
+        marks = ["sample"]
+        if phase != ep.get("phase"):
+            if phase == "yellow":
+                marks.append("stall")
+            elif phase == "green":
+                marks.append("dump")
+        self._snapshot(int(ep["id"]), now_ms, phase, state, metrics, marks, btc, peak_price, peak_ts, ep.get("growth_pct"))
 
     def _snapshot(
         self,

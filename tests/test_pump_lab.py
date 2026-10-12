@@ -260,6 +260,36 @@ class PumpStudyTests(unittest.TestCase):
             self.assertEqual(len(peak["features"]), len(STUDY_FIELDS))
             store.close()
 
+    def test_tracked_card_is_sampled_when_pump_is_not_redetected(self) -> None:
+        now = 1_700_000_000_000
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PumpLabStore(Path(tmp) / "lab.db")
+            store.open()
+            eid = store.insert_episode(
+                {
+                    "symbol": "LABUSDT",
+                    "pump_class": "fast",
+                    "phase": "red",
+                    "valley_price": 50.0,
+                    "valley_ts": now - 30 * 60_000,
+                    "peak_price": 100.0,
+                    "peak_ts": now - 10 * 60_000,
+                    "growth_pct": 100.0,
+                    "started_at": now - 20 * 60_000,
+                    "updated_at": now - 20 * 60_000,
+                    "last_price": 100.0,
+                }
+            )
+            state = SymbolState("LABUSDT", last_price=97.0)
+            state.bars_1m.append(Bar(now - 60_000, 98, 99, 96, 97, 10))
+            PumpLab(store)._run({"LABUSDT": state}, now)
+            marks = {row["mark"] for row in store.study_marks(eid)}
+            self.assertIn("sample", marks)
+            fresh = store.episode(eid)
+            self.assertEqual(fresh["status"], "active")
+            self.assertEqual(fresh["updated_at"], now)
+            store.close()
+
 
 if __name__ == "__main__":
     unittest.main()
