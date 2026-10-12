@@ -5,6 +5,7 @@ from pathlib import Path
 import config
 from signal_engine.paper.analytics import compute_analytics
 from signal_engine.paper.detect import (
+    late_entry_extension_ok,
     double_top,
     evaluate,
     find_pump,
@@ -375,7 +376,8 @@ class EntryGateTest(unittest.TestCase):
         self.assertIn("since_too_soon", ev.entry_blocked)
         self.assertEqual(ev.variants, [])
         ev.metrics["since_peak_min"] = 181
-        self.assertEqual(ev.entry_blocked, ["since_too_late"])
+        ev.metrics["oi_1h_pct"] = 1.0
+        self.assertIn("since_too_late", ev.entry_blocked)
 
     def test_blocks_late_megavol_and_double_top(self) -> None:
         ev = self._eval()
@@ -388,6 +390,22 @@ class EntryGateTest(unittest.TestCase):
         ev.metrics["since_peak_min"] = 40
         self.assertEqual(ev.entry_blocked, [])
         self.assertIn("t20", ev.variants)
+
+    def test_late_entry_extension_after_180_min(self) -> None:
+        base = {
+            "pump": {"trigger": "4h", "volume_ratio": 10},
+            "since_peak_min": 200,
+            "drawdown_from_peak_pct": 20.0,
+            "oi_1h_pct": -1.5,
+            "oi_4h_pct": -0.8,
+            "volume_ratio_20m": 0.5,
+            "sell_share": {"5m": 65.0, "10m": 62.0, "15m": 61.0},
+        }
+        self.assertTrue(late_entry_extension_ok(base))
+        self.assertNotIn("since_too_late", paper_entry_blocks(base))
+        bad = {**base, "drawdown_from_peak_pct": 31.0}
+        self.assertFalse(late_entry_extension_ok(bad))
+        self.assertIn("since_too_late", paper_entry_blocks(bad))
 
     def test_paper_entry_blocks_helper(self) -> None:
         self.assertEqual(

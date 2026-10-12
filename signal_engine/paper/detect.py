@@ -55,7 +55,11 @@ VARIANT_LABELS = {
 ENTRY_GATE_LABELS = {
     "no_14d": "триггер 14д запрещён",
     "since_too_soon": f"меньше {config.PAPER_ENTRY_SINCE_PEAK_MIN:g} мин с пика",
-    "since_too_late": f"больше {config.PAPER_ENTRY_SINCE_PEAK_MAX:g} мин с пика",
+    "since_too_late": (
+        f"больше {config.PAPER_ENTRY_SINCE_PEAK_MAX:g} мин с пика "
+        f"(без OI↓ 1ч/4ч, спада объёма, продаж >{config.PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT:g}% "
+        f"и отката ≤{config.PAPER_ENTRY_LATE_EXT_MAX_DRAWDOWN_PCT:g}%)"
+    ),
     "late_megavol": f"объём ×{config.PAPER_ENTRY_MEGAVOL_RATIO:g}+ при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
     "late_double_top": f"двойная вершина при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
 }
@@ -443,6 +447,26 @@ def btc_change_4h(btc: SymbolState | None, now_ms: int) -> float | None:
     return (btc.last_price / ref - 1.0) * 100.0
 
 
+def late_entry_extension_ok(metrics: dict) -> bool:
+    """Вход позже 180 мин с пика: OI↓ 1ч и 4ч, объём спал, продажи >60% в 2+ окнах, откат ≤30%."""
+    dd = metrics.get("drawdown_from_peak_pct")
+    if dd is None or dd > config.PAPER_ENTRY_LATE_EXT_MAX_DRAWDOWN_PCT:
+        return False
+    oi_1h = metrics.get("oi_1h_pct")
+    oi_4h = metrics.get("oi_4h_pct")
+    if oi_1h is None or oi_4h is None or oi_1h >= 0 or oi_4h >= 0:
+        return False
+    vol_ratio = metrics.get("volume_ratio_20m")
+    if vol_ratio is None or vol_ratio > config.PAPER_VOLUME_FADE_MAX_RATIO:
+        return False
+    shares = metrics.get("sell_share") or {}
+    need = config.PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT
+    wins = sum(1 for v in shares.values() if v is not None and float(v) > need)
+    if wins < config.PAPER_ENTRY_LATE_EXT_SELL_WINDOWS_REQUIRED:
+        return False
+    return True
+
+
 def paper_entry_blocks(metrics: dict) -> list[str]:
     """Жёсткий шлюз поверх 9 условий. Пустой список — вход разрешён."""
     pump = metrics.get("pump") or {}
@@ -453,7 +477,7 @@ def paper_entry_blocks(metrics: dict) -> list[str]:
         blocked.append("no_14d")
     if since is None or since < config.PAPER_ENTRY_SINCE_PEAK_MIN:
         blocked.append("since_too_soon")
-    elif since > config.PAPER_ENTRY_SINCE_PEAK_MAX:
+    elif since > config.PAPER_ENTRY_SINCE_PEAK_MAX and not late_entry_extension_ok(metrics):
         blocked.append("since_too_late")
     late = since is not None and since > config.PAPER_ENTRY_LATE_MIN
     if late and vol is not None and vol >= config.PAPER_ENTRY_MEGAVOL_RATIO:
