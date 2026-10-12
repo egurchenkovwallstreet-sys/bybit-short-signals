@@ -117,7 +117,7 @@ class TrailingTest(unittest.TestCase):
         self.assertAlmostEqual(pos.stop_price, 0.995 * 1.10)
 
     def test_peak_gap_locks_ten_pp_behind(self) -> None:
-        # v5: пик 40% → max(5, 20) = 20% → 0.98. p10: лок 30% → 0.97.
+        # t20: пик 40% → max(5, 20) = 20% → 0.98. p10: лок 30% → 0.97.
         self.assertAlmostEqual(trail_stop(1.0, 0.96, 10), 0.98)
         self.assertAlmostEqual(trail_stop(1.0, 0.96, 10, peak_gap_roe=10.0), 0.97)
 
@@ -220,33 +220,33 @@ class StrategyCycleTest(unittest.TestCase):
             states = {state.symbol: state}
 
             view = strategy.scan(states, NOW)["data"]
-            # Все 9 условий: входят v5, v9 и p10; без вершины dt не входит.
-            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "v5", "v9"])
+            # 5 из 9 есть: входят t20 и p10.
+            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "t20"])
             trade = view["open_trades"][0]
             self.assertAlmostEqual(trade["entry_price"], 1.35)
             self.assertAlmostEqual(trade["margin"], 50.0)
             self.assertAlmostEqual(strategy.balances["p10"], config.PAPER_START_BALANCE_USD)
+            self.assertNotIn("v5", strategy.balances)
+            self.assertNotIn("v9", strategy.balances)
+            self.assertNotIn("dt", strategy.balances)
 
             state.bars_1m.append(Bar(NOW + MIN, 1.3, 1.3, 1.2, 1.2, 10.0))
             state.last_price = 1.2
             strategy.scan(states, NOW + MIN + 5000)
-            self.assertIn(("v9", state.symbol), strategy.trades)
+            self.assertIn(("t20", state.symbol), strategy.trades)
 
             state.bars_1m.append(Bar(NOW + 2 * MIN, 1.2, 1.33, 1.2, 1.32, 10.0))
             state.last_price = 1.32
             strategy.scan(states, NOW + 2 * MIN + 5000)
             self.assertEqual(strategy.trades, {})
-            self.assertGreater(strategy.balances["v5"], config.PAPER_START_BALANCE_USD)
-            self.assertGreater(strategy.balances["v9"], config.PAPER_START_BALANCE_USD)
+            self.assertGreater(strategy.balances["t20"], config.PAPER_START_BALANCE_USD)
             self.assertGreater(strategy.balances["p10"], config.PAPER_START_BALANCE_USD)
-            self.assertEqual(strategy.balances["dt"], config.PAPER_START_BALANCE_USD)
 
             stats = compute_analytics(store.db, strategy.balances)
-            self.assertEqual(stats["variants"]["v9"]["trades"]["closed"], 1)
-            self.assertEqual(stats["variants"]["v9"]["trades"]["wins"], 1)
+            self.assertEqual(stats["variants"]["t20"]["trades"]["closed"], 1)
+            self.assertEqual(stats["variants"]["t20"]["trades"]["wins"], 1)
             self.assertEqual(stats["variants"]["p10"]["trades"]["closed"], 1)
-            self.assertEqual(stats["variants"]["dt"]["trades"]["closed"], 0)
-            self.assertEqual(strategy.candidates[state.symbol].entered, ["v5", "v9", "p10"])
+            self.assertEqual(strategy.candidates[state.symbol].entered, ["t20", "p10"])
             strategy.close()
 
     def test_near_miss_starts_shadow(self) -> None:
@@ -259,8 +259,8 @@ class StrategyCycleTest(unittest.TestCase):
             tape.add_liquidation(NOW, "Sell", 9_000.0)
             strategy.tape.symbols[state.symbol] = tape
             view = strategy.scan({state.symbol: state}, NOW)["data"]
-            # 8 из 9: вход в v5 и p10, для «все 9» — теневая сделка.
-            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "v5"])
+            # 8 из 9: вход в t20 и p10, теневая сделка по недостающему условию.
+            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "t20"])
             self.assertEqual(len(view["candidates"]), 1)
             self.assertEqual(view["candidates"][0]["shadow"]["missing"], "short_liq_faded")
             self.assertEqual(len(strategy.shadows), 1)
@@ -280,8 +280,8 @@ class StrategyCycleTest(unittest.TestCase):
             restarted = PaperStrategy(PaperStore(path))
             restarted.open()
             self.assertIn(state.symbol, restarted.candidates)
-            self.assertEqual(restarted.candidates[state.symbol].entered, ["v5", "v9", "p10"])
-            self.assertEqual(len(restarted.trades), 3)
+            self.assertEqual(restarted.candidates[state.symbol].entered, ["t20", "p10"])
+            self.assertEqual(len(restarted.trades), 2)
             tape = restarted.tape.symbols[state.symbol]
             self.assertTrue(tape.minutes)
             self.assertTrue(tape.liq_short)
@@ -345,9 +345,9 @@ class StrongTopTest(unittest.TestCase):
         self.assertEqual(ev.passed_count, 4)
         self.assertEqual(ev.variants, [])
         ev.strong_top = {"interval": "60"}
-        self.assertEqual(ev.variants, ["dt"])
+        self.assertEqual(ev.variants, [])
         ev.checks["stall"]["ok"] = True
-        self.assertEqual(ev.variants, ["v5", "dt", "p10"])
+        self.assertEqual(ev.variants, ["t20", "p10"])
 
 
 class EntryGateTest(unittest.TestCase):
@@ -360,7 +360,7 @@ class EntryGateTest(unittest.TestCase):
     def test_fixture_passes_gate(self) -> None:
         ev = self._eval()
         self.assertEqual(ev.entry_blocked, [])
-        self.assertIn("v5", ev.variants)
+        self.assertIn("t20", ev.variants)
         self.assertIn("p10", ev.variants)
 
     def test_blocks_14d(self) -> None:
@@ -387,7 +387,7 @@ class EntryGateTest(unittest.TestCase):
         self.assertEqual(ev.entry_blocked, ["late_double_top"])
         ev.metrics["since_peak_min"] = 40
         self.assertEqual(ev.entry_blocked, [])
-        self.assertIn("v5", ev.variants)
+        self.assertIn("t20", ev.variants)
 
     def test_paper_entry_blocks_helper(self) -> None:
         self.assertEqual(
@@ -418,7 +418,7 @@ class EntryGateTest(unittest.TestCase):
                             "pump": {"trigger": "14d", "volume_ratio": 20},
                             "since_peak_min": 2000,
                         },
-                        "variants": ["v5", "p10"],
+                        "variants": ["t20", "p10"],
                         "passed_count": 6,
                     },
                 }

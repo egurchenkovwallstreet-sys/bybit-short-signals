@@ -1,11 +1,9 @@
 """Тест стратегии: сам ищет пампы, ждёт затухания, открывает и ведёт виртуальные шорты.
 
 Кандидат — один памп одной монеты. Пока он жив, каждые 3 секунды проверяются
-все обязательные условия. Варианты входа идут параллельно, у каждого свой счёт:
-«5 из 9», «все 9», «сильная двойная вершина + 3» и «пик − 10 п.п.» (вход как у
-«5 из 9»). Выход v5/v9/dt: +1% → безубыток, +7% → +5%, трейл 20 п.п.; p10 —
-пик − 10. Поверх — шлюз: не 14d, с пика 6–180 мин, без мегаобъёма и dual-top
-после 60 мин. Не хватило ровно одного из 9 — теневая сделка.
+все обязательные условия. Два варианта с одним входом (шлюз + 5 из 9) и разными
+выходами: t20 (+1% BE / +7%→+5% / трейл 20 п.п.) и p10 (пик − 10). У каждого
+свой счёт. Не хватило ровно одного из 9 — теневая сделка.
 Всё пишется в SQLite для анализа.
 """
 
@@ -116,10 +114,7 @@ class PaperStrategy:
         if self.store.get_kv("started_at") is None:
             self.store.set_kv("started_at", str(now))
         for variant in VARIANTS:
-            saved = self.store.get_kv(f"balance:{variant}")
-            self.balances[variant] = float(saved) if saved is not None else config.PAPER_START_BALANCE_USD
-            if saved is None:
-                self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
+            self._ensure_balance(variant)
         if self.store.get_kv("revived_restart_expiry") is None:
             # До защиты от перезапуска кандидаты снимались, пока свечи ещё не подгрузились.
             since = now - config.PAPER_LONG_LIFETIME_HOURS * 3_600_000
@@ -128,7 +123,8 @@ class PaperStrategy:
             if revived:
                 log.info("Тест: возвращено кандидатов после ошибочного снятия: %s", revived)
         for row in self.store.open_trades():
-            variant = str(row["variant"] or "v9")
+            variant = str(row["variant"] or config.PAPER_T20_VARIANT)
+            self._ensure_balance(variant)
             gap = config.paper_peak_gap_roe(variant)
             pos = Position(
                 symbol=row["symbol"],
@@ -146,7 +142,7 @@ class PaperStrategy:
                 last_price=float(row["last_price"] or row["entry_price"]),
                 peak_gap_roe=gap,
             )
-            # Стоп по правилу варианта: v5/v9/dt — бумажный трейл, p10 — пик − gap.
+            # Стоп по правилу варианта: t20 — BE/лок/трейл 20, p10 — пик − gap.
             pos.stop_price = min(
                 pos.liq_price,
                 trail_stop(pos.entry_price, pos.best_price, pos.leverage, gap),
@@ -281,6 +277,14 @@ class PaperStrategy:
 
     def _variant_trades(self, variant: str) -> list[OpenTrade]:
         return [t for t in self.trades.values() if t.variant == variant]
+
+    def _ensure_balance(self, variant: str) -> None:
+        if variant in self.balances:
+            return
+        saved = self.store.get_kv(f"balance:{variant}")
+        self.balances[variant] = float(saved) if saved is not None else config.PAPER_START_BALANCE_USD
+        if saved is None:
+            self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
 
     def used_margin(self, variant: str) -> float:
         return sum(t.pos.margin for t in self._variant_trades(variant))
@@ -473,7 +477,7 @@ class PaperStrategy:
                 balance = self.balances[variant]
                 margin = balance * config.PAPER_MARGIN_PCT / 100.0
                 if margin <= 0 or balance - self.used_margin(variant) < margin:
-                    notes.append(f"{VARIANT_LABELS[variant]}: нет свободной маржи")
+                    notes.append(f"{VARIANT_LABELS.get(variant, variant)}: нет свободной маржи")
                     continue
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
             cand.note = "; ".join(notes) or None

@@ -3,10 +3,8 @@
 9 условий: качество пампа (объём ×10, покупки ≥70%), торможение в диапазоне,
 покупки упали, продажи перевешивают, объём падает (или держится при снижении
 цены), ликвидации шортов затихли, OI за 1 ч < 0, а при сильном росте BTC ещё
-пробой EMA50 15m или двойная вершина. Вход по вариантам: любые 5 из 9, все 9,
-или сильная двойная вершина (2-я ниже 1-й < 10%, после неё ≥ 2 ч) + 3 условия.
-Поверх — шлюз: не 14d, с пика 6–180 мин, без мегаобъёма ×80+ и dual-top после 60 мин.
-Остальное только добавляет баллы силы.
+пробой EMA50 15m или двойная вершина. Два варианта с одним входом (шлюз + 5 из 9):
+t20 — +1% BE / +7%→+5% / трейл 20 п.п.; p10 — пик − 10 п.п. Остальное — баллы силы.
 """
 
 from __future__ import annotations
@@ -50,9 +48,7 @@ CHECK_LABELS = {
 }
 
 VARIANT_LABELS = {
-    "v5": f"{config.PAPER_V5_MIN_PASSED} из {len(MANDATORY)} условий",
-    "v9": f"Все {len(MANDATORY)} условий",
-    "dt": f"Двойная вершина + {config.PAPER_DT_MIN_PASSED} условия",
+    "t20": "+1% BE / трейл 20%",
     "p10": "Пик −10 п.п.",
 }
 
@@ -135,12 +131,8 @@ class Evaluation:
     def qualifies(self, variant: str) -> bool:
         if self.entry_blocked:
             return False
-        if variant == "v9":
-            return self.passed
-        if variant in ("v5", "p10"):
+        if variant in config.PAPER_VARIANTS:
             return self.passed_count >= config.PAPER_V5_MIN_PASSED
-        if variant == "dt":
-            return self.strong_top is not None and self.passed_count >= config.PAPER_DT_MIN_PASSED
         return False
 
     @property

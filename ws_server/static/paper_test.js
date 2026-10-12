@@ -5,7 +5,7 @@
     closed: [],
     history: [],
     selected: null, // {type: "open"|"closed"|"cand", id}
-    variant: "v5",
+    variant: "t20",
     closedVariant: "",
     interval: "15",
     chart: null,
@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { v5: "#5dade2", v9: "#3dd68c", dt: "#f6d365", p10: "#c084fc" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -88,7 +88,7 @@
     return (paper.data && paper.data.mandatory) || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["v5", "v9", "dt", "p10"];
+    return (paper.data && paper.data.variants) || ["t20", "p10"];
   }
   function vlabel(v) {
     return ((paper.data && paper.data.variant_labels) || {})[v] || v;
@@ -112,6 +112,8 @@
   function onSnapshot(data) {
     if (!data) return;
     paper.data = data;
+    const vs = variants();
+    if (vs.length && !vs.includes(paper.variant)) paper.variant = vs[0];
     if (!isVisible()) return;
     render();
   }
