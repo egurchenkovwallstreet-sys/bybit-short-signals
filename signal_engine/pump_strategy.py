@@ -8,6 +8,7 @@ import config
 from signal_engine.flow import oi_change_pct
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars
+from signal_engine.pump_unified import symbol_has_unified_pump
 from signal_engine.watch_store import WatchRow, WatchStore
 
 BOARD_ID = "pump_strategy"
@@ -306,6 +307,8 @@ def build_pump_strategy_board(states: dict[str, SymbolState], now_ms: int, watch
             continue
         prior = watches.get(BOARD_ID, symbol)
         if prior is not None and prior.dismissed:
+            continue
+        if not symbol_has_unified_pump(state, now_ms):
             continue
         match = detect_best_pump(state, now_ms)
         if match is None:

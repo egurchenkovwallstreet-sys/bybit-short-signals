@@ -18,6 +18,7 @@ from signal_engine.swing_highs import (
     find_two_peak_htf,
     lower_high_chain_count,
 )
+from signal_engine.pump_unified import symbol_has_unified_pump
 from signal_engine.watch_store import WatchRow, WatchStore
 
 BOARD_ID = "x2_retrace"
@@ -319,6 +320,8 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
     active = watches.active(BOARD_ID)
     for symbol, state in states.items():
         if not _eligible(state):
+            continue
+        if not symbol_has_unified_pump(state, now_ms):
             continue
         if symbol in active:
             continue

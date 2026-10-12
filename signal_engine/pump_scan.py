@@ -10,6 +10,7 @@ from signal_engine.evaluate import Reading, evaluate
 from signal_engine.flow import funding_extreme, taker_sellers_control
 from signal_engine.stage_debounce import resolve_stage
 from signal_engine.state import SymbolState
+from signal_engine.pump_unified import symbol_has_unified_pump
 from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
 
 BOARD_ID = "pump_scan"
@@ -24,12 +25,8 @@ def price_24h_pct(raw: float | None) -> float | None:
     return raw
 
 
-def is_gainer_candidate(state: SymbolState) -> bool:
-    turnover = state.turnover_24h_usdt
-    if turnover is None or turnover < config.UNIVERSE_MIN_TURNOVER_24H_USDT:
-        return False
-    pct = price_24h_pct(state.price_24h_change)
-    return pct is not None and pct >= config.PUMP_SCAN_MIN_24H_PCT
+def is_gainer_candidate(state: SymbolState, now_ms: int) -> bool:
+    return symbol_has_unified_pump(state, now_ms)
 
 
 def _weakening_score(reading: Reading, now_ms: int, state: SymbolState) -> int:
@@ -117,11 +114,11 @@ def build_pump_scan_board(states: dict[str, SymbolState], now_ms: int, watches: 
         prior = watches.get(BOARD_ID, symbol)
         if prior is not None and prior.dismissed:
             continue
-        if not is_gainer_candidate(state):
+        if not is_gainer_candidate(state, now_ms):
             continue
         pct = price_24h_pct(state.price_24h_change)
         if pct is None:
-            continue
+            pct = 0.0
         watch = WatchRow(
             board=BOARD_ID,
             symbol=symbol,
