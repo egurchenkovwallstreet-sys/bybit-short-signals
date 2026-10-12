@@ -75,6 +75,16 @@ def max_drawdown_pct() -> float:
     return config.PUMP_UNIFIED_MAX_DRAWDOWN_PCT
 
 
+def should_remove_after_peak_drawdown(state: SymbolState, peak_price: float) -> bool:
+    """Убрать карточку: текущая цена отстаёт от пика пампа не меньше чем на порог %."""
+    if peak_price <= 0:
+        return False
+    price = state.last_price
+    if price is None or price <= 0:
+        return False
+    return drawdown_from_peak_pct(price, peak_price) >= max_drawdown_pct()
+
+
 def volume_ratio_min_to_peak(
     bars: list[Bar],
     valley_ts: int,
@@ -148,7 +158,7 @@ def _draft_from_min_max(
     ):
         return None
     price = state.last_price or (bars[-1].close if bars else peak)
-    if drawdown_from_peak_pct(price or 0, peak) > max_drawdown_pct():
+    if drawdown_from_peak_pct(price or 0, peak) >= max_drawdown_pct():
         return None
     return EpisodeDraft(
         symbol=state.symbol,
@@ -215,7 +225,7 @@ def _draft_24h_ticker(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
     bars = merged_15m(state)
     vol_ratio = volume_ratio_min_to_peak(bars, valley_bar.timestamp, peak_bar.timestamp, now_ms - DAY_MS)
     price = state.last_price or peak_bar.high
-    if drawdown_from_peak_pct(price or 0, peak_bar.high) > max_drawdown_pct():
+    if drawdown_from_peak_pct(price or 0, peak_bar.high) >= max_drawdown_pct():
         return None
     return EpisodeDraft(
         symbol=state.symbol,
@@ -256,7 +266,7 @@ def _draft_from_strategy(state: SymbolState, now_ms: int) -> EpisodeDraft | None
     if not _volume_ok(pump_class, vol_ratio, relaxed=True):
         return None
     price = state.last_price or match.peak_price
-    if drawdown_from_peak_pct(price or 0, match.peak_price) > max_drawdown_pct():
+    if drawdown_from_peak_pct(price or 0, match.peak_price) >= max_drawdown_pct():
         return None
     return EpisodeDraft(
         symbol=state.symbol,
@@ -296,7 +306,7 @@ def _draft_from_history(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
     if not _volume_ok("long", vol_ratio, relaxed=True):
         return None
     price = state.last_price or hist.peak_high
-    if drawdown_from_peak_pct(price or 0, hist.peak_high) > max_drawdown_pct():
+    if drawdown_from_peak_pct(price or 0, hist.peak_high) >= max_drawdown_pct():
         return None
     return EpisodeDraft(
         symbol=state.symbol,

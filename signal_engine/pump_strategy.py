@@ -8,7 +8,7 @@ import config
 from signal_engine.flow import oi_change_pct
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars
-from signal_engine.pump_unified import symbol_has_unified_pump
+from signal_engine.pump_unified import should_remove_after_peak_drawdown, symbol_has_unified_pump
 from signal_engine.watch_store import WatchRow, WatchStore
 
 BOARD_ID = "pump_strategy"
@@ -333,6 +333,13 @@ def build_pump_strategy_board(states: dict[str, SymbolState], now_ms: int, watch
             watches.remove(BOARD_ID, symbol)
             continue
         assert state is not None
+        peak = float(watch.meta.get("peak_price") or 0)
+        if state.last_price and state.last_price > peak:
+            peak = float(state.last_price)
+            watch.meta["peak_price"] = peak
+        if should_remove_after_peak_drawdown(state, peak):
+            watches.remove(BOARD_ID, symbol)
+            continue
         stored_kind = str(watch.meta.get("kind") or "long")
         match = _refresh_match(state, now_ms, stored_kind)
         if match is not None:

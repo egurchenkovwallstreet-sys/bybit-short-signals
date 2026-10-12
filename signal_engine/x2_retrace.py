@@ -18,7 +18,7 @@ from signal_engine.swing_highs import (
     find_two_peak_htf,
     lower_high_chain_count,
 )
-from signal_engine.pump_unified import symbol_has_unified_pump
+from signal_engine.pump_unified import should_remove_after_peak_drawdown, symbol_has_unified_pump
 from signal_engine.watch_store import WatchRow, WatchStore
 
 BOARD_ID = "x2_retrace"
@@ -366,6 +366,10 @@ def build_x2_retrace_board(states: dict[str, SymbolState], now_ms: int, watches:
             continue
         if state.last_price is None or state.last_price <= 0:
             state.last_price = price
+        hist_peak = history_pump_metrics(state, now_ms)
+        if hist_peak is not None and should_remove_after_peak_drawdown(state, hist_peak.peak_high):
+            watches.remove(BOARD_ID, symbol)
+            continue
         if not _meets_x2_turnover(state):
             watches.remove(BOARD_ID, symbol)
             continue

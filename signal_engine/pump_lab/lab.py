@@ -8,7 +8,12 @@ import time
 from typing import Any
 
 import config
-from signal_engine.pump_unified import detect_unified_episodes as detect_episodes, meets_unified_turnover, window_ms
+from signal_engine.pump_unified import (
+    detect_unified_episodes as detect_episodes,
+    meets_unified_turnover,
+    should_remove_after_peak_drawdown,
+    window_ms,
+)
 from signal_engine.pump_lab.metrics import METRIC_GROUPS, METRIC_LABELS, compute_all_metrics, metrics_summary
 from signal_engine.pump_lab.study import STUDY_FIELDS, build_study
 from signal_engine.pump_lab.phases import (
@@ -140,7 +145,7 @@ class PumpLab:
             state = symbols.get(symbol)
             price = state.last_price if state else ep.get("last_price")
             peak = ep.get("peak_price") or 0.0
-            if price and peak and drawdown_from_peak_pct(price, peak) > config.PUMP_UNIFIED_MAX_DRAWDOWN_PCT:
+            if price and peak and should_remove_after_peak_drawdown(state, peak):
                 self.store.close_episode(ep["id"], now_ms, "drawdown")
             elif now_ms - int(ep.get("peak_ts") or now_ms) > window_ms(pump_class):
                 self.store.close_episode(ep["id"], now_ms, "age")
@@ -199,8 +204,7 @@ class PumpLab:
             int(ep["id"]), now_ms, phase, state, metrics, marks, btc, peak_price, peak_ts, draft.growth_pct
         )
 
-        price = state.last_price or peak_price
-        if drawdown_from_peak_pct(price, peak_price) > config.PUMP_UNIFIED_MAX_DRAWDOWN_PCT:
+        if should_remove_after_peak_drawdown(state, peak_price):
             self.store.close_episode(int(ep["id"]), now_ms, "drawdown")
 
     def _refresh_tracked(
@@ -250,6 +254,8 @@ class PumpLab:
             elif phase == "green":
                 marks.append("dump")
         self._snapshot(int(ep["id"]), now_ms, phase, state, metrics, marks, btc, peak_price, peak_ts, ep.get("growth_pct"))
+        if should_remove_after_peak_drawdown(state, peak_price):
+            self.store.close_episode(int(ep["id"]), now_ms, "drawdown")
 
     def _snapshot(
         self,

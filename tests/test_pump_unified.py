@@ -5,7 +5,12 @@ from __future__ import annotations
 import unittest
 
 import config
-from signal_engine.pump_unified import detect_unified_episodes, meets_unified_turnover, min_growth_pct
+from signal_engine.pump_unified import (
+    detect_unified_episodes,
+    meets_unified_turnover,
+    min_growth_pct,
+    should_remove_after_peak_drawdown,
+)
 from signal_engine.state import Bar, SymbolState
 
 
@@ -13,6 +18,12 @@ class PumpUnifiedTests(unittest.TestCase):
     def test_thresholds_match_lab_defaults(self) -> None:
         self.assertEqual(min_growth_pct("fast"), 40.0)
         self.assertEqual(min_growth_pct("long"), 100.0)
+
+    def test_remove_at_50pct_drawdown(self) -> None:
+        state = SymbolState("X", last_price=51.0)
+        self.assertFalse(should_remove_after_peak_drawdown(state, 100.0))
+        state.last_price = 50.0
+        self.assertTrue(should_remove_after_peak_drawdown(state, 100.0))
 
     def test_turnover(self) -> None:
         state = SymbolState("A")

@@ -10,7 +10,11 @@ from signal_engine.evaluate import Reading, evaluate
 from signal_engine.flow import funding_extreme, taker_sellers_control
 from signal_engine.stage_debounce import resolve_stage
 from signal_engine.state import SymbolState
-from signal_engine.pump_unified import symbol_has_unified_pump
+from signal_engine.pump_unified import (
+    detect_unified_episode,
+    should_remove_after_peak_drawdown,
+    symbol_has_unified_pump,
+)
 from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
 
 BOARD_ID = "pump_scan"
@@ -119,6 +123,8 @@ def build_pump_scan_board(states: dict[str, SymbolState], now_ms: int, watches: 
         pct = price_24h_pct(state.price_24h_change)
         if pct is None:
             pct = 0.0
+        draft = detect_unified_episode(state, now_ms)
+        peak = float(draft.peak_price if draft else (state.last_price or 0))
         watch = WatchRow(
             board=BOARD_ID,
             symbol=symbol,
@@ -127,7 +133,7 @@ def build_pump_scan_board(states: dict[str, SymbolState], now_ms: int, watches: 
             confirmed_stage=1,
             pending_stage=None,
             pending_since=None,
-            meta={"entry_pct": pct},
+            meta={"entry_pct": pct, "peak_price": peak},
         )
         watches.upsert(watch)
         active[symbol] = watch
@@ -136,6 +142,13 @@ def build_pump_scan_board(states: dict[str, SymbolState], now_ms: int, watches: 
     for symbol, watch in list(active.items()):
         state = states.get(symbol)
         if state is None or state.last_price is None or state.last_price <= 0:
+            continue
+        peak = float(watch.meta.get("peak_price") or 0)
+        if state.last_price > peak:
+            peak = float(state.last_price)
+            watch.meta["peak_price"] = peak
+        if should_remove_after_peak_drawdown(state, peak):
+            watches.remove(BOARD_ID, symbol)
             continue
         if growth_pct_negative(state):
             watches.remove(BOARD_ID, symbol)
