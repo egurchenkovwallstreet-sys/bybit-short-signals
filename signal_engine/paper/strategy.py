@@ -90,7 +90,8 @@ class PaperStrategy:
         self.tape = TapeBook()
         self.klines: dict[str, dict[str, list[Bar]]] = {}
         self.kline_at: dict[str, float] = {}
-        self.balances: dict[str, float] = {v: config.PAPER_START_BALANCE_USD for v in VARIANTS}
+        # Пустой dict: _ensure_balance подгружает из paper_kv после перезапуска.
+        self.balances: dict[str, float] = {}
         self.trades: dict[tuple[str, str], OpenTrade] = {}
         self.candidates: dict[str, Candidate] = {}
         self.shadows: dict[int, Shadow] = {}

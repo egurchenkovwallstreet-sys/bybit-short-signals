@@ -250,6 +250,33 @@ class StrategyCycleTest(unittest.TestCase):
             self.assertEqual(strategy.candidates[state.symbol].entered, ["t20", "p10"])
             strategy.close()
 
+    def test_balance_restored_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper.db"
+            store = PaperStore(path)
+            strategy = PaperStrategy(store)
+            strategy.open()
+            state = pumped_state()
+            strategy.tape.symbols[state.symbol] = pumped_tape()
+            states = {state.symbol: state}
+            strategy.scan(states, NOW)
+            state.bars_1m.append(Bar(NOW + MIN, 1.3, 1.33, 1.2, 1.32, 10.0))
+            state.last_price = 1.32
+            strategy.scan(states, NOW + 2 * MIN + 5000)
+            balance_after_close = strategy.balances["t20"]
+            self.assertGreater(balance_after_close, config.PAPER_START_BALANCE_USD)
+            strategy.close()
+
+            strategy2 = PaperStrategy(PaperStore(path))
+            strategy2.open()
+            self.assertAlmostEqual(strategy2.balances["t20"], balance_after_close)
+            stats = compute_analytics(store.db, strategy2.balances)
+            self.assertAlmostEqual(
+                stats["variants"]["t20"]["trades"]["balance"],
+                balance_after_close,
+            )
+            strategy2.close()
+
     def test_near_miss_starts_shadow(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = PaperStore(Path(tmp) / "paper.db")
