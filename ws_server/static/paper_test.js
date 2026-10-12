@@ -364,6 +364,8 @@
         const m = ev.metrics || {};
         const p = r.pump || {};
         const ss = m.sell_share || {};
+        const gateLabels = (paper.data && paper.data.entry_gate_labels) || {};
+        const blocked = (ev.entry_blocked || []).map((k) => gateLabels[k] || k);
         const failed = (ev.failed || []).map((k) => labels()[k] || k);
         const passed = ev.passed_count ?? total - (ev.failed || mandatory()).length;
         const sh = r.shadow ? `${pct(r.shadow.roe_pct, 1)}` : "—";
@@ -381,7 +383,7 @@
           <td>${pct(m.oi_1h_pct)} / ${pct(m.oi_4h_pct)}</td>
           <td>${m.funding_rate === null || m.funding_rate === undefined ? "—" : num(m.funding_rate * 100, 4) + "%"}</td>
           <td>${checkDots(ev)} ${passed}/${total}</td>
-          <td>${esc(r.note || failed.join(", ") || "—")}</td>
+          <td>${esc(r.note || blocked.join(", ") || failed.join(", ") || "—")}</td>
           <td>${st ? `${st.interval === "60" ? "1H" : "30m"} −${num(st.diff_pct, 1)}%` : "—"}</td>
           <td>${fits}${inTrade ? `<br><span class="quiet">в сделке:</span> ${inTrade}` : ""}</td>
           <td class="grade-${ev.grade || "C"}">${ev.grade || "—"} · ${num(ev.score, 1)}</td>

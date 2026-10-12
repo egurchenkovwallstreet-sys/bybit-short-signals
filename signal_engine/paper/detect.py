@@ -5,6 +5,7 @@
 цены), ликвидации шортов затихли, OI за 1 ч < 0, а при сильном росте BTC ещё
 пробой EMA50 15m или двойная вершина. Вход по вариантам: любые 5 из 9, все 9,
 или сильная двойная вершина (2-я ниже 1-й < 10%, после неё ≥ 2 ч) + 3 условия.
+Поверх — шлюз: не 14d, с пика 6–180 мин, без мегаобъёма ×80+ и dual-top после 60 мин.
 Остальное только добавляет баллы силы.
 """
 
@@ -53,6 +54,14 @@ VARIANT_LABELS = {
     "v9": f"Все {len(MANDATORY)} условий",
     "dt": f"Двойная вершина + {config.PAPER_DT_MIN_PASSED} условия",
     "p10": "Пик −10 п.п.",
+}
+
+ENTRY_GATE_LABELS = {
+    "no_14d": "триггер 14д запрещён",
+    "since_too_soon": f"меньше {config.PAPER_ENTRY_SINCE_PEAK_MIN:g} мин с пика",
+    "since_too_late": f"больше {config.PAPER_ENTRY_SINCE_PEAK_MAX:g} мин с пика",
+    "late_megavol": f"объём ×{config.PAPER_ENTRY_MEGAVOL_RATIO:g}+ при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
+    "late_double_top": f"двойная вершина при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
 }
 
 _TF_WEIGHT = {"15": 1.0, "30": 1.5, "60": 2.0, "240": 3.0}
@@ -119,7 +128,13 @@ class Evaluation:
     def passed_count(self) -> int:
         return len(MANDATORY) - len(self.failed)
 
+    @property
+    def entry_blocked(self) -> list[str]:
+        return paper_entry_blocks(self.metrics)
+
     def qualifies(self, variant: str) -> bool:
+        if self.entry_blocked:
+            return False
         if variant == "v9":
             return self.passed
         if variant in ("v5", "p10"):
@@ -144,6 +159,7 @@ class Evaluation:
             "passed_count": self.passed_count,
             "failed": self.failed,
             "variants": self.variants,
+            "entry_blocked": self.entry_blocked,
         }
 
 
@@ -433,6 +449,26 @@ def btc_change_4h(btc: SymbolState | None, now_ms: int) -> float | None:
     if ref is None or ref <= 0:
         return None
     return (btc.last_price / ref - 1.0) * 100.0
+
+
+def paper_entry_blocks(metrics: dict) -> list[str]:
+    """Жёсткий шлюз поверх 9 условий. Пустой список — вход разрешён."""
+    pump = metrics.get("pump") or {}
+    since = metrics.get("since_peak_min")
+    vol = pump.get("volume_ratio")
+    blocked: list[str] = []
+    if str(pump.get("trigger") or "") == "14d":
+        blocked.append("no_14d")
+    if since is None or since < config.PAPER_ENTRY_SINCE_PEAK_MIN:
+        blocked.append("since_too_soon")
+    elif since > config.PAPER_ENTRY_SINCE_PEAK_MAX:
+        blocked.append("since_too_late")
+    late = since is not None and since > config.PAPER_ENTRY_LATE_MIN
+    if late and vol is not None and vol >= config.PAPER_ENTRY_MEGAVOL_RATIO:
+        blocked.append("late_megavol")
+    if late and metrics.get("double_top"):
+        blocked.append("late_double_top")
+    return blocked
 
 
 # --- условия входа -----------------------------------------------------------

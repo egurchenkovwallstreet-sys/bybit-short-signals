@@ -4,7 +4,14 @@ from pathlib import Path
 
 import config
 from signal_engine.paper.analytics import compute_analytics
-from signal_engine.paper.detect import double_top, evaluate, find_pump, round_level_near, strong_top
+from signal_engine.paper.detect import (
+    double_top,
+    evaluate,
+    find_pump,
+    paper_entry_blocks,
+    round_level_near,
+    strong_top,
+)
 from signal_engine.paper.position import Position, liquidation_price, trail_distance_pct, trail_stop
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.strategy import PaperStrategy
@@ -326,6 +333,67 @@ class StrongTopTest(unittest.TestCase):
         self.assertEqual(ev.variants, ["dt"])
         ev.checks["stall"]["ok"] = True
         self.assertEqual(ev.variants, ["v5", "dt", "p10"])
+
+
+class EntryGateTest(unittest.TestCase):
+    def _eval(self):
+        state, tape = pumped_state(), pumped_tape()
+        pump = find_pump(state, tape, NOW)
+        assert pump is not None
+        return evaluate(state, tape, pump, {}, None, NOW)
+
+    def test_fixture_passes_gate(self) -> None:
+        ev = self._eval()
+        self.assertEqual(ev.entry_blocked, [])
+        self.assertIn("v5", ev.variants)
+        self.assertIn("p10", ev.variants)
+
+    def test_blocks_14d(self) -> None:
+        ev = self._eval()
+        ev.metrics["pump"]["trigger"] = "14d"
+        self.assertEqual(ev.entry_blocked, ["no_14d"])
+        self.assertEqual(ev.variants, [])
+
+    def test_blocks_too_soon_and_too_late(self) -> None:
+        ev = self._eval()
+        ev.metrics["since_peak_min"] = 0
+        self.assertIn("since_too_soon", ev.entry_blocked)
+        self.assertEqual(ev.variants, [])
+        ev.metrics["since_peak_min"] = 181
+        self.assertEqual(ev.entry_blocked, ["since_too_late"])
+
+    def test_blocks_late_megavol_and_double_top(self) -> None:
+        ev = self._eval()
+        ev.metrics["since_peak_min"] = 90
+        ev.metrics["pump"]["volume_ratio"] = 80
+        self.assertEqual(ev.entry_blocked, ["late_megavol"])
+        ev.metrics["pump"]["volume_ratio"] = 20
+        ev.metrics["double_top"] = {"interval": "60"}
+        self.assertEqual(ev.entry_blocked, ["late_double_top"])
+        ev.metrics["since_peak_min"] = 40
+        self.assertEqual(ev.entry_blocked, [])
+        self.assertIn("v5", ev.variants)
+
+    def test_paper_entry_blocks_helper(self) -> None:
+        self.assertEqual(
+            paper_entry_blocks({"pump": {"trigger": "4h", "volume_ratio": 10}, "since_peak_min": 30}),
+            [],
+        )
+        self.assertIn("no_14d", paper_entry_blocks({"pump": {"trigger": "14d"}, "since_peak_min": 30}))
+
+    def test_strategy_skips_late_peak(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PaperStore(Path(tmp) / "paper.db")
+            strategy = PaperStrategy(store)
+            strategy.open()
+            state = pumped_state()
+            strategy.tape.symbols[state.symbol] = pumped_tape()
+            view = strategy.scan({state.symbol: state}, NOW + 100 * MIN)["data"]
+            self.assertEqual(view["open_trades"], [])
+            self.assertTrue(view["candidates"])
+            blocked = (view["candidates"][0].get("eval") or {}).get("entry_blocked") or []
+            self.assertIn("since_too_late", blocked)
+            strategy.close()
 
 
 if __name__ == "__main__":

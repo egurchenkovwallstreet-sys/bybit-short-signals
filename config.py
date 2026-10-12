@@ -252,6 +252,12 @@ PAPER_P10_VARIANT = "p10"
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
+# Жёсткий шлюз входа (все варианты): режет поздние 14d и выдохшиеся/мегаобъёмные пампы.
+PAPER_ENTRY_SINCE_PEAK_MIN = _env_float("PAPER_ENTRY_SINCE_PEAK_MIN", 6.0)
+PAPER_ENTRY_SINCE_PEAK_MAX = _env_float("PAPER_ENTRY_SINCE_PEAK_MAX", 180.0)
+PAPER_ENTRY_LATE_MIN = _env_float("PAPER_ENTRY_LATE_MIN", 60.0)
+PAPER_ENTRY_MEGAVOL_RATIO = _env_float("PAPER_ENTRY_MEGAVOL_RATIO", 80.0)
+
 
 def paper_peak_gap_roe(variant: str) -> float:
     """Лок «пик − gap» только у p10; остальные варианты — бумажный трейл 10%→2%."""

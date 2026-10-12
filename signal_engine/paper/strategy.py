@@ -3,7 +3,8 @@
 Кандидат — один памп одной монеты. Пока он жив, каждые 3 секунды проверяются
 все обязательные условия. Варианты входа идут параллельно, у каждого свой счёт:
 «5 из 9», «все 9», «сильная двойная вершина + 3» и «пик − 10 п.п.» (вход как у
-«5 из 9», другой трейл). Не хватило ровно одного из 9 — теневая сделка.
+«5 из 9», другой трейл). Поверх — шлюз: не 14d, с пика 6–180 мин, без мегаобъёма
+и dual-top после 60 мин. Не хватило ровно одного из 9 — теневая сделка.
 Всё пишется в SQLite для анализа.
 """
 
@@ -19,6 +20,7 @@ from signal_engine.flow import oi_change_pct
 from signal_engine.paper.analytics import compute_analytics
 from signal_engine.paper.detect import (
     CHECK_LABELS,
+    ENTRY_GATE_LABELS,
     MANDATORY,
     VARIANT_LABELS,
     PumpInfo,
@@ -457,6 +459,10 @@ class PaperStrategy:
             cand.last_eval = ev.to_data()
             cand.dirty = True
             notes = []
+            if ev.entry_blocked:
+                notes.append(
+                    "Вход закрыт: " + "; ".join(ENTRY_GATE_LABELS.get(k, k) for k in ev.entry_blocked)
+                )
             for variant in ev.variants:
                 if (variant, symbol) in self.trades:
                     continue
@@ -469,7 +475,7 @@ class PaperStrategy:
                     continue
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
             cand.note = "; ".join(notes) or None
-            if len(ev.failed) == 1 and not cand.near_miss:
+            if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
 
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
@@ -708,6 +714,7 @@ class PaperStrategy:
             },
             "variants": list(VARIANTS),
             "variant_labels": VARIANT_LABELS,
+            "entry_gate_labels": ENTRY_GATE_LABELS,
             "open_trades": [self._trade_view(t, now_ms) for t in trades],
             "candidates": [self._candidate_view(c, now_ms) for c in cands],
             "check_labels": CHECK_LABELS,
