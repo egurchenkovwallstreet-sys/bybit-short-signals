@@ -97,13 +97,13 @@ class TrailingTest(unittest.TestCase):
         fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.72 * config.PAPER_FEE_RATE_TAKER
         self.assertAlmostEqual(result["pnl_usd"], gross - fees, places=6)
 
-    def test_be_at_one_pct_then_lock_five_at_seven(self) -> None:
+    def test_be_at_two_pct_then_lock_five_at_seven(self) -> None:
         pos = Position("X", 0, 1.0, 50.0)
-        self.assertIsNone(pos.update(0.9995, 1.0, 0.9995))
-        self.assertAlmostEqual(pos.max_roe(), 0.5)
-        self.assertAlmostEqual(pos.stop_price, pos.liq_price)
         self.assertIsNone(pos.update(0.999, 1.0, 0.999))
         self.assertAlmostEqual(pos.max_roe(), 1.0)
+        self.assertAlmostEqual(pos.stop_price, pos.liq_price)
+        self.assertIsNone(pos.update(0.998, 1.0, 0.998))
+        self.assertAlmostEqual(pos.max_roe(), 2.0)
         self.assertAlmostEqual(pos.stop_price, 1.0)
         self.assertIsNone(pos.update(0.993, 0.999, 0.993))
         self.assertAlmostEqual(pos.max_roe(), 7.0)
