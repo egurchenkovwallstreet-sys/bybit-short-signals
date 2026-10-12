@@ -79,14 +79,28 @@ class TrailingTest(unittest.TestCase):
         pos = Position("X", 0, 1.0, 50.0)
         self.assertAlmostEqual(pos.stop_price, pos.liq_price)
         self.assertIsNone(pos.update(0.9, 1.0, 0.9))
-        self.assertAlmostEqual(pos.stop_price, 0.99)
+        # пик 100% ROE → лок пик−10 п.п. = 90% → цена 0.91 (жёстче 10% трейла 0.99)
+        self.assertAlmostEqual(pos.stop_price, 0.91)
         self.assertIsNone(pos.update(0.7, 0.9, 0.7))
-        self.assertAlmostEqual(pos.stop_price, 0.714)
+        # пик 300% → лок 290% → 0.71 (чуть жёстче 2% трейла 0.714)
+        self.assertAlmostEqual(pos.stop_price, 0.71)
         self.assertEqual(pos.update(0.7, 0.72, 0.72), "trailing_stop")
         result = pos.close_result("trailing_stop")
-        gross = (1.0 - 0.714) * 500
-        fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.714 * config.PAPER_FEE_RATE_TAKER
+        gross = (1.0 - 0.71) * 500
+        fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.71 * config.PAPER_FEE_RATE_TAKER
         self.assertAlmostEqual(result["pnl_usd"], gross - fees, places=6)
+
+    def test_peak_gap_not_before_ten_roe(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0)
+        self.assertIsNone(pos.update(0.995, 1.0, 0.995))
+        self.assertAlmostEqual(pos.max_roe(), 5.0)
+        self.assertAlmostEqual(pos.stop_price, 0.995 * 1.10)
+
+    def test_peak_gap_locks_ten_pp_behind(self) -> None:
+        from signal_engine.paper.position import trail_stop
+
+        # 40% ROE: best 0.96, лок 30% → 0.97
+        self.assertAlmostEqual(trail_stop(1.0, 0.96, 10), 0.97)
 
     def test_liquidation_loses_margin(self) -> None:
         pos = Position("X", 0, 1.0, 50.0)

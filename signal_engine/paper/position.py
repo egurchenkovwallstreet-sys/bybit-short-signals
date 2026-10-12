@@ -2,7 +2,8 @@
 
 ROE — прибыль в % от маржи без комиссий: (вход − цена) / вход × плечо × 100.
 Трейлинг: до ROE 100% стоп в 10% цены над лучшей ценой, к ROE 300% расстояние
-плавно сужается до 2% цены и дальше держится.
+плавно сужается до 2% цены. Когда пик ROE ≥ 10 п.п., стоп не хуже «пик − 10 п.п.»
+(жёстче бумажного трейла, чтобы не отдавать максимальный плюс).
 """
 
 from __future__ import annotations
@@ -38,9 +39,22 @@ def trail_distance_pct(best_roe: float) -> float:
     return start - (start - floor) * share
 
 
+def price_for_roe(entry: float, roe: float, leverage: int | None = None) -> float:
+    """Цена шорта, при которой gross ROE равен roe."""
+    lev = leverage or config.PAPER_LEVERAGE
+    return entry * (1.0 - roe / (100.0 * lev))
+
+
 def trail_stop(entry: float, best_price: float, leverage: int | None = None) -> float:
-    dist = trail_distance_pct(roe_pct(entry, best_price, leverage))
-    return best_price * (1.0 + dist / 100.0)
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    paper = best_price * (1.0 + trail_distance_pct(peak) / 100.0)
+    gap = config.PAPER_TRAIL_PEAK_GAP_ROE
+    if peak < gap:
+        return paper
+    lock_px = price_for_roe(entry, peak - gap, lev)
+    # Шорт: ниже стоп — жёстче. Берём более жёсткий из бумажного трейла и лока пик−gap.
+    return min(paper, lock_px)
 
 
 @dataclass

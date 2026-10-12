@@ -183,6 +183,8 @@ PAPER_TRAIL_START_DIST_PCT = _env_float("PAPER_TRAIL_START_DIST_PCT", 10.0)
 PAPER_TRAIL_TIGHTEN_FROM_ROE = _env_float("PAPER_TRAIL_TIGHTEN_FROM_ROE", 100.0)
 PAPER_TRAIL_TIGHTEN_TO_ROE = _env_float("PAPER_TRAIL_TIGHTEN_TO_ROE", 300.0)
 PAPER_TRAIL_MIN_DIST_PCT = _env_float("PAPER_TRAIL_MIN_DIST_PCT", 2.0)
+# После пика ROE не ниже этого стоп держит «пик − gap» п.п., чтобы не отдавать максимальный плюс.
+PAPER_TRAIL_PEAK_GAP_ROE = _env_float("PAPER_TRAIL_PEAK_GAP_ROE", 10.0)
 
 # Памп: короткий (окно до 4 ч / 24 ч по 15m), длинный (7 д / 14 д по 4H).
 PAPER_SHORT_4H_MIN_PCT = _env_float("PAPER_SHORT_4H_MIN_PCT", 30.0)
