@@ -1485,6 +1485,47 @@ th { cursor: pointer; color: var(--muted); }
   .columns { grid-template-columns: repeat(5, 160px); }
 }
 
+/* --- Анализ пампа: hub + подвкладки (лаборатория без изменений) --- */
+.analysis-hub {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.analysis-subtabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.analysis-subtab {
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px 8px 0 0;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.analysis-subtab:hover { color: var(--text); border-color: #3a4558; }
+.analysis-subtab.active {
+  color: var(--text);
+  background: var(--panel-2);
+  border-bottom-color: var(--panel-2);
+}
+.analysis-hub > .workspace,
+.analysis-hub > .pump-scan-view,
+.analysis-hub > .pump-strategy-view,
+.analysis-hub > .pump-lab-view,
+.analysis-hub > .pending-view {
+  flex: 1;
+  min-height: 0;
+}
+
 /* --- Анализ пампа (лаборатория) --- */
 .pump-lab-view {
   flex: 1;

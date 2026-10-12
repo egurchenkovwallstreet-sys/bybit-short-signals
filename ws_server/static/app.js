@@ -45,6 +45,16 @@ const state = {
   sortKey: "created_at",
   sortDir: -1,
   lastCandleBarCount: 0,
+  analysisSub: "pump_lab",
+};
+
+const ANALYSIS_SUB_VIEWS = {
+  pump_lab: "view-pump-lab",
+  signals: "view-signals",
+  pump_scan: "view-pump-scan",
+  x2_retrace: "view-x2-retrace",
+  pump_strategy: "view-pump-strategy",
+  pending: "view-pending",
 };
 
 const tooltip = document.getElementById("tooltip");
@@ -52,6 +62,59 @@ const tooltip = document.getElementById("tooltip");
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => showTab(button.dataset.tab));
 });
+
+function initAnalysisSubtabs() {
+  document.querySelectorAll(".analysis-subtab").forEach((button) => {
+    if (button.dataset.inited) return;
+    button.dataset.inited = "1";
+    button.addEventListener("click", () => {
+      const sub = button.dataset.analysisSub;
+      if (!sub) return;
+      state.analysisSub = sub;
+      showAnalysisSub(sub);
+    });
+  });
+}
+
+function showAnalysisSub(name) {
+  initAnalysisSubtabs();
+  state.analysisSub = name;
+  document.querySelectorAll(".analysis-subtab").forEach((button) => {
+    button.classList.toggle("active", button.dataset.analysisSub === name);
+  });
+  for (const [sub, id] of Object.entries(ANALYSIS_SUB_VIEWS)) {
+    const el = document.getElementById(id);
+    if (el) el.hidden = sub !== name;
+  }
+  if (name === "pump_lab" && window.pumpLab) {
+    window.pumpLab.onTab();
+  }
+  if (name === "pump_scan" && window.pumpScan) {
+    window.pumpScan.initPumpScanTab();
+    requestAnimationFrame(() => window.pumpScan.resizeChart?.());
+  }
+  if (name === "x2_retrace" && window.x2Retrace) {
+    window.x2Retrace.initX2RetraceTab();
+    requestAnimationFrame(() => window.x2Retrace.resizeChart?.());
+  }
+  if (name === "pump_strategy" && window.pumpStrategy) {
+    window.pumpStrategy.initPumpStrategyTab();
+    requestAnimationFrame(() => {
+      if (window.pumpStrategy?.resizeChart) window.pumpStrategy.resizeChart();
+    });
+  }
+  if (name === "pending") {
+    renderPending();
+  }
+  if (name === "signals" && state.chart) {
+    requestAnimationFrame(() => state.chart.resize());
+  }
+}
+
+function openAnalysisSub(name) {
+  showTab("pump_lab");
+  showAnalysisSub(name);
+}
 
 document.querySelectorAll("#signal-table th").forEach((header) => {
   header.addEventListener("click", () => {
@@ -227,6 +290,8 @@ function connectSocket() {
 }
 
 connectSocket();
+initAnalysisSubtabs();
+showTab("pump_lab");
 
 function setDemo(demo) {
   state.demo = !!demo;
@@ -239,41 +304,16 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === name);
   });
-  document.getElementById("view-signals").hidden = name !== "signals";
-  const pumpView = document.getElementById("view-pump-scan");
-  if (pumpView) pumpView.hidden = name !== "pump_scan";
-  const x2View = document.getElementById("view-x2-retrace");
-  if (x2View) x2View.hidden = name !== "x2_retrace";
-  const pumpStrategyView = document.getElementById("view-pump-strategy");
-  if (pumpStrategyView) pumpStrategyView.hidden = name !== "pump_strategy";
-  document.getElementById("view-pending").hidden = name !== "pending";
+  const hub = document.getElementById("view-analysis-hub");
+  if (hub) hub.hidden = name !== "pump_lab";
   document.getElementById("view-stats").hidden = name !== "stats";
-  const pumpLabView = document.getElementById("view-pump-lab");
-  if (pumpLabView) pumpLabView.hidden = name !== "pump_lab";
   const paperView = document.getElementById("view-paper");
   if (paperView) paperView.hidden = name !== "paper";
-  if (name === "pump_lab" && window.pumpLab) {
-    window.pumpLab.onTab();
+  if (name === "pump_lab") {
+    showAnalysisSub(state.analysisSub || "pump_lab");
   }
   if (name === "paper" && window.paperTest) {
     requestAnimationFrame(() => window.paperTest.onTab());
-  }
-  if (name === "pump_scan" && window.pumpScan) {
-    window.pumpScan.initPumpScanTab();
-    requestAnimationFrame(() => window.pumpScan.resizeChart?.());
-  }
-  if (name === "x2_retrace" && window.x2Retrace) {
-    window.x2Retrace.initX2RetraceTab();
-    requestAnimationFrame(() => window.x2Retrace.resizeChart?.());
-  }
-  if (name === "pump_strategy" && window.pumpStrategy) {
-    window.pumpStrategy.initPumpStrategyTab();
-    requestAnimationFrame(() => {
-      if (window.pumpStrategy?.resizeChart) window.pumpStrategy.resizeChart();
-    });
-  }
-  if (name === "pending") {
-    renderPending();
   }
   if (name === "stats") {
     renderStats();
@@ -281,7 +321,7 @@ function showTab(name) {
       Object.values(state.gauges).forEach((chart) => chart.resize());
       if (state.equity) state.equity.resize();
     });
-  } else if (state.chart) {
+  } else if (name !== "pump_lab" && state.chart) {
     requestAnimationFrame(() => state.chart.resize());
   }
 }
@@ -951,7 +991,7 @@ function renderPending() {
           const symbol = tr.dataset.symbol;
           state.selected = symbol;
           socket.send(JSON.stringify({ type: "select", symbol }));
-          showTab("signals");
+          openAnalysisSub("signals");
         });
       });
     })
