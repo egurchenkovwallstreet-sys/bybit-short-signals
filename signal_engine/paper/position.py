@@ -1,7 +1,7 @@
 """Виртуальный изолированный шорт: ликвидация, трейлинг-стоп, комиссии, funding.
 
 ROE — прибыль в % от маржи без комиссий: (вход − цена) / вход × плечо × 100.
-t20: при пике ≥ 2% стоп в безубыток (0% ROE), при ≥ 7% — не хуже +5%,
+t20: при пике ≥ 2% стоп на net-безубыток (комиссии вход/выход), при ≥ 7% — не хуже +5%,
 дальше трейл «пик − 20 п.п.». p10: бумажный трейл 10%→2% цены плюс лок пик − 10.
 """
 
@@ -44,11 +44,31 @@ def price_for_roe(entry: float, roe: float, leverage: int | None = None) -> floa
     return entry * (1.0 - roe / (100.0 * lev))
 
 
+def net_breakeven_stop_price(
+    entry: float,
+    margin: float,
+    leverage: int | None = None,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """Цена выхода шорта, при которой net P&L (комиссии + funding) ≈ 0."""
+    lev = leverage or config.PAPER_LEVERAGE
+    if entry <= 0 or margin <= 0:
+        return entry
+    qty = margin * lev / entry
+    fee = config.PAPER_FEE_RATE_TAKER
+    return (entry * qty - entry_fee + funding_paid) / (qty * (1.0 + fee))
+
+
 def trail_stop(
     entry: float,
     best_price: float,
     leverage: int | None = None,
     peak_gap_roe: float = 0.0,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
 ) -> float:
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
@@ -61,6 +81,8 @@ def trail_stop(
     if peak < config.PAPER_BE_ARM_ROE:
         return liquidation_price(entry, lev)
     if peak < config.PAPER_LOCK_ARM_ROE:
+        if margin > 0:
+            return net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
         return price_for_roe(entry, 0.0, lev)
     lock_roe = max(config.PAPER_LOCK_MIN_ROE, peak - config.PAPER_TRAIL_GAP_ROE)
     return price_for_roe(entry, lock_roe, lev)
@@ -97,7 +119,15 @@ class Position:
         if self.stop_price <= 0:
             self.stop_price = min(
                 self.liq_price,
-                trail_stop(self.entry_price, self.best_price, self.leverage, self.peak_gap_roe),
+                trail_stop(
+                    self.entry_price,
+                    self.best_price,
+                    self.leverage,
+                    self.peak_gap_roe,
+                    margin=self.margin,
+                    entry_fee=self.entry_fee,
+                    funding_paid=self.funding_paid,
+                ),
             )
         if self.last_price <= 0:
             self.last_price = self.entry_price
@@ -151,7 +181,15 @@ class Position:
             self.best_price = low
             self.stop_price = min(
                 self.liq_price,
-                trail_stop(self.entry_price, low, self.leverage, self.peak_gap_roe),
+                trail_stop(
+                    self.entry_price,
+                    low,
+                    self.leverage,
+                    self.peak_gap_roe,
+                    margin=self.margin,
+                    entry_fee=self.entry_fee,
+                    funding_paid=self.funding_paid,
+                ),
             )
             if last >= self.stop_price:
                 return "trailing_stop"

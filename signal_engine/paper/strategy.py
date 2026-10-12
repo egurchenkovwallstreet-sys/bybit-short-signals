@@ -146,7 +146,15 @@ class PaperStrategy:
             # Стоп по правилу варианта: t20 — BE/лок/трейл 20, p10 — пик − gap.
             pos.stop_price = min(
                 pos.liq_price,
-                trail_stop(pos.entry_price, pos.best_price, pos.leverage, gap),
+                trail_stop(
+                    pos.entry_price,
+                    pos.best_price,
+                    pos.leverage,
+                    gap,
+                    margin=pos.margin,
+                    entry_fee=pos.entry_fee,
+                    funding_paid=pos.funding_paid,
+                ),
             )
             self.trades[(variant, row["symbol"])] = OpenTrade(
                 id=int(row["id"]),

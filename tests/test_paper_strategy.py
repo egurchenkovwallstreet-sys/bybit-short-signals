@@ -13,7 +13,13 @@ from signal_engine.paper.detect import (
     round_level_near,
     strong_top,
 )
-from signal_engine.paper.position import Position, liquidation_price, trail_distance_pct, trail_stop
+from signal_engine.paper.position import (
+    Position,
+    liquidation_price,
+    net_breakeven_stop_price,
+    trail_distance_pct,
+    trail_stop,
+)
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.paper.tape import SymbolTape
@@ -105,11 +111,21 @@ class TrailingTest(unittest.TestCase):
         self.assertAlmostEqual(pos.stop_price, pos.liq_price)
         self.assertIsNone(pos.update(0.998, 1.0, 0.998))
         self.assertAlmostEqual(pos.max_roe(), 2.0)
-        self.assertAlmostEqual(pos.stop_price, 1.0)
+        self.assertAlmostEqual(pos.stop_price, net_breakeven_stop_price(1.0, 50.0, 10, pos.entry_fee))
         self.assertIsNone(pos.update(0.993, 0.999, 0.993))
         self.assertAlmostEqual(pos.max_roe(), 7.0)
         self.assertAlmostEqual(pos.stop_price, 0.995)
         self.assertEqual(pos.update(0.993, 0.995, 0.995), "trailing_stop")
+
+    def test_be_stop_closes_non_negative(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0)
+        self.assertIsNone(pos.update(0.998, 1.0, 0.998))
+        self.assertAlmostEqual(pos.max_roe(), 2.0)
+        stop = pos.stop_price
+        self.assertEqual(pos.update(stop, stop + 0.001, stop), "trailing_stop")
+        result = pos.close_result("trailing_stop")
+        self.assertGreaterEqual(result["pnl_usd"], -0.001)
+        self.assertGreaterEqual(result["roe_pct"], -0.01)
 
     def test_peak_gap_not_before_ten_roe(self) -> None:
         pos = Position("X", 0, 1.0, 50.0, peak_gap_roe=10.0)
