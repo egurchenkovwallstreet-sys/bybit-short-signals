@@ -381,6 +381,45 @@ class EntryGateTest(unittest.TestCase):
         )
         self.assertIn("no_14d", paper_entry_blocks({"pump": {"trigger": "14d"}, "since_peak_min": 30}))
 
+    def test_stale_last_eval_hides_blocked_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "paper.db"
+            store = PaperStore(path)
+            store.open()
+            store.insert_candidate(
+                {
+                    "symbol": "NIGHTUSDT",
+                    "kind": "long",
+                    "status": "watching",
+                    "started_at": 1,
+                    "updated_at": 1,
+                    "peak_ts": NOW - 2000 * MIN,
+                    "peak_price": 2.0,
+                    "valley_price": 1.0,
+                    "valley_ts": 1,
+                    "growth_pct": 120.0,
+                    "last_eval": {
+                        "metrics": {
+                            "pump": {"trigger": "14d", "volume_ratio": 20},
+                            "since_peak_min": 2000,
+                        },
+                        "variants": ["v5", "p10"],
+                        "passed_count": 6,
+                    },
+                }
+            )
+            store.close()
+            strategy = PaperStrategy(PaperStore(path))
+            strategy.open()
+            view = strategy.view(NOW, None)
+            self.assertEqual(len(view["candidates"]), 1)
+            ev = view["candidates"][0]["eval"]
+            self.assertIn("no_14d", ev["entry_blocked"])
+            self.assertIn("since_too_late", ev["entry_blocked"])
+            self.assertEqual(ev["variants"], [])
+            self.assertIn("Вход закрыт", view["candidates"][0]["note"] or "")
+            strategy.close()
+
     def test_strategy_skips_late_peak(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = PaperStore(Path(tmp) / "paper.db")

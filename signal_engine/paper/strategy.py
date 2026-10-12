@@ -28,6 +28,7 @@ from signal_engine.paper.detect import (
     evaluate,
     find_pump,
     grade_for,
+    paper_entry_blocks,
 )
 from signal_engine.paper.position import Position, trail_stop
 from signal_engine.paper.store import PaperStore
@@ -168,7 +169,7 @@ class PaperStrategy:
             if older is not None:
                 self._end_candidate(older, "дубль после перезапуска", now)
             pump = _pump_from_row(row)
-            last_eval = _loads(row["last_eval"]) or None
+            last_eval = _apply_entry_gate(_loads(row["last_eval"]) or None)
             self.candidates[row["symbol"]] = Candidate(
                 id=int(row["id"]),
                 symbol=row["symbol"],
@@ -758,6 +759,11 @@ class PaperStrategy:
 
     def _candidate_view(self, cand: Candidate, now_ms: int) -> dict:
         shadow = self.shadows.get(cand.id)
+        ev = _apply_entry_gate(cand.last_eval)
+        blocked = (ev or {}).get("entry_blocked") or []
+        note = cand.note
+        if blocked and not note:
+            note = "Вход закрыт: " + "; ".join(ENTRY_GATE_LABELS.get(k, k) for k in blocked)
         return {
             "id": cand.id,
             "symbol": cand.symbol,
@@ -768,8 +774,8 @@ class PaperStrategy:
             "best_passed": cand.best_passed,
             "entered": cand.entered,
             "open_in": [v for v in VARIANTS if (v, cand.symbol) in self.trades],
-            "note": cand.note,
-            "eval": cand.last_eval,
+            "note": note,
+            "eval": ev,
             "shadow": (
                 {
                     "entry_price": shadow.pos.entry_price,
@@ -832,6 +838,20 @@ def _pump_from_row(row) -> PumpInfo:
         buy_share_pct=data.get("buy_share_pct"),
         tape_minutes=int(data.get("tape_minutes") or 0),
     )
+
+
+def _apply_entry_gate(ev: dict | None) -> dict | None:
+    """Пересчитать шлюз на сохранённом last_eval — после рестарта оценка может быть старой."""
+    if not isinstance(ev, dict) or not ev:
+        return ev
+    blocked = paper_entry_blocks(ev.get("metrics") or {})
+    if ev.get("entry_blocked") == blocked and (not blocked or not ev.get("variants")):
+        return ev
+    out = dict(ev)
+    out["entry_blocked"] = blocked
+    if blocked:
+        out["variants"] = []
+    return out
 
 
 def _loads(raw) -> dict:
