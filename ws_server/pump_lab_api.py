@@ -8,6 +8,7 @@ from typing import Any
 
 import config
 from signal_engine.pump_lab.metrics import METRIC_GROUPS, METRIC_LABELS
+from signal_engine.pump_lab.study import STUDY_FIELDS
 from signal_engine.pump_lab.store import PumpLabStore
 
 
@@ -31,6 +32,8 @@ def episode_detail(episode_id: int) -> dict[str, Any] | None:
         return {
             "episode": ep,
             "snapshots": store.recent_snapshots(episode_id, 30),
+            "study": store.study_marks(episode_id),
+            "study_labels": [{"id": key, "label": label} for key, label in STUDY_FIELDS],
             "history": history,
             "metric_labels": METRIC_LABELS,
             "metric_groups": [{"id": g[0], "title": g[1]} for g in METRIC_GROUPS],

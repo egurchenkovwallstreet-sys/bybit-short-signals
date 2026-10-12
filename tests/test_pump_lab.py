@@ -22,7 +22,9 @@ from signal_engine.pump_lab.phases import (
     post_peak_correction_trough,
     pump_class_from_duration,
 )
+from signal_engine.pump_lab.lab import PumpLab
 from signal_engine.pump_lab.store import PumpLabStore
+from signal_engine.pump_lab.study import STUDY_FIELDS, build_study
 from signal_engine.state import Bar, SymbolState
 
 
@@ -134,6 +136,128 @@ class PumpLabStoreTests(unittest.TestCase):
             active = store.active_episodes()
             self.assertEqual(len(active), 1)
             self.assertEqual(active[0]["symbol"], "ABCUSDT")
+            store.close()
+
+    def test_study_marks_survive_sample_trim(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PumpLabStore(Path(tmp) / "lab.db")
+            store.open()
+            eid = store.insert_episode(
+                {
+                    "symbol": "ABCUSDT",
+                    "pump_class": "fast",
+                    "phase": "yellow",
+                    "peak_price": 1.5,
+                    "peak_ts": 1,
+                    "started_at": 1,
+                    "updated_at": 1,
+                }
+            )
+            store.insert_study(eid, 1, "peak", "red", 1.5, {"price": 1.5})
+            store.insert_study(eid, 2, "stall", "yellow", 1.4, {"price": 1.4})
+            for i in range(501):
+                store.insert_study(eid, 100 + i, "sample", "yellow", 1.4, {"price": 1.4})
+            marks = {row["mark"] for row in store.study_marks(eid)}
+            self.assertEqual(marks, {"peak", "stall", "sample"})
+            kept = store.conn.execute(
+                "SELECT COUNT(*) FROM lab_study WHERE episode_id = ? AND mark = 'sample'",
+                (eid,),
+            ).fetchone()[0]
+            self.assertEqual(kept, 500)
+            store.close()
+
+
+class OrderBookStateTests(unittest.TestCase):
+    def test_reset_delta_and_delete(self) -> None:
+        state = SymbolState("BEAMUSDT")
+        state.ingest(
+            {
+                "type": "orderbook",
+                "timestamp": 1000,
+                "data": {
+                    "reset": True,
+                    "bids": [[100.0, 2.0], [99.0, 1.0]],
+                    "asks": [[101.0, 3.0]],
+                },
+            }
+        )
+        state.ingest(
+            {
+                "type": "orderbook",
+                "timestamp": 2000,
+                "data": {"bids": [[100.0, 0.0], [98.0, 4.0]], "asks": [[101.0, 1.0]]},
+            }
+        )
+        self.assertNotIn(100.0, state.book_bids)
+        self.assertEqual(state.book_bids[99.0], 1.0)
+        self.assertEqual(state.book_bids[98.0], 4.0)
+        self.assertEqual(state.book_asks[101.0], 1.0)
+        self.assertEqual(state.book_ts, 2000)
+        state.ingest(
+            {
+                "type": "ticker",
+                "timestamp": 2000,
+                "data": {"mark_price": "101", "index_price": "100", "bid1_price": "99.5", "ask1_price": "100.5"},
+            }
+        )
+        self.assertEqual(state.mark_price, 101.0)
+        self.assertEqual(state.index_price, 100.0)
+
+
+class PumpStudyTests(unittest.TestCase):
+    def test_build_study_records_raw_numbers(self) -> None:
+        now = 1_700_000_000_000
+        state = SymbolState("LABUSDT")
+        for i in range(40):
+            ts = now - (39 - i) * 60_000
+            close = 110.0 - i * 0.25
+            state.bars_1m.append(Bar(ts, close + 0.1, close + 0.2, close - 0.1, close, 10.0))
+        state.last_price = state.bars_1m[-1].close
+        state.funding_rate = 0.0008
+        state.mark_price = 100.4
+        state.index_price = 100.0
+        for i in range(15):
+            minute = now - i * 60_000
+            state.taker_buy[minute] = 2.0
+            state.taker_sell[minute] = 8.0
+        state.oi_5m = [(now - 60 * 60_000, 1000.0), (now - 15 * 60_000, 900.0), (now, 800.0)]
+        minute = (now // 60_000) * 60_000
+        state.liq_notional[minute] = 5000.0
+        state.liq_long_notional[minute] = 1000.0
+        state.book_bids = {99.9: 200.0, 99.0: 50.0}
+        state.book_asks = {100.1: 10.0}
+        btc = SymbolState("BTCUSDT", last_price=100.0)
+        for i in range(20):
+            ts = now - (19 - i) * 60_000
+            btc.bars_1m.append(Bar(ts, 100.0, 100.0, 100.0, 100.0, 1.0))
+        features = build_study(state, btc, 110.0, now - 10 * 60_000, now, 50.0)
+        self.assertEqual(set(features), {key for key, _ in STUDY_FIELDS})
+        self.assertIsNone(features["long_account_ratio"])
+        self.assertIsNone(features["rush_orders"])
+        self.assertAlmostEqual(features["since_peak_min"], 10.0)
+        self.assertGreater(features["drawdown_pct"], 0)
+        self.assertEqual(features["sell_windows_over_50"], 3.0)
+        self.assertEqual(features["short_liq_5m_usd"], 5000.0)
+        self.assertEqual(features["long_liq_5m_usd"], 1000.0)
+        self.assertEqual(features["price_down_oi_down"], 1.0)
+        self.assertLess(features["cvd_15m_usd"], 0)
+        self.assertGreater(features["spread_pct"], 0)
+        self.assertIsNotNone(features["sell_slip_10k_pct"])
+        self.assertAlmostEqual(features["premium_pct"], 0.4)
+        self.assertEqual(features["lower_closes"], 39.0)
+
+    def test_snapshot_writes_marks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PumpLabStore(Path(tmp) / "lab.db")
+            store.open()
+            lab = PumpLab(store)
+            state = SymbolState("ABCUSDT", last_price=1.4)
+            lab._snapshot(7, 3000, "yellow", state, {}, ["sample", "peak", "stall"], None, 1.5, 2000, 50.0)
+            marks = {row["mark"] for row in store.study_marks(7)}
+            self.assertEqual(marks, {"sample", "peak", "stall"})
+            peak = next(row for row in store.study_marks(7) if row["mark"] == "peak")
+            self.assertIn("price", peak["features"])
+            self.assertEqual(len(peak["features"]), len(STUDY_FIELDS))
             store.close()
 
 

@@ -42,8 +42,15 @@ class SymbolState:
     taker_sell: dict[int, float] = field(default_factory=dict)
     last_price: float | None = None
     funding_rate: float | None = None
+    mark_price: float | None = None
+    index_price: float | None = None
+    bid1_price: float | None = None
+    ask1_price: float | None = None
     turnover_24h_usdt: float | None = None
     price_24h_change: float | None = None
+    book_bids: dict[float, float] = field(default_factory=dict)
+    book_asks: dict[float, float] = field(default_factory=dict)
+    book_ts: int | None = None
 
     def ingest(self, message: dict) -> None:
         kind = message.get("type")
@@ -59,6 +66,8 @@ class SymbolState:
             self._oi(data)
         elif kind == "kline":
             self._klines(data)
+        elif kind == "orderbook":
+            self._orderbook(timestamp, data)
 
     def closes_1m(self) -> list[float]:
         return [bar.close for bar in self.bars_1m]
@@ -141,6 +150,30 @@ class SymbolState:
         change = _float(data.get("price_24h_change"))
         if change is not None:
             self.price_24h_change = change
+        mark = _float(data.get("mark_price"))
+        if mark is not None and mark > 0:
+            self.mark_price = mark
+        index = _float(data.get("index_price"))
+        if index is not None and index > 0:
+            self.index_price = index
+        bid1 = _float(data.get("bid1_price"))
+        if bid1 is not None and bid1 > 0:
+            self.bid1_price = bid1
+        ask1 = _float(data.get("ask1_price"))
+        if ask1 is not None and ask1 > 0:
+            self.ask1_price = ask1
+
+    def _orderbook(self, timestamp: int, data: dict) -> None:
+        """Снимок или дельта стакана. size = 0 снимает уровень."""
+        if data.get("reset"):
+            self.book_bids.clear()
+            self.book_asks.clear()
+        _apply_book(self.book_bids, data.get("bids") or [])
+        _apply_book(self.book_asks, data.get("asks") or [])
+        if timestamp:
+            self.book_ts = timestamp
+        _trim_book(self.book_bids, reverse=True)
+        _trim_book(self.book_asks, reverse=False)
 
     def _oi(self, data: dict) -> None:
         # Для решения «OI падает» хватает 5-минуток. Остальные интервалы не мешают.
@@ -205,6 +238,31 @@ def _bar_from_candle(row: dict) -> Bar | None:
     if None in (timestamp, open_, high, low, close, volume):
         return None
     return Bar(timestamp, open_, high, low, close, volume, from_kline=True)
+
+
+def _apply_book(book: dict[float, float], levels: object) -> None:
+    if not isinstance(levels, list):
+        return
+    for row in levels:
+        if not isinstance(row, (list, tuple)) or len(row) < 2:
+            continue
+        price = _float(row[0])
+        size = _float(row[1])
+        if price is None or price <= 0 or size is None:
+            continue
+        if size <= 0:
+            book.pop(price, None)
+        else:
+            book[price] = size
+
+
+def _trim_book(book: dict[float, float], reverse: bool, keep: int = 50) -> None:
+    if len(book) <= keep + 30:
+        return
+    top = sorted(book, reverse=reverse)[:keep]
+    kept = {price: book[price] for price in top}
+    book.clear()
+    book.update(kept)
 
 
 def _float(value: object) -> float | None:

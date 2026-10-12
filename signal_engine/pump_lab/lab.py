@@ -10,6 +10,7 @@ from typing import Any
 import config
 from signal_engine.pump_lab.detect import detect_episodes, window_ms
 from signal_engine.pump_lab.metrics import METRIC_GROUPS, METRIC_LABELS, compute_all_metrics, metrics_summary
+from signal_engine.pump_lab.study import STUDY_FIELDS, build_study
 from signal_engine.pump_lab.phases import (
     compute_phase,
     drawdown_from_peak_pct,
@@ -122,7 +123,14 @@ class PumpLab:
                             "metrics": metrics,
                         }
                     )
-                    self._snapshot(eid, now_ms, phase, state, metrics)
+                    marks = ["sample", "peak"]
+                    if phase == "yellow":
+                        marks.append("stall")
+                    elif phase == "green":
+                        marks.append("dump")
+                    self._snapshot(
+                        eid, now_ms, phase, state, metrics, marks, btc, draft.peak_price, draft.peak_ts, draft.growth_pct
+                    )
                     log.info("PumpLab: новый эпизод %s %s %s", symbol, draft.pump_class, phase)
                     continue
 
@@ -179,21 +187,42 @@ class PumpLab:
             "valley_ts": min(int(ep.get("valley_ts") or draft.valley_ts), draft.valley_ts),
         }
         self.store.update_episode(int(ep["id"]), row)
-        self._snapshot(int(ep["id"]), now_ms, phase, state, metrics)
+        marks = ["sample"]
+        if peak_ts != int(ep.get("peak_ts") or 0):
+            marks.append("peak")
+        if phase != ep.get("phase"):
+            if phase == "yellow":
+                marks.append("stall")
+            elif phase == "green":
+                marks.append("dump")
+        self._snapshot(
+            int(ep["id"]), now_ms, phase, state, metrics, marks, btc, peak_price, peak_ts, draft.growth_pct
+        )
 
         price = state.last_price or peak_price
         if drawdown_from_peak_pct(price, peak_price) > config.PUMP_LAB_MAX_DRAWDOWN_PCT:
             self.store.close_episode(int(ep["id"]), now_ms, "drawdown")
 
-    def _snapshot(self, episode_id: int, ts: int, phase: str, state: SymbolState, metrics: dict) -> None:
+    def _snapshot(
+        self,
+        episode_id: int,
+        ts: int,
+        phase: str,
+        state: SymbolState,
+        metrics: dict,
+        marks: list[str],
+        btc: SymbolState | None,
+        peak_price: float,
+        peak_ts: int,
+        growth_pct: float | None,
+    ) -> None:
         price = state.last_price
-        peak = None
-        ep = self.store.episode(episode_id)
-        if ep:
-            peak = ep.get("peak_price")
-        dd = drawdown_from_peak_pct(price or 0, peak or 0) if peak else None
+        dd = drawdown_from_peak_pct(price or 0, peak_price) if peak_price else None
         self.store.insert_snapshot(episode_id, ts, phase, price, dd, metrics)
         self.store.append_metric_points(episode_id, ts, metrics)
+        features = build_study(state, btc, peak_price, peak_ts, ts, growth_pct)
+        for mark in marks:
+            self.store.insert_study(episode_id, ts, mark, phase, price, features)
 
     def build_board(self, now_ms: int) -> dict[str, Any]:
         sections: dict[str, list[dict[str, Any]]] = {"fast": [], "medium": [], "long": []}
@@ -239,6 +268,7 @@ class PumpLab:
             "metric_labels": METRIC_LABELS,
             "metric_groups": [{"id": g[0], "title": g[1]} for g in METRIC_GROUPS],
             "horizon_labels": {"short": "Короткий", "mid": "Средний", "long": "Длинный"},
+            "study_field_count": len(STUDY_FIELDS),
         }
 
     def board_message(self, now_ms: int) -> dict[str, Any]:

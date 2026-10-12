@@ -1619,6 +1619,8 @@ th { cursor: pointer; color: var(--muted); }
   padding: 12px 14px;
 }
 .pl-detail-head { margin-bottom: 12px; }
+.pl-study { margin: 8px 0 14px; }
+.pl-study h4 { margin: 0 0 6px; font-size: 13px; }
 .pl-detail-head h3 { margin: 0 0 4px; }
 .pl-metric-group { margin-bottom: 16px; }
 .pl-metric-group h4 { margin: 0 0 6px; font-size: 13px; color: var(--muted); }

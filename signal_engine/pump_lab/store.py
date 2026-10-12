@@ -52,6 +52,17 @@ CREATE TABLE IF NOT EXISTS lab_metric_series (
     PRIMARY KEY (episode_id, metric_id, horizon, ts)
 );
 CREATE INDEX IF NOT EXISTS lab_metric_series_ep ON lab_metric_series(episode_id, metric_id);
+
+CREATE TABLE IF NOT EXISTS lab_study (
+    episode_id INTEGER NOT NULL,
+    ts INTEGER NOT NULL,
+    mark TEXT NOT NULL,
+    phase TEXT,
+    price REAL,
+    features_json TEXT NOT NULL,
+    PRIMARY KEY (episode_id, ts, mark)
+);
+CREATE INDEX IF NOT EXISTS lab_study_ep ON lab_study(episode_id, ts);
 """
 
 
@@ -224,6 +235,93 @@ class PumpLabStore:
                 (episode_id, metric_id, horizon, cutoff),
             )
         self.conn.commit()
+
+    def insert_study(
+        self,
+        episode_id: int,
+        ts: int,
+        mark: str,
+        phase: str,
+        price: float | None,
+        features: dict[str, Any],
+    ) -> None:
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO lab_study (episode_id, ts, mark, phase, price, features_json)
+            VALUES (?,?,?,?,?,?)
+            """,
+            (episode_id, ts, mark, phase, price, json.dumps(features, ensure_ascii=False)),
+        )
+        self.conn.commit()
+        self._trim_study(episode_id)
+
+    def _trim_study(self, episode_id: int, keep_samples: int = 500) -> None:
+        rows = self.conn.execute(
+            """
+            SELECT ts FROM lab_study
+            WHERE episode_id = ? AND mark = 'sample'
+            ORDER BY ts DESC
+            """,
+            (episode_id,),
+        ).fetchall()
+        if len(rows) <= keep_samples:
+            return
+        cutoff = rows[keep_samples - 1][0]
+        self.conn.execute(
+            """
+            DELETE FROM lab_study
+            WHERE episode_id = ? AND mark = 'sample' AND ts < ?
+            """,
+            (episode_id, cutoff),
+        )
+        self.conn.commit()
+
+    def study_marks(self, episode_id: int) -> list[dict[str, Any]]:
+        """Последняя запись каждой метки: пик, остановка, старт снижения, скан."""
+        out = []
+        for mark in ("dump", "stall", "peak", "sample"):
+            row = self.conn.execute(
+                """
+                SELECT ts, mark, phase, price, features_json FROM lab_study
+                WHERE episode_id = ? AND mark = ?
+                ORDER BY ts DESC LIMIT 1
+                """,
+                (episode_id, mark),
+            ).fetchone()
+            if row is None:
+                continue
+            out.append(
+                {
+                    "ts": row[0],
+                    "mark": row[1],
+                    "phase": row[2],
+                    "price": row[3],
+                    "features": json.loads(row[4] or "{}"),
+                }
+            )
+        return out
+
+    def study_rows(self, episode_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self.conn.execute(
+            """
+            SELECT ts, mark, phase, price, features_json FROM lab_study
+            WHERE episode_id = ?
+            ORDER BY ts DESC LIMIT ?
+            """,
+            (episode_id, limit),
+        ).fetchall()
+        out = []
+        for r in rows:
+            out.append(
+                {
+                    "ts": r[0],
+                    "mark": r[1],
+                    "phase": r[2],
+                    "price": r[3],
+                    "features": json.loads(r[4] or "{}"),
+                }
+            )
+        return out
 
     def metric_history(self, episode_id: int, metric_id: str, horizon: str) -> list[dict[str, Any]]:
         rows = self.conn.execute(

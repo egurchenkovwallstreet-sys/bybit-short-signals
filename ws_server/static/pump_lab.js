@@ -52,6 +52,11 @@ function initPumpLabTab() {
 function onPumpLabBoard(data) {
   if (!data) return;
   plState.board = data;
+  const count = document.getElementById("pl-study-count");
+  if (count) {
+    const n = data.study_field_count;
+    count.textContent = n ? `Журнал: ${n} показателей.` : "";
+  }
   initPumpLabTab();
   for (const [id] of PUMP_LAB_SECTIONS) {
     const wrap = document.getElementById(`pl-cards-${id}`);
@@ -185,6 +190,51 @@ async function loadEpisode(id) {
   }
 }
 
+const STUDY_MARKS = {
+  dump: "старт снижения",
+  stall: "остановка",
+  peak: "пик",
+  sample: "скан",
+};
+
+function renderStudy(d) {
+  const rows = d.study || [];
+  const labels = d.study_labels || [];
+  const n = labels.length;
+  if (!rows.length) {
+    return `<p class="quiet">Журнал показателей ещё пуст${n ? ` (${n} полей)` : ""}.</p>`;
+  }
+  const latest = {};
+  for (const row of rows) {
+    if (!latest[row.mark]) latest[row.mark] = row;
+  }
+  const marks = ["dump", "stall", "peak", "sample"].filter((m) => latest[m]);
+  let html = `<div class="pl-study"><h4>Журнал показателей · ${n} полей</h4>`;
+  html += `<div class="pl-metric-table-wrap"><table class="pl-metric-table"><thead><tr><th></th>`;
+  for (const m of marks) html += `<th>${STUDY_MARKS[m] || m}</th>`;
+  html += `</tr></thead><tbody>`;
+  for (const item of labels) {
+    const cells = marks.map((m) => (latest[m].features || {})[item.id]);
+    if (cells.every((v) => v == null)) continue;
+    html += `<tr><td class="pl-m-name">${item.label}</td>`;
+    for (const v of cells) html += `<td>${v != null ? formatStudyVal(v) : "—"}</td>`;
+    html += `</tr>`;
+  }
+  html += `</tbody></table></div></div>`;
+  return html;
+}
+
+function formatStudyVal(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  const a = Math.abs(n);
+  if (a === 0) return "0";
+  if (a >= 1000) return n.toFixed(0);
+  if (a >= 10) return n.toFixed(2);
+  if (a >= 0.01) return n.toFixed(4);
+  return n.toExponential(2);
+}
+
 function renderDetail() {
   const pane = document.getElementById("pump-lab-detail");
   const d = plState.detail;
@@ -199,9 +249,11 @@ function renderDetail() {
     byGroup[g] = byGroup[g] || [];
     byGroup[g].push(id);
   }
+  const studyHtml = renderStudy(d);
   let html = `<div class="pl-detail-head">
     <h3>${ep.symbol}</h3>
     <p class="quiet">Пик ${ep.peak_price} · рост ${ep.growth_pct != null ? ep.growth_pct.toFixed(1) : "—"}%</p>
+    ${studyHtml}
     <p class="pl-metric-legend"><span class="pl-short-yes">■</span> за шорт · <span class="pl-short-neutral">■</span> нейтрально · <span class="pl-short-no">■</span> против</p>
     <a class="bybit-btn" href="https://www.bybit.com/trade/usdt/${ep.symbol}" target="_blank" rel="noopener">Bybit</a>
   </div>`;
