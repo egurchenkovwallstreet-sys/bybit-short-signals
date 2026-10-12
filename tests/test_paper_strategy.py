@@ -5,7 +5,7 @@ from pathlib import Path
 import config
 from signal_engine.paper.analytics import compute_analytics
 from signal_engine.paper.detect import double_top, evaluate, find_pump, round_level_near, strong_top
-from signal_engine.paper.position import Position, liquidation_price, trail_distance_pct
+from signal_engine.paper.position import Position, liquidation_price, trail_distance_pct, trail_stop
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.paper.tape import SymbolTape
@@ -79,28 +79,30 @@ class TrailingTest(unittest.TestCase):
         pos = Position("X", 0, 1.0, 50.0)
         self.assertAlmostEqual(pos.stop_price, pos.liq_price)
         self.assertIsNone(pos.update(0.9, 1.0, 0.9))
-        # пик 100% ROE → лок пик−10 п.п. = 90% → цена 0.91 (жёстче 10% трейла 0.99)
-        self.assertAlmostEqual(pos.stop_price, 0.91)
+        self.assertAlmostEqual(pos.stop_price, 0.99)
         self.assertIsNone(pos.update(0.7, 0.9, 0.7))
-        # пик 300% → лок 290% → 0.71 (чуть жёстче 2% трейла 0.714)
-        self.assertAlmostEqual(pos.stop_price, 0.71)
+        self.assertAlmostEqual(pos.stop_price, 0.714)
         self.assertEqual(pos.update(0.7, 0.72, 0.72), "trailing_stop")
         result = pos.close_result("trailing_stop")
-        gross = (1.0 - 0.71) * 500
-        fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.71 * config.PAPER_FEE_RATE_TAKER
+        gross = (1.0 - 0.714) * 500
+        fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.714 * config.PAPER_FEE_RATE_TAKER
         self.assertAlmostEqual(result["pnl_usd"], gross - fees, places=6)
 
     def test_peak_gap_not_before_ten_roe(self) -> None:
-        pos = Position("X", 0, 1.0, 50.0)
+        pos = Position("X", 0, 1.0, 50.0, peak_gap_roe=10.0)
         self.assertIsNone(pos.update(0.995, 1.0, 0.995))
         self.assertAlmostEqual(pos.max_roe(), 5.0)
         self.assertAlmostEqual(pos.stop_price, 0.995 * 1.10)
 
     def test_peak_gap_locks_ten_pp_behind(self) -> None:
-        from signal_engine.paper.position import trail_stop
+        # Без лока — бумажный трейл 10% цены. С gap=10 при 40% ROE лок 30% → 0.97.
+        self.assertAlmostEqual(trail_stop(1.0, 0.96, 10), 0.96 * 1.10)
+        self.assertAlmostEqual(trail_stop(1.0, 0.96, 10, peak_gap_roe=10.0), 0.97)
 
-        # 40% ROE: best 0.96, лок 30% → 0.97
-        self.assertAlmostEqual(trail_stop(1.0, 0.96, 10), 0.97)
+    def test_p10_position_uses_peak_gap(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0, peak_gap_roe=10.0)
+        self.assertIsNone(pos.update(0.9, 1.0, 0.9))
+        self.assertAlmostEqual(pos.stop_price, 0.91)
 
     def test_liquidation_loses_margin(self) -> None:
         pos = Position("X", 0, 1.0, 50.0)
@@ -196,11 +198,12 @@ class StrategyCycleTest(unittest.TestCase):
             states = {state.symbol: state}
 
             view = strategy.scan(states, NOW)["data"]
-            # Все 9 условий: входят «5 из 9» и «все 9», без вершины «dt» не входит.
-            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["v5", "v9"])
+            # Все 9 условий: входят v5, v9 и p10; без вершины dt не входит.
+            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "v5", "v9"])
             trade = view["open_trades"][0]
             self.assertAlmostEqual(trade["entry_price"], 1.35)
             self.assertAlmostEqual(trade["margin"], 50.0)
+            self.assertAlmostEqual(strategy.balances["p10"], config.PAPER_START_BALANCE_USD)
 
             state.bars_1m.append(Bar(NOW + MIN, 1.3, 1.3, 1.2, 1.2, 10.0))
             state.last_price = 1.2
@@ -213,13 +216,15 @@ class StrategyCycleTest(unittest.TestCase):
             self.assertEqual(strategy.trades, {})
             self.assertGreater(strategy.balances["v5"], config.PAPER_START_BALANCE_USD)
             self.assertGreater(strategy.balances["v9"], config.PAPER_START_BALANCE_USD)
+            self.assertGreater(strategy.balances["p10"], config.PAPER_START_BALANCE_USD)
             self.assertEqual(strategy.balances["dt"], config.PAPER_START_BALANCE_USD)
 
             stats = compute_analytics(store.db, strategy.balances)
             self.assertEqual(stats["variants"]["v9"]["trades"]["closed"], 1)
             self.assertEqual(stats["variants"]["v9"]["trades"]["wins"], 1)
+            self.assertEqual(stats["variants"]["p10"]["trades"]["closed"], 1)
             self.assertEqual(stats["variants"]["dt"]["trades"]["closed"], 0)
-            self.assertEqual(strategy.candidates[state.symbol].entered, ["v5", "v9"])
+            self.assertEqual(strategy.candidates[state.symbol].entered, ["v5", "v9", "p10"])
             strategy.close()
 
     def test_near_miss_starts_shadow(self) -> None:
@@ -232,8 +237,8 @@ class StrategyCycleTest(unittest.TestCase):
             tape.add_liquidation(NOW, "Sell", 9_000.0)
             strategy.tape.symbols[state.symbol] = tape
             view = strategy.scan({state.symbol: state}, NOW)["data"]
-            # 8 из 9: вход только в варианте «5 из 9», для «все 9» — теневая сделка.
-            self.assertEqual([t["variant"] for t in view["open_trades"]], ["v5"])
+            # 8 из 9: вход в v5 и p10, для «все 9» — теневая сделка.
+            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "v5"])
             self.assertEqual(len(view["candidates"]), 1)
             self.assertEqual(view["candidates"][0]["shadow"]["missing"], "short_liq_faded")
             self.assertEqual(len(strategy.shadows), 1)
@@ -253,8 +258,8 @@ class StrategyCycleTest(unittest.TestCase):
             restarted = PaperStrategy(PaperStore(path))
             restarted.open()
             self.assertIn(state.symbol, restarted.candidates)
-            self.assertEqual(restarted.candidates[state.symbol].entered, ["v5", "v9"])
-            self.assertEqual(len(restarted.trades), 2)
+            self.assertEqual(restarted.candidates[state.symbol].entered, ["v5", "v9", "p10"])
+            self.assertEqual(len(restarted.trades), 3)
             tape = restarted.tape.symbols[state.symbol]
             self.assertTrue(tape.minutes)
             self.assertTrue(tape.liq_short)
@@ -320,7 +325,7 @@ class StrongTopTest(unittest.TestCase):
         ev.strong_top = {"interval": "60"}
         self.assertEqual(ev.variants, ["dt"])
         ev.checks["stall"]["ok"] = True
-        self.assertEqual(ev.variants, ["v5", "dt"])
+        self.assertEqual(ev.variants, ["v5", "dt", "p10"])
 
 
 if __name__ == "__main__":

@@ -2,8 +2,8 @@
 
 ROE — прибыль в % от маржи без комиссий: (вход − цена) / вход × плечо × 100.
 Трейлинг: до ROE 100% стоп в 10% цены над лучшей ценой, к ROE 300% расстояние
-плавно сужается до 2% цены. Когда пик ROE ≥ 10 п.п., стоп не хуже «пик − 10 п.п.»
-(жёстче бумажного трейла, чтобы не отдавать максимальный плюс).
+плавно сужается до 2% цены. Вариант p10 дополнительно держит стоп не хуже
+«пик − 10 п.п. ROE», когда пик ≥ 10%.
 """
 
 from __future__ import annotations
@@ -45,14 +45,18 @@ def price_for_roe(entry: float, roe: float, leverage: int | None = None) -> floa
     return entry * (1.0 - roe / (100.0 * lev))
 
 
-def trail_stop(entry: float, best_price: float, leverage: int | None = None) -> float:
+def trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    peak_gap_roe: float = 0.0,
+) -> float:
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
     paper = best_price * (1.0 + trail_distance_pct(peak) / 100.0)
-    gap = config.PAPER_TRAIL_PEAK_GAP_ROE
-    if peak < gap:
+    if peak_gap_roe <= 0 or peak < peak_gap_roe:
         return paper
-    lock_px = price_for_roe(entry, peak - gap, lev)
+    lock_px = price_for_roe(entry, peak - peak_gap_roe, lev)
     # Шорт: ниже стоп — жёстче. Берём более жёсткий из бумажного трейла и лока пик−gap.
     return min(paper, lock_px)
 
@@ -74,6 +78,7 @@ class Position:
     funding_paid: float = 0.0
     next_funding_ts: int | None = None
     last_price: float = 0.0
+    peak_gap_roe: float = 0.0
 
     def __post_init__(self) -> None:
         if self.best_price <= 0:
@@ -85,7 +90,10 @@ class Position:
         if self.entry_fee <= 0:
             self.entry_fee = self.notional * config.PAPER_FEE_RATE_TAKER
         if self.stop_price <= 0:
-            self.stop_price = min(self.liq_price, trail_stop(self.entry_price, self.best_price, self.leverage))
+            self.stop_price = min(
+                self.liq_price,
+                trail_stop(self.entry_price, self.best_price, self.leverage, self.peak_gap_roe),
+            )
         if self.last_price <= 0:
             self.last_price = self.entry_price
 
@@ -136,7 +144,10 @@ class Position:
         self.worst_price = max(self.worst_price, high)
         if low < self.best_price:
             self.best_price = low
-            self.stop_price = min(self.liq_price, trail_stop(self.entry_price, low, self.leverage))
+            self.stop_price = min(
+                self.liq_price,
+                trail_stop(self.entry_price, low, self.leverage, self.peak_gap_roe),
+            )
             if last >= self.stop_price:
                 return "trailing_stop"
         return None

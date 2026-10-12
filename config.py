@@ -183,7 +183,7 @@ PAPER_TRAIL_START_DIST_PCT = _env_float("PAPER_TRAIL_START_DIST_PCT", 10.0)
 PAPER_TRAIL_TIGHTEN_FROM_ROE = _env_float("PAPER_TRAIL_TIGHTEN_FROM_ROE", 100.0)
 PAPER_TRAIL_TIGHTEN_TO_ROE = _env_float("PAPER_TRAIL_TIGHTEN_TO_ROE", 300.0)
 PAPER_TRAIL_MIN_DIST_PCT = _env_float("PAPER_TRAIL_MIN_DIST_PCT", 2.0)
-# После пика ROE не ниже этого стоп держит «пик − gap» п.п., чтобы не отдавать максимальный плюс.
+# Только вариант p10: после пика ROE не ниже этого стоп держит «пик − gap» п.п.
 PAPER_TRAIL_PEAK_GAP_ROE = _env_float("PAPER_TRAIL_PEAK_GAP_ROE", 10.0)
 
 # Памп: короткий (окно до 4 ч / 24 ч по 15m), длинный (7 д / 14 д по 4H).
@@ -246,10 +246,16 @@ PAPER_STRONG_TOP_MIN_HOURS_AFTER = _env_float("PAPER_STRONG_TOP_MIN_HOURS_AFTER"
 PAPER_STRONG_TOP_MIN_BARS_1H = _env_int("PAPER_STRONG_TOP_MIN_BARS_1H", 5)
 PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 
-# Варианты входа, у каждого свой счёт: любые N из 9 условий, все 9, сильная вершина + N условий.
-PAPER_VARIANTS = ("v5", "v9", "dt")
+# Варианты входа, у каждого свой счёт: любые N из 9, все 9, сильная вершина + N, пик − 10 п.п.
+PAPER_VARIANTS = ("v5", "v9", "dt", "p10")
+PAPER_P10_VARIANT = "p10"
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
+
+
+def paper_peak_gap_roe(variant: str) -> float:
+    """Лок «пик − gap» только у p10; остальные варианты — бумажный трейл 10%→2%."""
+    return PAPER_TRAIL_PEAK_GAP_ROE if variant == PAPER_P10_VARIANT else 0.0
 
 # После перезапуска свечи в памяти не сразу полные: кандидата не снимаем
 # «по условиям пампа», пока не прошло столько минут и не набралась история.

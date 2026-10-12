@@ -52,6 +52,7 @@ VARIANT_LABELS = {
     "v5": f"{config.PAPER_V5_MIN_PASSED} из {len(MANDATORY)} условий",
     "v9": f"Все {len(MANDATORY)} условий",
     "dt": f"Двойная вершина + {config.PAPER_DT_MIN_PASSED} условия",
+    "p10": "Пик −10 п.п.",
 }
 
 _TF_WEIGHT = {"15": 1.0, "30": 1.5, "60": 2.0, "240": 3.0}
@@ -121,7 +122,7 @@ class Evaluation:
     def qualifies(self, variant: str) -> bool:
         if variant == "v9":
             return self.passed
-        if variant == "v5":
+        if variant in ("v5", "p10"):
             return self.passed_count >= config.PAPER_V5_MIN_PASSED
         if variant == "dt":
             return self.strong_top is not None and self.passed_count >= config.PAPER_DT_MIN_PASSED

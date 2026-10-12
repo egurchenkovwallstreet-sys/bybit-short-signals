@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { v5: "#5dade2", v9: "#3dd68c", dt: "#f6d365" };
+  const VARIANT_COLORS = { v5: "#5dade2", v9: "#3dd68c", dt: "#f6d365", p10: "#c084fc" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -88,7 +88,7 @@
     return (paper.data && paper.data.mandatory) || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["v5", "v9", "dt"];
+    return (paper.data && paper.data.variants) || ["v5", "v9", "dt", "p10"];
   }
   function vlabel(v) {
     return ((paper.data && paper.data.variant_labels) || {})[v] || v;
@@ -268,7 +268,7 @@
     paper.equityChart.setOption(
       {
         backgroundColor: "transparent",
-        grid: { left: 60, right: 20, top: 28, bottom: 30 },
+        grid: { left: 60, right: 20, top: 44, bottom: 30 },
         tooltip: { trigger: "axis" },
         legend: { data: series.map((s) => s.name), textStyle: { color: "#8e9aab" }, top: 0 },
         xAxis: { type: "time", axisLabel: { color: "#8e9aab" } },

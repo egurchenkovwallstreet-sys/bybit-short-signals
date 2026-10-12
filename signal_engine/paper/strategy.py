@@ -2,8 +2,8 @@
 
 Кандидат — один памп одной монеты. Пока он жив, каждые 3 секунды проверяются
 все обязательные условия. Варианты входа идут параллельно, у каждого свой счёт:
-«5 из 9», «все 9» и «сильная двойная вершина + 3 условия». Не хватило ровно
-одного из 9 — запускается теневая сделка: что было бы при входе.
+«5 из 9», «все 9», «сильная двойная вершина + 3» и «пик − 10 п.п.» (вход как у
+«5 из 9», другой трейл). Не хватило ровно одного из 9 — теневая сделка.
 Всё пишется в SQLite для анализа.
 """
 
@@ -27,7 +27,7 @@ from signal_engine.paper.detect import (
     find_pump,
     grade_for,
 )
-from signal_engine.paper.position import Position
+from signal_engine.paper.position import Position, trail_stop
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.tape import TapeBook, minute_start
 from signal_engine.state import Bar, SymbolState
@@ -124,6 +124,8 @@ class PaperStrategy:
             if revived:
                 log.info("Тест: возвращено кандидатов после ошибочного снятия: %s", revived)
         for row in self.store.open_trades():
+            variant = str(row["variant"] or "v9")
+            gap = config.paper_peak_gap_roe(variant)
             pos = Position(
                 symbol=row["symbol"],
                 opened_at=int(row["opened_at"]),
@@ -138,8 +140,13 @@ class PaperStrategy:
                 funding_paid=float(row["funding_paid"] or 0),
                 next_funding_ts=row["next_funding_ts"],
                 last_price=float(row["last_price"] or row["entry_price"]),
+                peak_gap_roe=gap,
             )
-            variant = str(row["variant"] or "v9")
+            # Стоп по правилу варианта: v5/v9/dt — бумажный трейл, p10 — пик − gap.
+            pos.stop_price = min(
+                pos.liq_price,
+                trail_stop(pos.entry_price, pos.best_price, pos.leverage, gap),
+            )
             self.trades[(variant, row["symbol"])] = OpenTrade(
                 id=int(row["id"]),
                 variant=variant,
@@ -469,7 +476,14 @@ class PaperStrategy:
         price = float(state.last_price)
         tape = self.tape.symbols.get(cand.symbol)
         nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
-        pos = Position(symbol=cand.symbol, opened_at=now_ms, entry_price=price, margin=margin, next_funding_ts=nft)
+        pos = Position(
+            symbol=cand.symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            peak_gap_roe=config.paper_peak_gap_roe(variant),
+        )
         entry = ev.to_data()
         trade_id = self.store.insert_trade(
             {
