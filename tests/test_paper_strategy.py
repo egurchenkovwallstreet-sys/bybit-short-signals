@@ -86,14 +86,29 @@ class TrailingTest(unittest.TestCase):
         pos = Position("X", 0, 1.0, 50.0)
         self.assertAlmostEqual(pos.stop_price, pos.liq_price)
         self.assertIsNone(pos.update(0.9, 1.0, 0.9))
-        self.assertAlmostEqual(pos.stop_price, 0.99)
+        # пик 100% → трейл пик−20 = 80% → 0.92
+        self.assertAlmostEqual(pos.stop_price, 0.92)
         self.assertIsNone(pos.update(0.7, 0.9, 0.7))
-        self.assertAlmostEqual(pos.stop_price, 0.714)
+        # пик 300% → 280% → 0.72
+        self.assertAlmostEqual(pos.stop_price, 0.72)
         self.assertEqual(pos.update(0.7, 0.72, 0.72), "trailing_stop")
         result = pos.close_result("trailing_stop")
-        gross = (1.0 - 0.714) * 500
-        fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.714 * config.PAPER_FEE_RATE_TAKER
+        gross = (1.0 - 0.72) * 500
+        fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.72 * config.PAPER_FEE_RATE_TAKER
         self.assertAlmostEqual(result["pnl_usd"], gross - fees, places=6)
+
+    def test_be_at_one_pct_then_lock_five_at_seven(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0)
+        self.assertIsNone(pos.update(0.9995, 1.0, 0.9995))
+        self.assertAlmostEqual(pos.max_roe(), 0.5)
+        self.assertAlmostEqual(pos.stop_price, pos.liq_price)
+        self.assertIsNone(pos.update(0.999, 1.0, 0.999))
+        self.assertAlmostEqual(pos.max_roe(), 1.0)
+        self.assertAlmostEqual(pos.stop_price, 1.0)
+        self.assertIsNone(pos.update(0.993, 0.999, 0.993))
+        self.assertAlmostEqual(pos.max_roe(), 7.0)
+        self.assertAlmostEqual(pos.stop_price, 0.995)
+        self.assertEqual(pos.update(0.993, 0.995, 0.995), "trailing_stop")
 
     def test_peak_gap_not_before_ten_roe(self) -> None:
         pos = Position("X", 0, 1.0, 50.0, peak_gap_roe=10.0)
@@ -102,8 +117,8 @@ class TrailingTest(unittest.TestCase):
         self.assertAlmostEqual(pos.stop_price, 0.995 * 1.10)
 
     def test_peak_gap_locks_ten_pp_behind(self) -> None:
-        # Без лока — бумажный трейл 10% цены. С gap=10 при 40% ROE лок 30% → 0.97.
-        self.assertAlmostEqual(trail_stop(1.0, 0.96, 10), 0.96 * 1.10)
+        # v5: пик 40% → max(5, 20) = 20% → 0.98. p10: лок 30% → 0.97.
+        self.assertAlmostEqual(trail_stop(1.0, 0.96, 10), 0.98)
         self.assertAlmostEqual(trail_stop(1.0, 0.96, 10, peak_gap_roe=10.0), 0.97)
 
     def test_p10_position_uses_peak_gap(self) -> None:

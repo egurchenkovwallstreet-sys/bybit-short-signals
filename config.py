@@ -178,13 +178,18 @@ PAPER_FEE_RATE_TAKER = _env_float("PAPER_FEE_RATE_TAKER", 0.00055)
 PAPER_MAINT_MARGIN_RATE = _env_float("PAPER_MAINT_MARGIN_RATE", 0.005)
 PAPER_REENTRY_COOLDOWN_SEC = _env_int("PAPER_REENTRY_COOLDOWN_SEC", 300)
 
-# Трейлинг: расстояние стопа от лучшей цены в % цены по прибыли на маржу (ROE).
+# Трейлинг p10: расстояние стопа от лучшей цены в % цены по прибыли на маржу (ROE).
 PAPER_TRAIL_START_DIST_PCT = _env_float("PAPER_TRAIL_START_DIST_PCT", 10.0)
 PAPER_TRAIL_TIGHTEN_FROM_ROE = _env_float("PAPER_TRAIL_TIGHTEN_FROM_ROE", 100.0)
 PAPER_TRAIL_TIGHTEN_TO_ROE = _env_float("PAPER_TRAIL_TIGHTEN_TO_ROE", 300.0)
 PAPER_TRAIL_MIN_DIST_PCT = _env_float("PAPER_TRAIL_MIN_DIST_PCT", 2.0)
 # Только вариант p10: после пика ROE не ниже этого стоп держит «пик − gap» п.п.
 PAPER_TRAIL_PEAK_GAP_ROE = _env_float("PAPER_TRAIL_PEAK_GAP_ROE", 10.0)
+# v5/v9/dt: +1% PnL → безубыток, +7% → пол +5%, дальше трейл пик − 20 п.п. ROE.
+PAPER_BE_ARM_ROE = _env_float("PAPER_BE_ARM_ROE", 1.0)
+PAPER_LOCK_ARM_ROE = _env_float("PAPER_LOCK_ARM_ROE", 7.0)
+PAPER_LOCK_MIN_ROE = _env_float("PAPER_LOCK_MIN_ROE", 5.0)
+PAPER_TRAIL_GAP_ROE = _env_float("PAPER_TRAIL_GAP_ROE", 20.0)
 
 # Памп: короткий (окно до 4 ч / 24 ч по 15m), длинный (7 д / 14 д по 4H).
 PAPER_SHORT_4H_MIN_PCT = _env_float("PAPER_SHORT_4H_MIN_PCT", 30.0)
