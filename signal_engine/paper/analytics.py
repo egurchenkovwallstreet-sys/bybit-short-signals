@@ -4,23 +4,46 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import config
 
 EXIT_LABELS = {"trailing_stop": "Трейлинг-стоп", "liquidation": "Ликвидация"}
+MSK = timezone(timedelta(hours=3))
 
 
-def compute_analytics(conn: sqlite3.Connection, balances: dict[str, float] | None = None) -> dict[str, Any]:
+def msk_day_start_ms(now_ms: int) -> int:
+    """Полночь текущих московских суток (МСК UTC+3, без перехода на летнее время)."""
+    dt = datetime.fromtimestamp(now_ms / 1000.0, tz=MSK)
+    start = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    return int(start.timestamp() * 1000)
+
+
+def compute_analytics(
+    conn: sqlite3.Connection,
+    balances: dict[str, float] | None = None,
+    now_ms: int | None = None,
+    unrealized: dict[str, float] | None = None,
+) -> dict[str, Any]:
     conn.row_factory = sqlite3.Row
+    now_ms = int(now_ms or time.time() * 1000)
     variants = {}
     for variant in config.PAPER_VARIANTS:
         balance = (balances or {}).get(variant)
-        variants[variant] = _variant_stats(conn, variant, balance)
-    return {"variants": variants, "candidates": _candidate_stats(conn)}
+        u = float((unrealized or {}).get(variant, 0.0)) if unrealized is not None else None
+        variants[variant] = _variant_stats(conn, variant, balance, now_ms, u)
+    return {"variants": variants, "candidates": _candidate_stats(conn), "day_start_ms": msk_day_start_ms(now_ms)}
 
 
-def _variant_stats(conn: sqlite3.Connection, variant: str, balance: float | None) -> dict[str, Any]:
+def _variant_stats(
+    conn: sqlite3.Connection,
+    variant: str,
+    balance: float | None,
+    now_ms: int,
+    unrealized: float | None,
+) -> dict[str, Any]:
     closed = list(
         conn.execute(
             "SELECT * FROM paper_trades WHERE status = 'closed' AND variant = ? ORDER BY closed_at", (variant,)
@@ -36,6 +59,7 @@ def _variant_stats(conn: sqlite3.Connection, variant: str, balance: float | None
         balance = float(row[0]) if row else None
     if balance is not None:
         trades["balance"] = round(balance, 2)
+    trades.update(_day_stats(conn, variant, closed, now_ms, balance, unrealized))
     return {
         "trades": trades,
         "by_reason": _group(closed, lambda r: EXIT_LABELS.get(r["exit_reason"], r["exit_reason"] or "—")),
@@ -87,6 +111,46 @@ def _trade_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         "funding": round(funding, 2),
         "liquidations": sum(1 for r in rows if r["exit_reason"] == "liquidation"),
         "trailing_wins": sum(1 for r in rows if r["exit_reason"] == "trailing_stop" and float(r["pnl_usd"] or 0) > 0),
+    }
+
+
+def _day_stats(
+    conn: sqlite3.Connection,
+    variant: str,
+    closed: list[sqlite3.Row],
+    now_ms: int,
+    balance: float | None,
+    unrealized: float | None,
+) -> dict[str, Any]:
+    start_ms = msk_day_start_ms(now_ms)
+    today = [r for r in closed if r["closed_at"] and int(r["closed_at"]) >= start_ms]
+    closed_pnl = sum(float(r["pnl_usd"] or 0) for r in today)
+    sod_row = conn.execute(
+        "SELECT equity FROM paper_equity_v WHERE variant = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
+        (variant, start_ms),
+    ).fetchone()
+    if sod_row is not None:
+        sod_eq = float(sod_row["equity"])
+    else:
+        sod_eq = float(config.PAPER_START_BALANCE_USD)
+    if unrealized is not None and balance is not None:
+        equity = float(balance) + float(unrealized)
+    else:
+        last = conn.execute(
+            "SELECT equity FROM paper_equity_v WHERE variant = ? ORDER BY ts DESC LIMIT 1",
+            (variant,),
+        ).fetchone()
+        equity = float(last["equity"]) if last is not None else (float(balance) if balance is not None else sod_eq)
+    day_pnl = equity - sod_eq
+    day_pct = (day_pnl / sod_eq * 100.0) if sod_eq else 0.0
+    return {
+        "day_pnl": round(day_pnl, 2),
+        "day_pnl_pct": round(day_pct, 2),
+        "day_pnl_closed": round(closed_pnl, 2),
+        "day_trades": len(today),
+        "day_wins": sum(1 for r in today if float(r["pnl_usd"] or 0) > 0),
+        "day_start_equity": round(sod_eq, 2),
+        "day_start_ms": start_ms,
     }
 
 

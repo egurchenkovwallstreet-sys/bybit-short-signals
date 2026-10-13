@@ -37,7 +37,7 @@ def scalp_state(*, long: bool) -> SymbolState:
     state = SymbolState("SC10USDT")
     state.bars_1m = _bars_flat_then_break(long=long)
     state.last_price = 1.028 if long else 0.972
-    state.oi_5m = [(NOW - (20 - i) * 5 * MIN, 1000.0 + i) for i in range(21)]
+    state.oi_5m = [(NOW - (20 - i) * 5 * MIN, 1000.0 + i * 8) for i in range(21)]
     return state
 
 
@@ -109,6 +109,21 @@ class Sc10DetectTest(unittest.TestCase):
         self.assertFalse(ev.checks["range_break"]["ok"])
         self.assertFalse(ev.passed)
 
+    def test_price_back_inside_range_blocks(self) -> None:
+        state = scalp_state(long=True)
+        state.last_price = 1.002
+        ev = evaluate_sc10(state, scalp_tape(long=True, bar_ts=state.bars_1m[-1].timestamp), btc_flat(), NOW)
+        self.assertTrue(ev.checks["range_break"]["ok"])
+        self.assertFalse(ev.checks["follow_through"]["ok"])
+        self.assertFalse(ev.passed)
+
+    def test_oi_flat_blocks(self) -> None:
+        state = scalp_state(long=True)
+        state.oi_5m = [(NOW - (20 - i) * 5 * MIN, 1000.0) for i in range(21)]
+        ev = evaluate_sc10(state, scalp_tape(long=True, bar_ts=state.bars_1m[-1].timestamp), btc_flat(), NOW)
+        self.assertFalse(ev.checks["oi_ok"]["ok"])
+        self.assertFalse(ev.passed)
+
 
 class Sc10StrategyTest(unittest.TestCase):
     def test_opens_long(self) -> None:
@@ -124,4 +139,53 @@ class Sc10StrategyTest(unittest.TestCase):
             self.assertEqual(trades[0]["side"], "long")
             pos = strategy.trades[("sc10", state.symbol)].pos
             self.assertEqual(pos.stop_style, "sc10")
+            self.assertFalse(any(c.get("episode") == "sc10" for c in view.get("candidates") or []))
             strategy.close()
+
+
+class DayPnlTest(unittest.TestCase):
+    def test_msk_day_and_equity_delta(self) -> None:
+        from datetime import datetime
+
+        from signal_engine.paper.analytics import MSK, compute_analytics, msk_day_start_ms
+
+        noon = datetime(2026, 10, 13, 12, 0, tzinfo=MSK)
+        now_ms = int(noon.timestamp() * 1000)
+        start = msk_day_start_ms(now_ms)
+        self.assertEqual(datetime.fromtimestamp(start / 1000.0, tz=MSK).hour, 0)
+        self.assertEqual(datetime.fromtimestamp(start / 1000.0, tz=MSK).day, 13)
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PaperStore(Path(tmp) / "paper.db")
+            store.open()
+            store.add_equity("t20", start - 3_600_000, 1000.0, 980.0, 0)
+            store.insert_trade(
+                {
+                    "symbol": "XUSDT",
+                    "variant": "t20",
+                    "kind": "short",
+                    "status": "closed",
+                    "opened_at": start + 60_000,
+                    "closed_at": start + 120_000,
+                    "entry_price": 1.0,
+                    "margin": 50.0,
+                    "leverage": 10,
+                    "notional": 500.0,
+                    "qty": 500.0,
+                    "liq_price": 1.1,
+                    "stop_price": 1.0,
+                    "best_price": 0.99,
+                    "worst_price": 1.0,
+                    "entry_fee": 0.0,
+                    "funding_paid": 0.0,
+                    "pnl_usd": 50.0,
+                    "roe_pct": 10.0,
+                    "exit_reason": "trailing_stop",
+                }
+            )
+            stats = compute_analytics(store.db, {"t20": 1030.0}, now_ms=now_ms, unrealized={"t20": 0.0})
+            t = stats["variants"]["t20"]["trades"]
+            self.assertEqual(t["day_start_equity"], 980.0)
+            self.assertAlmostEqual(t["day_pnl"], 50.0, places=2)
+            self.assertAlmostEqual(t["day_pnl_pct"], 50.0 / 980.0 * 100.0, places=2)
+            self.assertEqual(t["day_trades"], 1)
+            store.close()

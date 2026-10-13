@@ -19,14 +19,16 @@ SC10_MANDATORY = (
     "tape_side",
     "oi_ok",
     "btc_ok",
+    "follow_through",
 )
 
 SC10_CHECK_LABELS = {
     "range_break": "Закрытая 1м пробила диапазон",
-    "volume_spike": "Объём минутки ×2.5+",
+    "volume_spike": "Объём минутки ×3+ и выше предыдущих",
     "tape_side": "Агрессия ленты в сторону хода",
-    "oi_ok": "OI не падает",
+    "oi_ok": "OI растёт",
     "btc_ok": "Не против BTC",
+    "follow_through": "Цена держит пробой",
 }
 
 
@@ -87,6 +89,17 @@ class Sc10Evaluation:
         }
 
 
+def _empty_checks() -> dict[str, dict]:
+    return {
+        "range_break": _check(False, None, "закрытая 1м за хай/лой диапазона"),
+        "volume_spike": _check(False, None, f"объём ×{config.PAPER_SC10_VOLUME_MIN_RATIO:g}"),
+        "tape_side": _check(False, None, f"доля ≥ {config.PAPER_SC10_TAKER_SHARE_MIN_PCT:g}%"),
+        "oi_ok": _check(False, None, f"OI ≥ +{config.PAPER_SC10_OI_MIN_PCT:g}%"),
+        "btc_ok": _check(False, None, "не против BTC"),
+        "follow_through": _check(False, None, "цена всё ещё за диапазоном"),
+    }
+
+
 def evaluate_sc10(
     state: SymbolState,
     tape: SymbolTape,
@@ -101,13 +114,7 @@ def evaluate_sc10(
         "pump": {"kind": "sc10", "side": None},
         "last_price": float(state.last_price or 0),
     }
-    empty = {
-        "range_break": _check(False, None, "закрытая 1м за хай/лой диапазона"),
-        "volume_spike": _check(False, None, f"объём ×{config.PAPER_SC10_VOLUME_MIN_RATIO:g}"),
-        "tape_side": _check(False, None, f"доля ≥ {config.PAPER_SC10_TAKER_SHARE_MIN_PCT:g}%"),
-        "oi_ok": _check(False, None, "OI за 15 мин ≥ 0"),
-        "btc_ok": _check(False, None, "не против BTC"),
-    }
+    empty = _empty_checks()
     if len(closed) < lookback + 2:
         return Sc10Evaluation(checks=empty, metrics=metrics, score=0.0, side=None)
 
@@ -138,16 +145,24 @@ def evaluate_sc10(
             "body_ratio": _r(body_ratio, 2),
             "side": side,
         },
-        "закрытие 1м за диапазон 10м, тело ≥ 50%",
+        f"закрытие 1м за диапазон {lookback}м, тело ≥ {config.PAPER_SC10_BODY_MIN_RATIO:.0%}",
     )
 
     base = closed[-(vol_n + 1) : -1]
     mean_vol = sum(b.volume for b in base) / len(base) if base else 0.0
     vol_ratio = bar.volume / mean_vol if mean_vol > 0 else None
+    dom_n = config.PAPER_SC10_VOL_DOMINATE_BARS
+    prev_vols = [b.volume for b in closed[-(dom_n + 1) : -1]]
+    vol_max_prev = max(prev_vols) if prev_vols else 0.0
+    vol_ok = (
+        vol_ratio is not None
+        and vol_ratio >= config.PAPER_SC10_VOLUME_MIN_RATIO
+        and bar.volume > vol_max_prev
+    )
     checks["volume_spike"] = _check(
-        vol_ratio is not None and vol_ratio >= config.PAPER_SC10_VOLUME_MIN_RATIO,
-        _r(vol_ratio, 2),
-        f"≥ ×{config.PAPER_SC10_VOLUME_MIN_RATIO:g} к средней {vol_n}м",
+        vol_ok,
+        {"ratio": _r(vol_ratio, 2), "vs_prev": _r(bar.volume / vol_max_prev if vol_max_prev > 0 else None, 2)},
+        f"≥ ×{config.PAPER_SC10_VOLUME_MIN_RATIO:g} к средней {vol_n}м и выше {dom_n} предыдущих",
     )
 
     tape_now = bar.timestamp + MIN_MS - 1
@@ -174,10 +189,11 @@ def evaluate_sc10(
     )
 
     oi_pct = oi_change_pct(state.oi_points(), lookback_min=config.PAPER_SC10_OI_LOOKBACK_MIN)
+    oi_need = config.PAPER_SC10_OI_MIN_PCT
     checks["oi_ok"] = _check(
-        oi_pct is not None and oi_pct >= 0,
+        oi_pct is not None and oi_pct >= oi_need,
         _r(oi_pct, 2),
-        f"OI {config.PAPER_SC10_OI_LOOKBACK_MIN:g}м ≥ 0%",
+        f"OI {config.PAPER_SC10_OI_LOOKBACK_MIN:g}м ≥ +{oi_need:g}%",
     )
 
     btc_pct = btc_move_pct(btc_state, now_ms, config.PAPER_SC10_BTC_MINUTES)
@@ -196,6 +212,25 @@ def evaluate_sc10(
         btc_need = "сначала пробой"
     checks["btc_ok"] = _check(btc_ok, _r(btc_pct, 2), btc_need)
 
+    last = float(state.last_price or 0)
+    break_min = config.PAPER_SC10_BREAK_MIN_PCT
+    ext_pct = None
+    if side == "long" and rng_high > 0:
+        ext_pct = (bar.close / rng_high - 1.0) * 100.0
+        hold = last >= rng_high and last >= bar.close * 0.998
+        ft_ok = ext_pct >= break_min and hold
+    elif side == "short" and rng_low > 0:
+        ext_pct = (1.0 - bar.close / rng_low) * 100.0
+        hold = last <= rng_low and last <= bar.close * 1.002
+        ft_ok = ext_pct >= break_min and hold
+    else:
+        ft_ok = False
+    checks["follow_through"] = _check(
+        ft_ok,
+        {"last": last, "ext_pct": _r(ext_pct, 2)},
+        f"пробой ≥ {break_min:g}% и цена не вернулась в диапазон",
+    )
+
     metrics.update(
         {
             "pump": {
@@ -213,7 +248,8 @@ def evaluate_sc10(
             "oi_15m_pct": _r(oi_pct, 2),
             "btc_5m_pct": _r(btc_pct, 2),
             "range_pct": _r((rng_high / rng_low - 1.0) * 100.0 if rng_low > 0 else None, 2),
+            "ext_pct": _r(ext_pct, 2),
         }
     )
-    score = sum(20.0 for k in SC10_MANDATORY if checks[k]["ok"])
+    score = sum(100.0 / len(SC10_MANDATORY) for k in SC10_MANDATORY if checks[k]["ok"])
     return Sc10Evaluation(checks=checks, metrics=metrics, score=score, side=side)

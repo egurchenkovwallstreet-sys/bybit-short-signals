@@ -248,6 +248,15 @@ class PaperStore:
         if commit:
             self.db.commit()
 
+    def expire_kind_watching(self, kind: str, reason: str, now_ms: int) -> int:
+        cur = self.db.execute(
+            "UPDATE paper_candidates SET status = 'expired', ended_at = ?, end_reason = ?, updated_at = ? "
+            "WHERE kind = ? AND status = 'watching'",
+            (now_ms, reason, now_ms, kind),
+        )
+        self.db.commit()
+        return int(cur.rowcount or 0)
+
     def active_candidates(self) -> list[sqlite3.Row]:
         return list(self.db.execute("SELECT * FROM paper_candidates WHERE status = 'watching'"))
 

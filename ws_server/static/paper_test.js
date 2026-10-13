@@ -111,7 +111,7 @@
   function candidateRows() {
     const rows = (paper.data && paper.data.candidates) || [];
     if (paper.variant === "css") return rows.filter((r) => r.episode === "css");
-    if (paper.variant === "sc10") return rows.filter((r) => r.episode === "sc10");
+    if (paper.variant === "sc10") return [];
     return rows.filter((r) => r.episode !== "css" && r.episode !== "sc10");
   }
   function vlabel(v) {
@@ -203,7 +203,8 @@
     if (!table) return;
     const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
     table.innerHTML = `<thead><tr>
-      <th>Вариант</th><th>Баланс</th><th>Equity</th><th>Итог P&amp;L</th><th>Закрыто</th><th>Win rate</th><th>PF</th>
+      <th>Вариант</th><th>Баланс</th><th>Equity</th><th>Итог P&amp;L</th><th>Сутки P&amp;L</th>
+      <th>Закрыто</th><th>Win rate</th><th>PF</th>
       <th>Ср. ROE</th><th>Макс. просадка</th><th>Открыто</th><th>Маржа в работе</th>
     </tr></thead><tbody>${variants()
       .map((v) => {
@@ -215,6 +216,7 @@
           <td>$${num(balance)} ${pct(((balance - start) / start) * 100)}</td>
           <td>$${num(a.equity ?? balance)}</td>
           <td>${usd(t.total_pnl ?? 0)}</td>
+          <td>${usd(t.day_pnl ?? 0)} ${pct(t.day_pnl_pct ?? 0)}${t.day_trades ? `<div class="quiet">${t.day_trades} закр. сегодня</div>` : ""}</td>
           <td>${t.closed ?? 0} (${t.wins ?? 0} / ${t.losses ?? 0})</td>
           <td>${num(t.win_rate ?? 0, 1)}%</td>
           <td>${t.profit_factor ?? "—"}</td>
@@ -259,6 +261,7 @@
       ["Закрыто сделок", t.closed ?? 0, `${t.wins ?? 0} в плюс · ${t.losses ?? 0} в минус`],
       ["Win rate", `${num(t.win_rate ?? 0, 1)}%`, `PF ${t.profit_factor ?? "—"}`],
       ["Итог P&L", usd(t.total_pnl ?? 0), `ср. ROE ${num(t.avg_roe ?? 0, 1)}%`],
+      ["Сутки P&L (МСК)", usd(t.day_pnl ?? 0), `${pct(t.day_pnl_pct ?? 0)} · закрыто сегодня ${t.day_trades ?? 0}`],
       ["Средняя прибыль", usd(t.avg_win ?? 0), `средний убыток ${usd(t.avg_loss ?? 0)}`],
       ["Макс. просадка", `${num(t.max_drawdown_pct ?? 0)}%`, `лучшая ${usd(t.best ?? 0)} · худшая ${usd(t.worst ?? 0)}`],
       ["Трейлинг / ликвидации", `${t.trailing_wins ?? 0} / ${t.liquidations ?? 0}`, `ср. длительность ${dur(t.avg_duration_min ?? 0)}`],
@@ -372,6 +375,8 @@
   }
 
   function renderCandidates() {
+    const section = document.getElementById("paper-cand-section");
+    if (section) section.hidden = paper.variant === "sc10";
     const table = document.getElementById("paper-cand-table");
     if (!table) return;
     const rows = candidateRows();
@@ -479,6 +484,8 @@
   }
 
   function renderCandAnalytics() {
+    const section = document.getElementById("paper-cand-analytics-section");
+    if (section) section.hidden = paper.variant === "sc10";
     const root = document.getElementById("paper-cand-analytics");
     if (!root) return;
     const c = ((paper.data && paper.data.analytics) || {}).candidates || {};
