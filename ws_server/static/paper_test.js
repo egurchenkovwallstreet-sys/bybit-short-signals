@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -82,21 +82,31 @@
     if (p.kind === "growth" || p.anchor_price !== undefined) {
       return `Рост: +${num(p.rally_pct ?? p.growth_pct, 1)}% от ${price(p.anchor_price ?? p.valley_price)}`;
     }
+    if (p.kind === "css" || p.trigger === "fast") {
+      return `Cursor SS: +${num(p.growth_pct, 1)}% от ${price(p.valley_price)} → ${price(p.peak_price)}`;
+    }
     if (p.growth_pct === undefined) return "—";
     return `${KIND[p.kind] || p.kind}: +${num(p.growth_pct, 1)}% за ${dur(p.duration_min)} (окно ${TRIGGER[p.trigger] || p.trigger || "?"})`;
   }
   function labels() {
     if (!paper.data) return {};
     if (paper.variant === "lt20") return paper.data.growth_check_labels || {};
+    if (paper.variant === "css") return paper.data.css_check_labels || {};
     return paper.data.check_labels || {};
   }
   function mandatory() {
     if (!paper.data) return [];
     if (paper.variant === "lt20") return paper.data.growth_mandatory || [];
+    if (paper.variant === "css") return paper.data.css_mandatory || [];
     return paper.data.mandatory || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css"];
+  }
+  function candidateRows() {
+    const rows = (paper.data && paper.data.candidates) || [];
+    if (paper.variant === "css") return rows.filter((r) => r.episode === "css");
+    return rows.filter((r) => r.episode !== "css");
   }
   function vlabel(v) {
     return ((paper.data && paper.data.variant_labels) || {})[v] || v;
@@ -358,7 +368,7 @@
   function renderCandidates() {
     const table = document.getElementById("paper-cand-table");
     if (!table) return;
-    const rows = (paper.data && paper.data.candidates) || [];
+    const rows = candidateRows();
     if (!rows.length) {
       table.innerHTML = '<tbody><tr><td class="quiet">Сейчас нет монет после пампа по условиям стратегии.</td></tr></tbody>';
       return;

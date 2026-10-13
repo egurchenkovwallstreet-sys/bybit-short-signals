@@ -151,6 +151,30 @@ def net_breakeven_stop_price(
     return (entry * qty - entry_fee + funding_paid) / (qty * (1.0 + fee))
 
 
+def css_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """Cursor SS: стоп −15% ROE, с пика ≥ +10% ROE — net-безубыток, дальше трейл 20 п.п."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    initial = net_roe_stop_price(
+        entry, margin, config.PAPER_CSS_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    if peak < config.PAPER_CSS_BE_ARM_ROE:
+        return initial
+    be = net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
+    lock_roe = peak - config.PAPER_CSS_TRAIL_GAP_ROE
+    if lock_roe <= 0:
+        return be
+    return min(be, price_for_roe(entry, lock_roe, lev))
+
+
 def trail_stop(
     entry: float,
     best_price: float,
@@ -199,6 +223,7 @@ class Position:
     peak_gap_roe: float = 0.0
     loss_cap_armed: bool = False
     side: str = "short"
+    stop_style: str = "default"
 
     def __post_init__(self) -> None:
         if self.best_price <= 0:
@@ -219,6 +244,17 @@ class Position:
             self.last_price = self.entry_price
 
     def _sync_stop(self, last: float) -> None:
+        if self.stop_style == "css":
+            trail = css_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+            )
+            self.stop_price = min(self.liq_price, trail)
+            return
         if self.side == "long":
             trail = trail_stop_long(
                 self.entry_price,

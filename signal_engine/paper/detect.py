@@ -51,6 +51,7 @@ VARIANT_LABELS = {
     "t20": "+2% BE / трейл 20%",
     "p10": "Пик −10 п.п.",
     "lt20": "Лонг t20",
+    "css": "Cursor SS",
 }
 
 ENTRY_GATE_LABELS = {

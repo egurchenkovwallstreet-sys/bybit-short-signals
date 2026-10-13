@@ -31,6 +31,15 @@ from signal_engine.paper.detect import (
     measure_pump_peak,
     paper_entry_blocks,
 )
+from signal_engine.paper.css_detect import (
+    CSS_CHECK_LABELS,
+    CSS_MANDATORY,
+    CssEvaluation,
+    CssPumpInfo,
+    evaluate_css,
+    find_css_pump,
+    refresh_css_peak,
+)
 from signal_engine.paper.growth_detect import (
     GROWTH_CHECK_LABELS,
     GROWTH_MANDATORY,
@@ -86,6 +95,24 @@ class GrowthCandidate:
 
 
 @dataclass
+class CssCandidate:
+    id: int
+    symbol: str
+    pump: CssPumpInfo
+    started_at: int
+    scans: int = 0
+    fail_counts: dict[str, int] = field(default_factory=dict)
+    best_passed: int = 0
+    last_eval: dict | None = None
+    entered: list[str] = field(default_factory=list)
+    last_trade_id: int | None = None
+    note: str | None = None
+    dirty: bool = True
+    entries_used: int = 0
+    rearm_needed: bool = False
+
+
+@dataclass
 class Candidate:
     id: int
     symbol: str
@@ -122,6 +149,7 @@ class PaperStrategy:
         self.trades: dict[tuple[str, str], OpenTrade] = {}
         self.candidates: dict[str, Candidate] = {}
         self.growth_candidates: dict[str, GrowthCandidate] = {}
+        self.css_candidates: dict[str, CssCandidate] = {}
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -173,6 +201,7 @@ class PaperStrategy:
                 last_price=float(row["last_price"] or row["entry_price"]),
                 peak_gap_roe=gap,
                 side=side,
+                stop_style="css" if variant == config.PAPER_CSS_VARIANT else "default",
             )
             # Стоп по правилу варианта: t20 — BE/лок/трейл 20, p10 — пик − gap.
             pos._sync_stop(float(row["last_price"] or row["entry_price"]))
@@ -208,6 +237,27 @@ class PaperStrategy:
                 )
                 if growth.peak_price > 0:
                     self.peak_snapshots[row["symbol"]] = (growth.peak_price, growth.peak_ts)
+                continue
+            if str(row["kind"] or "") == "css":
+                pump = _css_from_row(row)
+                css_state = (_loads(row["last_eval"]) or {}).get("css_state") or {}
+                self.css_candidates[row["symbol"]] = CssCandidate(
+                    id=int(row["id"]),
+                    symbol=row["symbol"],
+                    pump=pump,
+                    started_at=int(row["started_at"]),
+                    scans=int(row["scans"] or 0),
+                    fail_counts=_loads(row["fail_counts"]) or {},
+                    best_passed=int(row["best_passed"] or 0),
+                    last_eval=_loads(row["last_eval"]) or None,
+                    entered=_loads_list(row["variants"]),
+                    last_trade_id=row["trade_id"],
+                    dirty=False,
+                    entries_used=int(css_state.get("entries_used") or 0),
+                    rearm_needed=bool(css_state.get("rearm_needed")),
+                )
+                if pump.peak_price > 0:
+                    self.peak_snapshots[row["symbol"]] = (pump.peak_price, pump.peak_ts)
                 continue
             older = self.candidates.get(row["symbol"])
             if older is not None:
@@ -266,10 +316,12 @@ class PaperStrategy:
         self._analytics = compute_analytics(self.store.db, self.balances)
         self._opened = True
         log.info(
-            "Тест стратегии: балансы %s, открытых %s, кандидатов %s, теневых %s",
+            "Тест стратегии: балансы %s, открытых %s, кандидатов %s, роста %s, Cursor SS %s, теневых %s",
             ", ".join(f"{v} {self.balances[v]:.2f}" for v in VARIANTS),
             len(self.trades),
             len(self.candidates),
+            len(self.growth_candidates),
+            len(self.css_candidates),
             len(self.shadows),
         )
 
@@ -286,7 +338,7 @@ class PaperStrategy:
         self.tape.ingest(message)
 
     def kline_wanted(self) -> list[str]:
-        return sorted(set(self.candidates))
+        return sorted(set(self.candidates) | set(self.growth_candidates) | set(self.css_candidates))
 
     def on_klines(self, symbol: str, interval: str, candles: list[dict]) -> None:
         bars = []
@@ -314,14 +366,17 @@ class PaperStrategy:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
         self._refresh_peaks(states, now_ms)
         self._refresh_growth_peaks(states, now_ms)
+        self._refresh_css_peaks(states, now_ms)
         self._update_trades(states, now_ms)
         self._update_shadows(states, now_ms)
         if now_ms >= self._next_detect:
             self._detect(states, now_ms)
             self._detect_growth(states, now_ms)
+            self._detect_css(states, now_ms)
             self._next_detect = now_ms + config.PAPER_DETECT_INTERVAL_SEC * 1000
         self._evaluate(states, btc_4h, now_ms)
         self._evaluate_growth(states, now_ms)
+        self._evaluate_css(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -388,6 +443,18 @@ class PaperStrategy:
                 cand.dirty = True
                 self.peak_snapshots[symbol] = (cand.growth.peak_price, cand.growth.peak_ts)
 
+    def _refresh_css_peaks(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        for symbol, cand in self.css_candidates.items():
+            state = states.get(symbol)
+            if state is None:
+                continue
+            tape = self.tape.symbols.get(symbol)
+            if refresh_css_peak(cand.pump, state, tape, now_ms):
+                cand.rearm_needed = False
+                cand.dirty = True
+                cand.note = "вторая нога: новый пик"
+                self.peak_snapshots[symbol] = (cand.pump.peak_price, cand.pump.peak_ts)
+
     def _update_trades(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for trade in list(self.trades.values()):
             state = states.get(trade.symbol)
@@ -453,6 +520,8 @@ class PaperStrategy:
         self._snapshot_equity(variant, now_ms)
         self.last_close[(variant, trade.symbol)] = now_ms
         self._next_analytics = 0
+        if variant == config.PAPER_CSS_VARIANT:
+            self._on_css_trade_closed(trade, pos, now_ms)
         log.info(
             "Тест [%s]: закрыт шорт %s (%s), P&L %+.2f USD (%+.1f%%), баланс %.2f",
             variant,
@@ -542,6 +611,27 @@ class PaperStrategy:
                 id=cid, symbol=symbol, growth=growth, started_at=now_ms
             )
             log.info("Тест: кандидат роста %s — ралли +%.1f%%", symbol, growth.rally_pct)
+
+    def _detect_css(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        for symbol, state in states.items():
+            if symbol in self.css_candidates or not state.last_price:
+                continue
+            pump = find_css_pump(state, self.tape.symbols.get(symbol), now_ms)
+            if pump is None:
+                continue
+            cid = self.store.insert_candidate(
+                {
+                    "symbol": symbol,
+                    "kind": "css",
+                    "status": "watching",
+                    "started_at": now_ms,
+                    "updated_at": now_ms,
+                    **_css_fields(pump),
+                    "fail_counts": {},
+                }
+            )
+            self.css_candidates[symbol] = CssCandidate(id=cid, symbol=symbol, pump=pump, started_at=now_ms)
+            log.info("Тест: кандидат Cursor SS %s — быстрый памп +%.1f%%", symbol, pump.growth_pct)
 
     def _ready(self, state: SymbolState, cand: Candidate, now_ms: int) -> bool:
         """Хватает ли истории в памяти, чтобы честно решить, что памп кончился."""
@@ -701,6 +791,167 @@ class PaperStrategy:
             ev.turbo,
             ev.score,
         )
+
+    def _evaluate_css(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        variant = config.PAPER_CSS_VARIANT
+        cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
+        for symbol, cand in list(self.css_candidates.items()):
+            state = states.get(symbol)
+            if state is None or not state.last_price:
+                continue
+            tape = self.tape.get(symbol)
+            pump = find_css_pump(state, tape, now_ms)
+            if pump is None:
+                self._end_css_candidate(cand, "условия Cursor SS больше не выполняются", now_ms)
+                continue
+            if pump.peak_price > cand.pump.peak_price + 1e-12:
+                cand.rearm_needed = False
+            pump.stall_frozen = cand.pump.stall_frozen and pump.peak_price <= cand.pump.peak_price + 1e-12
+            if pump.stall_frozen:
+                pump.stall_low = cand.pump.stall_low
+                pump.stall_high = cand.pump.stall_high
+            cand.pump = pump
+            ev = evaluate_css(state, tape, pump, self.klines.get(symbol, {}), now_ms)
+            cand.pump.stall_frozen = pump.stall_frozen
+            cand.pump.stall_low = pump.stall_low
+            cand.pump.stall_high = pump.stall_high
+            cand.scans += 1
+            for key in ev.failed:
+                cand.fail_counts[key] = cand.fail_counts.get(key, 0) + 1
+            cand.best_passed = max(cand.best_passed, ev.passed_count)
+            cand.last_eval = _css_eval_with_state(ev.to_data(), cand)
+            cand.dirty = True
+            dump_ok = bool((ev.checks.get("dump_break") or {}).get("ok"))
+            if cand.rearm_needed:
+                if dump_ok:
+                    cand.note = "ждём новый слив после стопа"
+                    continue
+                cand.rearm_needed = False
+                cand.last_eval = _css_eval_with_state(ev.to_data(), cand)
+            if cand.entries_used >= config.PAPER_CSS_MAX_ENTRIES:
+                self._end_css_candidate(cand, "лимит входов Cursor SS", now_ms)
+                continue
+            if not ev.passed:
+                cand.note = "ждём затихание и дамп"
+                continue
+            if (variant, symbol) in self.trades:
+                continue
+            if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                cand.note = "пауза после стопа"
+                continue
+            balance = self.balances[variant]
+            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+            if margin <= 0 or balance - self.used_margin(variant) < margin:
+                cand.note = "нет свободной маржи"
+                continue
+            self._open_css_trade(cand, state, ev, margin, now_ms)
+
+    def _open_css_trade(
+        self, cand: CssCandidate, state: SymbolState, ev: CssEvaluation, margin: float, now_ms: int
+    ) -> None:
+        variant = config.PAPER_CSS_VARIANT
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(cand.symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=cand.symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            stop_style="css",
+        )
+        entry = _css_eval_with_state(ev.to_data(), cand)
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": cand.symbol,
+                "variant": variant,
+                "candidate_id": cand.id,
+                "kind": "css",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": ev.score,
+                "grade": grade_for(ev.score),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, cand.symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=cand.symbol,
+            kind="css",
+            pos=pos,
+            score=ev.score,
+            grade=grade_for(ev.score),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=cand.id,
+            last_check=now_ms,
+        )
+        cand.entries_used += 1
+        if variant not in cand.entered:
+            cand.entered.append(variant)
+        cand.last_trade_id = trade_id
+        cand.dirty = True
+        cand.note = f"вход {cand.entries_used}/{config.PAPER_CSS_MAX_ENTRIES}"
+        cand.last_eval = _css_eval_with_state(ev.to_data(), cand)
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт шорт %s по %s, маржа %.2f USD, вход %s/%s, балл %.1f",
+            variant,
+            cand.symbol,
+            price,
+            margin,
+            cand.entries_used,
+            config.PAPER_CSS_MAX_ENTRIES,
+            ev.score,
+        )
+
+    def _on_css_trade_closed(self, trade: OpenTrade, pos: Position, now_ms: int) -> None:
+        cand = self.css_candidates.get(trade.symbol)
+        if cand is None:
+            return
+        if pos.max_roe() >= config.PAPER_CSS_BE_ARM_ROE:
+            self._end_css_candidate(cand, "Cursor SS: был плюс +10% ROE", now_ms)
+            return
+        cand.rearm_needed = True
+        cand.dirty = True
+        cand.note = "стоп −15% ROE, ждём новый слив"
+        if cand.entries_used >= config.PAPER_CSS_MAX_ENTRIES:
+            self._end_css_candidate(cand, "лимит входов Cursor SS", now_ms)
+
+    def _end_css_candidate(self, cand: CssCandidate, reason: str, now_ms: int) -> None:
+        status = "entered" if cand.entered else "expired"
+        fields = {
+            "status": status,
+            "ended_at": now_ms,
+            "end_reason": reason,
+            "updated_at": now_ms,
+            "scans": cand.scans,
+            "fail_counts": cand.fail_counts,
+            "best_passed": cand.best_passed,
+            "last_eval": _css_eval_with_state(cand.last_eval or {}, cand),
+            "variants": cand.entered,
+            "trade_id": cand.last_trade_id,
+            **_css_fields(cand.pump),
+        }
+        self.store.update_candidate(cand.id, fields)
+        self.css_candidates.pop(cand.symbol, None)
 
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
         price = float(state.last_price)
@@ -888,6 +1139,24 @@ class PaperStrategy:
                 commit=False,
             )
             cand.dirty = False
+        for cand in self.css_candidates.values():
+            if not cand.dirty:
+                continue
+            self.store.update_candidate(
+                cand.id,
+                {
+                    "updated_at": now_ms,
+                    "scans": cand.scans,
+                    "fail_counts": cand.fail_counts,
+                    "best_passed": cand.best_passed,
+                    "last_eval": _css_eval_with_state(cand.last_eval or {}, cand),
+                    "variants": cand.entered,
+                    "trade_id": cand.last_trade_id,
+                    **_css_fields(cand.pump),
+                },
+                commit=False,
+            )
+            cand.dirty = False
         for shadow in self.shadows.values():
             self.store.update_candidate(
                 shadow.candidate_id,
@@ -950,6 +1219,10 @@ class PaperStrategy:
             self.growth_candidates.values(),
             key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.growth.rally_pct),
         )
+        ccands = sorted(
+            self.css_candidates.values(),
+            key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.pump.growth_pct),
+        )
         accounts = {}
         for variant in VARIANTS:
             used = self.used_margin(variant)
@@ -969,7 +1242,7 @@ class PaperStrategy:
             "summary": {
                 "start_balance": config.PAPER_START_BALANCE_USD,
                 "accounts": accounts,
-                "candidates": len(self.candidates) + len(self.growth_candidates),
+                "candidates": len(self.candidates) + len(self.growth_candidates) + len(self.css_candidates),
                 "shadows_open": len(self.shadows),
                 "btc_4h_pct": _r(btc_4h),
                 "btc_strict": btc_4h is not None and btc_4h >= config.PAPER_BTC_STRICT_4H_PCT,
@@ -981,11 +1254,14 @@ class PaperStrategy:
             "entry_gate_labels": ENTRY_GATE_LABELS,
             "open_trades": [self._trade_view(t, now_ms) for t in trades],
             "candidates": [self._candidate_view(c, now_ms) for c in cands]
-            + [self._growth_candidate_view(c, now_ms) for c in gcands],
+            + [self._growth_candidate_view(c, now_ms) for c in gcands]
+            + [self._css_candidate_view(c, now_ms) for c in ccands],
             "check_labels": CHECK_LABELS,
             "growth_check_labels": GROWTH_CHECK_LABELS,
+            "css_check_labels": CSS_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_MANDATORY),
+            "css_mandatory": list(CSS_MANDATORY),
             "analytics": self._analytics,
         }
 
@@ -1077,6 +1353,26 @@ class PaperStrategy:
             "shadow": None,
         }
 
+    def _css_candidate_view(self, cand: CssCandidate, now_ms: int) -> dict:
+        ev = cand.last_eval
+        return {
+            "id": cand.id,
+            "symbol": cand.symbol,
+            "episode": "css",
+            "pump": cand.pump.to_data(),
+            "started_at": cand.started_at,
+            "watch_min": round((now_ms - cand.started_at) / 60_000),
+            "scans": cand.scans,
+            "best_passed": cand.best_passed,
+            "entered": cand.entered,
+            "open_in": [v for v in VARIANTS if (v, cand.symbol) in self.trades],
+            "note": cand.note,
+            "eval": ev,
+            "shadow": None,
+            "entries_used": cand.entries_used,
+            "rearm_needed": cand.rearm_needed,
+        }
+
 
 def _price_range(state: SymbolState, since_ms: int) -> tuple[float, float, float]:
     last = float(state.last_price or 0)
@@ -1098,6 +1394,47 @@ def _expire_reason(pump: PumpInfo, state: SymbolState, now_ms: int) -> str:
     if now_ms - pump.peak_ts > hours * 3_600_000:
         return "истекло время после пика"
     return _REASON_CONDITIONS
+
+
+def _css_fields(pump: CssPumpInfo) -> dict:
+    return {
+        "kind": "css",
+        "peak_price": pump.peak_price,
+        "peak_ts": pump.peak_ts,
+        "valley_price": pump.valley_price,
+        "valley_ts": pump.valley_ts,
+        "growth_pct": pump.growth_pct,
+    }
+
+
+def _css_from_row(row) -> CssPumpInfo:
+    last_eval = _loads(row["last_eval"]) or {}
+    data = (last_eval.get("metrics") or {}).get("pump") or {}
+    css_state = last_eval.get("css_state") or {}
+    return CssPumpInfo(
+        valley_price=float(row["valley_price"] or data.get("valley_price") or 0),
+        valley_ts=int(row["valley_ts"] or data.get("valley_ts") or 0),
+        peak_price=float(row["peak_price"] or 0),
+        peak_ts=int(row["peak_ts"] or 0),
+        growth_pct=float(row["growth_pct"] or data.get("growth_pct") or 0),
+        volume_ratio=data.get("volume_ratio"),
+        volume_avg_ratio=data.get("volume_avg_ratio"),
+        buy_share_pct=data.get("buy_share_pct"),
+        tape_minutes=int(data.get("tape_minutes") or 0),
+        stall_low=data.get("stall_low"),
+        stall_high=data.get("stall_high"),
+        stall_frozen=bool(css_state.get("stall_frozen", data.get("stall_frozen"))),
+    )
+
+
+def _css_eval_with_state(ev: dict, cand: CssCandidate) -> dict:
+    out = dict(ev)
+    out["css_state"] = {
+        "entries_used": cand.entries_used,
+        "rearm_needed": cand.rearm_needed,
+        "stall_frozen": cand.pump.stall_frozen,
+    }
+    return out
 
 
 def _growth_fields(growth: GrowthInfo) -> dict:

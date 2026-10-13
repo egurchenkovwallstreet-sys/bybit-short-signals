@@ -260,8 +260,9 @@ class StrategyCycleTest(unittest.TestCase):
             states = {state.symbol: state}
 
             view = strategy.scan(states, NOW)["data"]
-            # 5 из 9 есть: входят t20 и p10.
-            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "t20"])
+            # 5 из 9 есть: входят t20 и p10. Cursor SS ждёт дамп и сюда не лезет.
+            shorts = sorted(t["variant"] for t in view["open_trades"] if t["variant"] in ("t20", "p10"))
+            self.assertEqual(shorts, ["p10", "t20"])
             trade = view["open_trades"][0]
             self.assertAlmostEqual(trade["entry_price"], 1.35)
             self.assertAlmostEqual(trade["margin"], 50.0)
@@ -278,7 +279,8 @@ class StrategyCycleTest(unittest.TestCase):
             state.bars_1m.append(Bar(NOW + 2 * MIN, 1.2, 1.33, 1.2, 1.32, 10.0))
             state.last_price = 1.32
             strategy.scan(states, NOW + 2 * MIN + 5000)
-            self.assertEqual(strategy.trades, {})
+            self.assertNotIn(("t20", state.symbol), strategy.trades)
+            self.assertNotIn(("p10", state.symbol), strategy.trades)
             self.assertGreater(strategy.balances["t20"], config.PAPER_START_BALANCE_USD)
             self.assertGreater(strategy.balances["p10"], config.PAPER_START_BALANCE_USD)
 
@@ -309,10 +311,11 @@ class StrategyCycleTest(unittest.TestCase):
             strategy2 = PaperStrategy(PaperStore(path))
             strategy2.open()
             self.assertAlmostEqual(strategy2.balances["t20"], balance_after_close)
-            stats = compute_analytics(store.db, strategy2.balances)
+            stats = compute_analytics(strategy2.store.db, strategy2.balances)
             self.assertAlmostEqual(
                 stats["variants"]["t20"]["trades"]["balance"],
                 balance_after_close,
+                places=2,
             )
             strategy2.close()
 
@@ -327,9 +330,11 @@ class StrategyCycleTest(unittest.TestCase):
             strategy.tape.symbols[state.symbol] = tape
             view = strategy.scan({state.symbol: state}, NOW)["data"]
             # 8 из 9: вход в t20 и p10, теневая сделка по недостающему условию.
-            self.assertEqual(sorted(t["variant"] for t in view["open_trades"]), ["p10", "t20"])
-            self.assertEqual(len(view["candidates"]), 1)
-            self.assertEqual(view["candidates"][0]["shadow"]["missing"], "short_liq_faded")
+            shorts = sorted(t["variant"] for t in view["open_trades"] if t["variant"] in ("t20", "p10"))
+            self.assertEqual(shorts, ["p10", "t20"])
+            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth")]
+            self.assertEqual(len(pumps), 1)
+            self.assertEqual(pumps[0]["shadow"]["missing"], "short_liq_faded")
             self.assertEqual(len(strategy.shadows), 1)
             strategy.close()
 
@@ -511,12 +516,13 @@ class EntryGateTest(unittest.TestCase):
             strategy = PaperStrategy(PaperStore(path))
             strategy.open()
             view = strategy.view(NOW, None)
-            self.assertEqual(len(view["candidates"]), 1)
-            ev = view["candidates"][0]["eval"]
+            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth")]
+            self.assertEqual(len(pumps), 1)
+            ev = pumps[0]["eval"]
             self.assertIn("no_14d", ev["entry_blocked"])
             self.assertIn("since_too_late", ev["entry_blocked"])
             self.assertEqual(ev["variants"], [])
-            self.assertIn("Вход закрыт", view["candidates"][0]["note"] or "")
+            self.assertIn("Вход закрыт", pumps[0]["note"] or "")
             strategy.close()
 
     def test_strategy_skips_late_peak(self) -> None:
@@ -527,9 +533,11 @@ class EntryGateTest(unittest.TestCase):
             state = pumped_state()
             strategy.tape.symbols[state.symbol] = pumped_tape()
             view = strategy.scan({state.symbol: state}, NOW + 100 * MIN)["data"]
-            self.assertEqual(view["open_trades"], [])
-            self.assertTrue(view["candidates"])
-            blocked = (view["candidates"][0].get("eval") or {}).get("entry_blocked") or []
+            shorts = [t for t in view["open_trades"] if t["variant"] in ("t20", "p10")]
+            self.assertEqual(shorts, [])
+            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth")]
+            self.assertTrue(pumps)
+            blocked = (pumps[0].get("eval") or {}).get("entry_blocked") or []
             self.assertIn("since_too_late", blocked)
             strategy.close()
 

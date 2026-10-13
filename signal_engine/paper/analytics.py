@@ -39,7 +39,7 @@ def _variant_stats(conn: sqlite3.Connection, variant: str, balance: float | None
     return {
         "trades": trades,
         "by_reason": _group(closed, lambda r: EXIT_LABELS.get(r["exit_reason"], r["exit_reason"] or "—")),
-        "by_kind": _group(closed, lambda r: "Короткий памп" if r["kind"] == "short" else "Длинный памп"),
+        "by_kind": _group(closed, _kind_label),
         "by_grade": _group(closed, lambda r: f"Сила {r['grade'] or 'C'}"),
         "by_btc": _group(closed, lambda r: "BTC строгий режим" if r["strict_btc"] else "BTC обычный"),
         "by_trigger": _group(closed, _trigger_label),
@@ -109,10 +109,25 @@ def _group(rows: list[sqlite3.Row], key) -> list[dict[str, Any]]:
     return out
 
 
+def _kind_label(row: sqlite3.Row) -> str:
+    kind = str(row["kind"] or "")
+    if kind == "css":
+        return "Cursor SS"
+    if kind == "growth":
+        return "Лонг роста"
+    return "Короткий памп" if kind == "short" else "Длинный памп"
+
+
 def _trigger_label(row: sqlite3.Row) -> str:
     entry = _loads(row["entry_json"])
     trigger = ((entry.get("metrics") or {}).get("pump") or {}).get("trigger") or "?"
-    return {"4h": "Рост за ≤4 ч", "24h": "Рост за 24 ч", "7d": "Рост за 7 д", "14d": "Рост за 14 д"}.get(trigger, trigger)
+    return {
+        "4h": "Рост за ≤4 ч",
+        "24h": "Рост за 24 ч",
+        "7d": "Рост за 7 д",
+        "14d": "Рост за 14 д",
+        "fast": "Быстрый памп",
+    }.get(trigger, trigger)
 
 
 def _passed_label(row: sqlite3.Row) -> str:
