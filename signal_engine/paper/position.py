@@ -175,6 +175,28 @@ def css_trail_stop(
     return min(be, price_for_roe(entry, lock_roe, lev))
 
 
+def sc10_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+    side: str = "short",
+) -> float:
+    """Скальп 10: стоп всегда на 10 п.п. ROE позади пика (с входа это −10% ROE)."""
+    lev = leverage or config.PAPER_LEVERAGE
+    gap = config.PAPER_SC10_TRAIL_GAP_ROE
+    if side == "long":
+        peak = long_roe_pct(entry, best_price, lev)
+        return net_roe_stop_price_long(
+            entry, margin, peak - gap, lev, entry_fee, funding_paid
+        )
+    peak = roe_pct(entry, best_price, lev)
+    return net_roe_stop_price(entry, margin, peak - gap, lev, entry_fee, funding_paid)
+
+
 def trail_stop(
     entry: float,
     best_price: float,
@@ -254,6 +276,21 @@ class Position:
                 funding_paid=self.funding_paid,
             )
             self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "sc10":
+            trail = sc10_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+                side=self.side,
+            )
+            if self.side == "long":
+                self.stop_price = max(self.liq_price, trail)
+            else:
+                self.stop_price = min(self.liq_price, trail)
             return
         if self.side == "long":
             trail = trail_stop_long(

@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623", sc10: "#00c2c7" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -85,6 +85,9 @@
     if (p.kind === "css" || p.trigger === "fast") {
       return `Cursor SS: +${num(p.growth_pct, 1)}% от ${price(p.valley_price)} → ${price(p.peak_price)}`;
     }
+    if (p.kind === "sc10" || (p.side && (p.kind || "").startsWith("sc10"))) {
+      return `Скальп 10: ${p.side === "short" ? "шорт" : "лонг"} пробой 1м`;
+    }
     if (p.growth_pct === undefined) return "—";
     return `${KIND[p.kind] || p.kind}: +${num(p.growth_pct, 1)}% за ${dur(p.duration_min)} (окно ${TRIGGER[p.trigger] || p.trigger || "?"})`;
   }
@@ -92,21 +95,24 @@
     if (!paper.data) return {};
     if (paper.variant === "lt20") return paper.data.growth_check_labels || {};
     if (paper.variant === "css") return paper.data.css_check_labels || {};
+    if (paper.variant === "sc10") return paper.data.sc10_check_labels || {};
     return paper.data.check_labels || {};
   }
   function mandatory() {
     if (!paper.data) return [];
     if (paper.variant === "lt20") return paper.data.growth_mandatory || [];
     if (paper.variant === "css") return paper.data.css_mandatory || [];
+    if (paper.variant === "sc10") return paper.data.sc10_mandatory || [];
     return paper.data.mandatory || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css", "sc10"];
   }
   function candidateRows() {
     const rows = (paper.data && paper.data.candidates) || [];
     if (paper.variant === "css") return rows.filter((r) => r.episode === "css");
-    return rows.filter((r) => r.episode !== "css");
+    if (paper.variant === "sc10") return rows.filter((r) => r.episode === "sc10");
+    return rows.filter((r) => r.episode !== "css" && r.episode !== "sc10");
   }
   function vlabel(v) {
     return ((paper.data && paper.data.variant_labels) || {})[v] || v;

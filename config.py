@@ -256,11 +256,12 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 # Бумажные варианты: шорты t20/p10 (шлюз + 5 из 9), лонг lt20 (детектор роста),
 # шорт Cursor SS (css) — свой детектор, t20/p10/lt20 не использует.
 PAPER_SHORT_VARIANTS = ("t20", "p10")
-PAPER_VARIANTS = ("t20", "p10", "lt20", "css")
+PAPER_VARIANTS = ("t20", "p10", "lt20", "css", "sc10")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_LT20_VARIANT = "lt20"
 PAPER_CSS_VARIANT = "css"
+PAPER_SC10_VARIANT = "sc10"
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
@@ -277,6 +278,14 @@ PAPER_ENTRY_LATE_EXT_SELL_WINDOWS_REQUIRED = _env_int("PAPER_ENTRY_LATE_EXT_SELL
 
 def paper_is_long(variant: str) -> bool:
     return variant == PAPER_LT20_VARIANT
+
+
+def paper_stop_style(variant: str) -> str:
+    if variant == PAPER_CSS_VARIANT:
+        return "css"
+    if variant == PAPER_SC10_VARIANT:
+        return "sc10"
+    return "default"
 
 
 def paper_peak_gap_roe(variant: str) -> float:
@@ -323,6 +332,20 @@ PAPER_CSS_INITIAL_STOP_ROE = _env_float("PAPER_CSS_INITIAL_STOP_ROE", -15.0)
 PAPER_CSS_BE_ARM_ROE = _env_float("PAPER_CSS_BE_ARM_ROE", 10.0)
 PAPER_CSS_TRAIL_GAP_ROE = _env_float("PAPER_CSS_TRAIL_GAP_ROE", 20.0)
 PAPER_CSS_MAX_ENTRIES = _env_int("PAPER_CSS_MAX_ENTRIES", 3)
+
+# Скальп sc10: старт хода 1м, лонг и шорт, трейл 10% ROE с входа.
+PAPER_SC10_RANGE_BARS = _env_int("PAPER_SC10_RANGE_BARS", 10)
+PAPER_SC10_VOLUME_BARS = _env_int("PAPER_SC10_VOLUME_BARS", 20)
+PAPER_SC10_VOLUME_MIN_RATIO = _env_float("PAPER_SC10_VOLUME_MIN_RATIO", 2.5)
+PAPER_SC10_TAKER_SHARE_MIN_PCT = _env_float("PAPER_SC10_TAKER_SHARE_MIN_PCT", 60.0)
+PAPER_SC10_TAKER_MINUTES = _env_int("PAPER_SC10_TAKER_MINUTES", 3)
+PAPER_SC10_OI_LOOKBACK_MIN = _env_int("PAPER_SC10_OI_LOOKBACK_MIN", 15)
+PAPER_SC10_BTC_MINUTES = _env_int("PAPER_SC10_BTC_MINUTES", 5)
+PAPER_SC10_BTC_AGAINST_PCT = _env_float("PAPER_SC10_BTC_AGAINST_PCT", 0.3)
+PAPER_SC10_BODY_MIN_RATIO = _env_float("PAPER_SC10_BODY_MIN_RATIO", 0.5)
+PAPER_SC10_TRAIL_GAP_ROE = _env_float("PAPER_SC10_TRAIL_GAP_ROE", 10.0)
+PAPER_SC10_REENTRY_SEC = _env_int("PAPER_SC10_REENTRY_SEC", 90)
+PAPER_SC10_CAND_TTL_MIN = _env_int("PAPER_SC10_CAND_TTL_MIN", 3)
 
 # После перезапуска свечи в памяти не сразу полные: кандидата не снимаем
 # «по условиям пампа», пока не прошло столько минут и не набралась история.

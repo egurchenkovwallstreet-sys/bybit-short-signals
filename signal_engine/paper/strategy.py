@@ -40,6 +40,12 @@ from signal_engine.paper.css_detect import (
     find_css_pump,
     refresh_css_peak,
 )
+from signal_engine.paper.sc10_detect import (
+    SC10_CHECK_LABELS,
+    SC10_MANDATORY,
+    Sc10Evaluation,
+    evaluate_sc10,
+)
 from signal_engine.paper.growth_detect import (
     GROWTH_CHECK_LABELS,
     GROWTH_MANDATORY,
@@ -113,6 +119,24 @@ class CssCandidate:
 
 
 @dataclass
+class Sc10Candidate:
+    id: int
+    symbol: str
+    side: str
+    bar_ts: int
+    started_at: int
+    scans: int = 0
+    fail_counts: dict[str, int] = field(default_factory=dict)
+    best_passed: int = 0
+    last_eval: dict | None = None
+    entered: list[str] = field(default_factory=list)
+    last_trade_id: int | None = None
+    note: str | None = None
+    dirty: bool = True
+    last_entry_bar_ts: int = 0
+
+
+@dataclass
 class Candidate:
     id: int
     symbol: str
@@ -150,6 +174,7 @@ class PaperStrategy:
         self.candidates: dict[str, Candidate] = {}
         self.growth_candidates: dict[str, GrowthCandidate] = {}
         self.css_candidates: dict[str, CssCandidate] = {}
+        self.sc10_candidates: dict[str, Sc10Candidate] = {}
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -184,7 +209,8 @@ class PaperStrategy:
             variant = str(row["variant"] or config.PAPER_T20_VARIANT)
             self._ensure_balance(variant)
             gap = config.paper_peak_gap_roe(variant)
-            side = "long" if config.paper_is_long(variant) else "short"
+            kind = str(row["kind"] or "")
+            side = "long" if config.paper_is_long(variant) or kind.endswith("_long") else "short"
             pos = Position(
                 symbol=row["symbol"],
                 opened_at=int(row["opened_at"]),
@@ -201,7 +227,7 @@ class PaperStrategy:
                 last_price=float(row["last_price"] or row["entry_price"]),
                 peak_gap_roe=gap,
                 side=side,
-                stop_style="css" if variant == config.PAPER_CSS_VARIANT else "default",
+                stop_style=config.paper_stop_style(variant),
             )
             # Стоп по правилу варианта: t20 — BE/лок/трейл 20, p10 — пик − gap.
             pos._sync_stop(float(row["last_price"] or row["entry_price"]))
@@ -237,6 +263,25 @@ class PaperStrategy:
                 )
                 if growth.peak_price > 0:
                     self.peak_snapshots[row["symbol"]] = (growth.peak_price, growth.peak_ts)
+                continue
+            if str(row["kind"] or "") == "sc10":
+                ev = _loads(row["last_eval"]) or {}
+                pump = (ev.get("metrics") or {}).get("pump") or {}
+                self.sc10_candidates[row["symbol"]] = Sc10Candidate(
+                    id=int(row["id"]),
+                    symbol=row["symbol"],
+                    side=str(ev.get("side") or pump.get("side") or "long"),
+                    bar_ts=int(pump.get("bar_ts") or 0),
+                    started_at=int(row["started_at"]),
+                    scans=int(row["scans"] or 0),
+                    fail_counts=_loads(row["fail_counts"]) or {},
+                    best_passed=int(row["best_passed"] or 0),
+                    last_eval=ev or None,
+                    entered=_loads_list(row["variants"]),
+                    last_trade_id=row["trade_id"],
+                    dirty=False,
+                    last_entry_bar_ts=int(pump.get("entry_bar_ts") or 0),
+                )
                 continue
             if str(row["kind"] or "") == "css":
                 pump = _css_from_row(row)
@@ -316,12 +361,13 @@ class PaperStrategy:
         self._analytics = compute_analytics(self.store.db, self.balances)
         self._opened = True
         log.info(
-            "Тест стратегии: балансы %s, открытых %s, кандидатов %s, роста %s, Cursor SS %s, теневых %s",
+            "Тест стратегии: балансы %s, открытых %s, кандидатов %s, роста %s, Cursor SS %s, скальп %s, теневых %s",
             ", ".join(f"{v} {self.balances[v]:.2f}" for v in VARIANTS),
             len(self.trades),
             len(self.candidates),
             len(self.growth_candidates),
             len(self.css_candidates),
+            len(self.sc10_candidates),
             len(self.shadows),
         )
 
@@ -377,6 +423,7 @@ class PaperStrategy:
         self._evaluate(states, btc_4h, now_ms)
         self._evaluate_growth(states, now_ms)
         self._evaluate_css(states, now_ms)
+        self._evaluate_sc10(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -953,6 +1000,179 @@ class PaperStrategy:
         self.store.update_candidate(cand.id, fields)
         self.css_candidates.pop(cand.symbol, None)
 
+    def _evaluate_sc10(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        variant = config.PAPER_SC10_VARIANT
+        btc = states.get(config.PAPER_BTC_SYMBOL)
+        cooldown = config.PAPER_SC10_REENTRY_SEC * 1000
+        ttl = config.PAPER_SC10_CAND_TTL_MIN * 60_000
+        live: set[str] = set()
+        for symbol, state in states.items():
+            if not state.last_price:
+                continue
+            tape = self.tape.get(symbol)
+            ev = evaluate_sc10(state, tape, btc, now_ms)
+            bar_ts = int(((ev.metrics.get("pump") or {}).get("bar_ts")) or 0)
+            if ev.side is None and not (ev.checks.get("range_break") or {}).get("ok"):
+                cand = self.sc10_candidates.get(symbol)
+                if cand is not None and (variant, symbol) not in self.trades and now_ms - cand.started_at > ttl:
+                    self._end_sc10_candidate(cand, "нет пробоя 1м", now_ms)
+                continue
+            live.add(symbol)
+            cand = self.sc10_candidates.get(symbol)
+            if cand is None:
+                cid = self.store.insert_candidate(
+                    {
+                        "symbol": symbol,
+                        "kind": "sc10",
+                        "status": "watching",
+                        "started_at": now_ms,
+                        "updated_at": now_ms,
+                        "peak_price": float(state.last_price),
+                        "peak_ts": bar_ts or now_ms,
+                        "valley_price": float(state.last_price),
+                        "valley_ts": bar_ts or now_ms,
+                        "growth_pct": 0.0,
+                        "fail_counts": {},
+                    }
+                )
+                cand = Sc10Candidate(
+                    id=cid,
+                    symbol=symbol,
+                    side=ev.side or "long",
+                    bar_ts=bar_ts,
+                    started_at=now_ms,
+                )
+                self.sc10_candidates[symbol] = cand
+                log.info("Тест: кандидат Скальп 10 %s — %s", symbol, ev.side or "пробой")
+            cand.side = ev.side or cand.side
+            if bar_ts:
+                cand.bar_ts = bar_ts
+            cand.scans += 1
+            for key in ev.failed:
+                cand.fail_counts[key] = cand.fail_counts.get(key, 0) + 1
+            cand.best_passed = max(cand.best_passed, ev.passed_count)
+            cand.last_eval = ev.to_data()
+            cand.dirty = True
+            if not ev.passed:
+                cand.note = "ждём подтверждение хода"
+                continue
+            if (variant, symbol) in self.trades:
+                continue
+            if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                cand.note = "пауза после сделки"
+                continue
+            if cand.last_entry_bar_ts and cand.last_entry_bar_ts == bar_ts:
+                cand.note = "этот бар уже торговали"
+                continue
+            balance = self.balances[variant]
+            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+            if margin <= 0 or balance - self.used_margin(variant) < margin:
+                cand.note = "нет свободной маржи"
+                continue
+            self._open_sc10_trade(cand, state, ev, margin, now_ms)
+
+        for symbol, cand in list(self.sc10_candidates.items()):
+            if symbol in live or (variant, symbol) in self.trades:
+                continue
+            if now_ms - cand.started_at > ttl:
+                self._end_sc10_candidate(cand, "нет пробоя 1м", now_ms)
+
+    def _open_sc10_trade(
+        self, cand: Sc10Candidate, state: SymbolState, ev: Sc10Evaluation, margin: float, now_ms: int
+    ) -> None:
+        variant = config.PAPER_SC10_VARIANT
+        side = ev.side or cand.side
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(cand.symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=cand.symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            side=side,
+            stop_style="sc10",
+        )
+        entry = ev.to_data()
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": cand.symbol,
+                "variant": variant,
+                "candidate_id": cand.id,
+                "kind": f"sc10_{side}",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": ev.score,
+                "grade": grade_for(ev.score),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, cand.symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=cand.symbol,
+            kind=f"sc10_{side}",
+            pos=pos,
+            score=ev.score,
+            grade=grade_for(ev.score),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=cand.id,
+            last_check=now_ms,
+        )
+        if variant not in cand.entered:
+            cand.entered.append(variant)
+        cand.last_trade_id = trade_id
+        cand.last_entry_bar_ts = cand.bar_ts
+        cand.dirty = True
+        cand.note = side
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт %s %s по %s, маржа %.2f USD, балл %.1f",
+            variant,
+            side,
+            cand.symbol,
+            price,
+            margin,
+            ev.score,
+        )
+
+    def _end_sc10_candidate(self, cand: Sc10Candidate, reason: str, now_ms: int) -> None:
+        status = "entered" if cand.entered else "expired"
+        fields = {
+            "status": status,
+            "ended_at": now_ms,
+            "end_reason": reason,
+            "updated_at": now_ms,
+            "scans": cand.scans,
+            "fail_counts": cand.fail_counts,
+            "best_passed": cand.best_passed,
+            "last_eval": cand.last_eval or {},
+            "variants": cand.entered,
+            "trade_id": cand.last_trade_id,
+            "kind": "sc10",
+            "peak_price": ((cand.last_eval or {}).get("metrics") or {}).get("last_price"),
+            "peak_ts": cand.bar_ts,
+        }
+        self.store.update_candidate(cand.id, fields)
+        self.sc10_candidates.pop(cand.symbol, None)
+
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
         price = float(state.last_price)
         tape = self.tape.symbols.get(cand.symbol)
@@ -1157,6 +1377,33 @@ class PaperStrategy:
                 commit=False,
             )
             cand.dirty = False
+        for cand in self.sc10_candidates.values():
+            if not cand.dirty:
+                continue
+            ev = dict(cand.last_eval or {})
+            metrics = dict(ev.get("metrics") or {})
+            pump = dict(metrics.get("pump") or {})
+            pump["entry_bar_ts"] = cand.last_entry_bar_ts
+            pump["side"] = cand.side
+            metrics["pump"] = pump
+            ev["metrics"] = metrics
+            ev["side"] = cand.side
+            self.store.update_candidate(
+                cand.id,
+                {
+                    "updated_at": now_ms,
+                    "scans": cand.scans,
+                    "fail_counts": cand.fail_counts,
+                    "best_passed": cand.best_passed,
+                    "last_eval": ev,
+                    "variants": cand.entered,
+                    "trade_id": cand.last_trade_id,
+                    "kind": "sc10",
+                    "peak_ts": cand.bar_ts,
+                },
+                commit=False,
+            )
+            cand.dirty = False
         for shadow in self.shadows.values():
             self.store.update_candidate(
                 shadow.candidate_id,
@@ -1223,6 +1470,10 @@ class PaperStrategy:
             self.css_candidates.values(),
             key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.pump.growth_pct),
         )
+        scands = sorted(
+            self.sc10_candidates.values(),
+            key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.started_at),
+        )
         accounts = {}
         for variant in VARIANTS:
             used = self.used_margin(variant)
@@ -1242,7 +1493,10 @@ class PaperStrategy:
             "summary": {
                 "start_balance": config.PAPER_START_BALANCE_USD,
                 "accounts": accounts,
-                "candidates": len(self.candidates) + len(self.growth_candidates) + len(self.css_candidates),
+                "candidates": len(self.candidates)
+                + len(self.growth_candidates)
+                + len(self.css_candidates)
+                + len(self.sc10_candidates),
                 "shadows_open": len(self.shadows),
                 "btc_4h_pct": _r(btc_4h),
                 "btc_strict": btc_4h is not None and btc_4h >= config.PAPER_BTC_STRICT_4H_PCT,
@@ -1255,13 +1509,16 @@ class PaperStrategy:
             "open_trades": [self._trade_view(t, now_ms) for t in trades],
             "candidates": [self._candidate_view(c, now_ms) for c in cands]
             + [self._growth_candidate_view(c, now_ms) for c in gcands]
-            + [self._css_candidate_view(c, now_ms) for c in ccands],
+            + [self._css_candidate_view(c, now_ms) for c in ccands]
+            + [self._sc10_candidate_view(c, now_ms) for c in scands],
             "check_labels": CHECK_LABELS,
             "growth_check_labels": GROWTH_CHECK_LABELS,
             "css_check_labels": CSS_CHECK_LABELS,
+            "sc10_check_labels": SC10_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_MANDATORY),
             "css_mandatory": list(CSS_MANDATORY),
+            "sc10_mandatory": list(SC10_MANDATORY),
             "analytics": self._analytics,
         }
 
@@ -1371,6 +1628,25 @@ class PaperStrategy:
             "shadow": None,
             "entries_used": cand.entries_used,
             "rearm_needed": cand.rearm_needed,
+        }
+
+    def _sc10_candidate_view(self, cand: Sc10Candidate, now_ms: int) -> dict:
+        ev = cand.last_eval or {}
+        pump = ((ev.get("metrics") or {}).get("pump") or {})
+        return {
+            "id": cand.id,
+            "symbol": cand.symbol,
+            "episode": "sc10",
+            "pump": pump,
+            "started_at": cand.started_at,
+            "watch_min": round((now_ms - cand.started_at) / 60_000),
+            "scans": cand.scans,
+            "best_passed": cand.best_passed,
+            "entered": cand.entered,
+            "open_in": [v for v in VARIANTS if (v, cand.symbol) in self.trades],
+            "note": cand.note,
+            "eval": ev,
+            "shadow": None,
         }
 
 

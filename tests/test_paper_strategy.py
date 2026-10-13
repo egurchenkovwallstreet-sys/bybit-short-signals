@@ -332,7 +332,7 @@ class StrategyCycleTest(unittest.TestCase):
             # 8 из 9: вход в t20 и p10, теневая сделка по недостающему условию.
             shorts = sorted(t["variant"] for t in view["open_trades"] if t["variant"] in ("t20", "p10"))
             self.assertEqual(shorts, ["p10", "t20"])
-            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth")]
+            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth", "sc10")]
             self.assertEqual(len(pumps), 1)
             self.assertEqual(pumps[0]["shadow"]["missing"], "short_liq_faded")
             self.assertEqual(len(strategy.shadows), 1)
@@ -516,7 +516,7 @@ class EntryGateTest(unittest.TestCase):
             strategy = PaperStrategy(PaperStore(path))
             strategy.open()
             view = strategy.view(NOW, None)
-            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth")]
+            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth", "sc10")]
             self.assertEqual(len(pumps), 1)
             ev = pumps[0]["eval"]
             self.assertIn("no_14d", ev["entry_blocked"])
@@ -535,7 +535,7 @@ class EntryGateTest(unittest.TestCase):
             view = strategy.scan({state.symbol: state}, NOW + 100 * MIN)["data"]
             shorts = [t for t in view["open_trades"] if t["variant"] in ("t20", "p10")]
             self.assertEqual(shorts, [])
-            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth")]
+            pumps = [c for c in view["candidates"] if c.get("episode") not in ("css", "growth", "sc10")]
             self.assertTrue(pumps)
             blocked = (pumps[0].get("eval") or {}).get("entry_blocked") or []
             self.assertIn("since_too_late", blocked)
