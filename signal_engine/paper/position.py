@@ -25,6 +25,79 @@ def roe_pct(entry: float, price: float, leverage: int | None = None) -> float:
     return (entry - price) / entry * lev * 100.0
 
 
+def long_roe_pct(entry: float, price: float, leverage: int | None = None) -> float:
+    lev = leverage or config.PAPER_LEVERAGE
+    if entry <= 0:
+        return 0.0
+    return (price - entry) / entry * lev * 100.0
+
+
+def long_liquidation_price(entry: float, leverage: int | None = None, mmr: float | None = None) -> float:
+    lev = leverage or config.PAPER_LEVERAGE
+    rate = config.PAPER_MAINT_MARGIN_RATE if mmr is None else mmr
+    return entry * (1.0 - 1.0 / lev + rate)
+
+
+def price_for_long_roe(entry: float, roe: float, leverage: int | None = None) -> float:
+    lev = leverage or config.PAPER_LEVERAGE
+    return entry * (1.0 + roe / (100.0 * lev))
+
+
+def net_breakeven_stop_price_long(
+    entry: float,
+    margin: float,
+    leverage: int | None = None,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    lev = leverage or config.PAPER_LEVERAGE
+    if entry <= 0 or margin <= 0:
+        return entry
+    qty = margin * lev / entry
+    fee = config.PAPER_FEE_RATE_TAKER
+    return (entry * qty + entry_fee - funding_paid) / (qty * (1.0 - fee))
+
+
+def net_roe_stop_price_long(
+    entry: float,
+    margin: float,
+    roe_pct: float,
+    leverage: int | None = None,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    lev = leverage or config.PAPER_LEVERAGE
+    if entry <= 0 or margin <= 0:
+        return entry
+    qty = margin * lev / entry
+    fee = config.PAPER_FEE_RATE_TAKER
+    target_pnl = margin * roe_pct / 100.0
+    return (entry * qty + entry_fee - funding_paid + target_pnl) / (qty * (1.0 - fee))
+
+
+def trail_stop_long(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = long_roe_pct(entry, best_price, lev)
+    if peak <= 0:
+        return net_roe_stop_price_long(
+            entry, margin, config.PAPER_LONG_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+        )
+    if peak < config.PAPER_LONG_LOCK_ARM_ROE:
+        if margin > 0:
+            return net_breakeven_stop_price_long(entry, margin, lev, entry_fee, funding_paid)
+        return price_for_long_roe(entry, 0.0, lev)
+    lock_roe = max(config.PAPER_LONG_LOCK_MIN_ROE, peak - config.PAPER_LONG_TRAIL_GAP_ROE)
+    return price_for_long_roe(entry, lock_roe, lev)
+
+
 def trail_distance_pct(best_roe: float) -> float:
     start = config.PAPER_TRAIL_START_DIST_PCT
     floor = config.PAPER_TRAIL_MIN_DIST_PCT
@@ -125,6 +198,7 @@ class Position:
     last_price: float = 0.0
     peak_gap_roe: float = 0.0
     loss_cap_armed: bool = False
+    side: str = "short"
 
     def __post_init__(self) -> None:
         if self.best_price <= 0:
@@ -132,7 +206,11 @@ class Position:
         if self.worst_price <= 0:
             self.worst_price = self.entry_price
         if self.liq_price <= 0:
-            self.liq_price = liquidation_price(self.entry_price, self.leverage)
+            self.liq_price = (
+                long_liquidation_price(self.entry_price, self.leverage)
+                if self.side == "long"
+                else liquidation_price(self.entry_price, self.leverage)
+            )
         if self.entry_fee <= 0:
             self.entry_fee = self.notional * config.PAPER_FEE_RATE_TAKER
         if self.stop_price <= 0:
@@ -141,6 +219,17 @@ class Position:
             self.last_price = self.entry_price
 
     def _sync_stop(self, last: float) -> None:
+        if self.side == "long":
+            trail = trail_stop_long(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+            )
+            self.stop_price = max(self.liq_price, trail)
+            return
         trail = trail_stop(
             self.entry_price,
             self.best_price,
@@ -173,6 +262,8 @@ class Position:
         return self.notional / self.entry_price
 
     def gross_pnl(self, price: float) -> float:
+        if self.side == "long":
+            return (price - self.entry_price) * self.qty
         return (self.entry_price - price) * self.qty
 
     def exit_fee(self, price: float) -> float:
@@ -185,16 +276,22 @@ class Position:
         return self.net_pnl(price) / self.margin * 100.0 if self.margin > 0 else 0.0
 
     def max_roe(self) -> float:
+        if self.side == "long":
+            return long_roe_pct(self.entry_price, self.best_price, self.leverage)
         return roe_pct(self.entry_price, self.best_price, self.leverage)
 
     def min_roe(self) -> float:
+        if self.side == "long":
+            return long_roe_pct(self.entry_price, self.worst_price, self.leverage)
         return roe_pct(self.entry_price, self.worst_price, self.leverage)
 
     def apply_funding(self, now_ms: int, rate: float | None, price: float) -> float:
-        """Шорт получает funding при положительной ставке и платит при отрицательной."""
+        """Funding: шорт получает при rate>0, лонг платит."""
         if self.next_funding_ts is None or rate is None or now_ms < self.next_funding_ts:
             return 0.0
         payment = self.qty * price * rate
+        if self.side == "long":
+            payment = -payment
         self.funding_paid += payment
         self.next_funding_ts = None
         return payment
@@ -202,6 +299,22 @@ class Position:
     def update(self, low: float, high: float, last: float) -> str | None:
         """Обновить по диапазону цен с прошлой проверки. Вернуть причину выхода."""
         self.last_price = last
+        if self.side == "long":
+            if low <= self.liq_price:
+                self.worst_price = min(self.worst_price, self.liq_price)
+                return "liquidation"
+            if low <= self.stop_price:
+                self.worst_price = min(self.worst_price, max(low, self.stop_price))
+                return "trailing_stop"
+            self.worst_price = min(self.worst_price, low)
+            best_changed = high > self.best_price
+            if best_changed:
+                self.best_price = high
+            prev_stop = self.stop_price
+            self._sync_stop(last)
+            if self.stop_price > prev_stop + 1e-12 and last <= self.stop_price:
+                return "trailing_stop"
+            return None
         if high >= self.liq_price:
             self.worst_price = max(self.worst_price, self.liq_price)
             return "liquidation"

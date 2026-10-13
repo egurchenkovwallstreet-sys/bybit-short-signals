@@ -253,10 +253,12 @@ PAPER_STRONG_TOP_MIN_HOURS_AFTER = _env_float("PAPER_STRONG_TOP_MIN_HOURS_AFTER"
 PAPER_STRONG_TOP_MIN_BARS_1H = _env_int("PAPER_STRONG_TOP_MIN_BARS_1H", 5)
 PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 
-# Два бумажных варианта, у каждого свой счёт $1000. Вход одинаковый (шлюз + N из 9).
-PAPER_VARIANTS = ("t20", "p10")
+# Бумажные варианты: шорты t20/p10 (шлюз + 5 из 9), лонг lt20 (детектор роста).
+PAPER_SHORT_VARIANTS = ("t20", "p10")
+PAPER_VARIANTS = ("t20", "p10", "lt20")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
+PAPER_LT20_VARIANT = "lt20"
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
@@ -271,9 +273,29 @@ PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT = _env_float("PAPER_ENTRY_LATE_EXT_SELL_
 PAPER_ENTRY_LATE_EXT_SELL_WINDOWS_REQUIRED = _env_int("PAPER_ENTRY_LATE_EXT_SELL_WINDOWS_REQUIRED", 2)
 
 
+def paper_is_long(variant: str) -> bool:
+    return variant == PAPER_LT20_VARIANT
+
+
 def paper_peak_gap_roe(variant: str) -> float:
-    """Лок «пик − gap» только у p10; t20 — безубыток / лок +5% / трейл 20 п.п."""
+    """Лок «пик − gap» только у p10; t20/lt20 — свои правила ROE."""
     return PAPER_TRAIL_PEAK_GAP_ROE if variant == PAPER_P10_VARIANT else 0.0
+
+
+# Лонг lt20: −10% → BE в плюсе → +10% лок +5% → трейл 20 п.п.
+PAPER_LONG_INITIAL_STOP_ROE = _env_float("PAPER_LONG_INITIAL_STOP_ROE", -10.0)
+PAPER_LONG_LOCK_ARM_ROE = _env_float("PAPER_LONG_LOCK_ARM_ROE", 10.0)
+PAPER_LONG_LOCK_MIN_ROE = _env_float("PAPER_LONG_LOCK_MIN_ROE", 5.0)
+PAPER_LONG_TRAIL_GAP_ROE = _env_float("PAPER_LONG_TRAIL_GAP_ROE", 20.0)
+
+# Детектор роста (кандидаты lt20).
+PAPER_GROWTH_DETECT_HOURS = _env_int("PAPER_GROWTH_DETECT_HOURS", 12)
+PAPER_GROWTH_MIN_RALLY_PCT = _env_float("PAPER_GROWTH_MIN_RALLY_PCT", 5.0)
+PAPER_GROWTH_MAX_PULLBACK_PCT = _env_float("PAPER_GROWTH_MAX_PULLBACK_PCT", 25.0)
+PAPER_GROWTH_BUY_SHARE_MIN = _env_float("PAPER_GROWTH_BUY_SHARE_MIN", 60.0)
+PAPER_GROWTH_BUY_SHARE_TURBO = _env_float("PAPER_GROWTH_BUY_SHARE_TURBO", 75.0)
+PAPER_GROWTH_VOL_GROWTH_MIN_PCT = _env_float("PAPER_GROWTH_VOL_GROWTH_MIN_PCT", 20.0)
+PAPER_GROWTH_TURBO_VOL_RATIO = _env_float("PAPER_GROWTH_TURBO_VOL_RATIO", 3.0)
 
 # После перезапуска свечи в памяти не сразу полные: кандидата не снимаем
 # «по условиям пампа», пока не прошло столько минут и не набралась история.

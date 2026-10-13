@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import config
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS paper_trades (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,6 +164,12 @@ class PaperStore:
         if old is not None:
             db.execute("INSERT OR IGNORE INTO paper_kv(key, value) VALUES('balance:v9', ?)", (old["value"],))
             db.execute("DELETE FROM paper_kv WHERE key = 'balance'")
+        start = str(config.PAPER_START_BALANCE_USD)
+        for variant in config.PAPER_VARIANTS:
+            db.execute(
+                "INSERT OR IGNORE INTO paper_kv(key, value) VALUES(?, ?)",
+                (f"balance:{variant}", start),
+            )
 
     def close(self) -> None:
         if self.conn is not None:

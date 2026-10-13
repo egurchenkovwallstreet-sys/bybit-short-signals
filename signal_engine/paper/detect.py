@@ -50,6 +50,7 @@ CHECK_LABELS = {
 VARIANT_LABELS = {
     "t20": "+2% BE / трейл 20%",
     "p10": "Пик −10 п.п.",
+    "lt20": "Лонг t20",
 }
 
 ENTRY_GATE_LABELS = {
@@ -135,13 +136,13 @@ class Evaluation:
     def qualifies(self, variant: str) -> bool:
         if self.entry_blocked:
             return False
-        if variant in config.PAPER_VARIANTS:
+        if variant in config.PAPER_SHORT_VARIANTS:
             return self.passed_count >= config.PAPER_V5_MIN_PASSED
         return False
 
     @property
     def variants(self) -> list[str]:
-        return [v for v in config.PAPER_VARIANTS if self.qualifies(v)]
+        return [v for v in config.PAPER_SHORT_VARIANTS if self.qualifies(v)]
 
     def to_data(self) -> dict:
         return {

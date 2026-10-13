@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -78,17 +78,25 @@
     return `${Math.floor(m / 1440)} д ${Math.floor((m % 1440) / 60)} ч`;
   }
   function pumpLine(p) {
-    if (!p || p.growth_pct === undefined) return "—";
+    if (!p) return "—";
+    if (p.kind === "growth" || p.anchor_price !== undefined) {
+      return `Рост: +${num(p.rally_pct ?? p.growth_pct, 1)}% от ${price(p.anchor_price ?? p.valley_price)}`;
+    }
+    if (p.growth_pct === undefined) return "—";
     return `${KIND[p.kind] || p.kind}: +${num(p.growth_pct, 1)}% за ${dur(p.duration_min)} (окно ${TRIGGER[p.trigger] || p.trigger || "?"})`;
   }
   function labels() {
-    return (paper.data && paper.data.check_labels) || {};
+    if (!paper.data) return {};
+    if (paper.variant === "lt20") return paper.data.growth_check_labels || {};
+    return paper.data.check_labels || {};
   }
   function mandatory() {
-    return (paper.data && paper.data.mandatory) || [];
+    if (!paper.data) return [];
+    if (paper.variant === "lt20") return paper.data.growth_mandatory || [];
+    return paper.data.mandatory || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20"];
   }
   function vlabel(v) {
     return ((paper.data && paper.data.variant_labels) || {})[v] || v;
@@ -792,7 +800,7 @@
     const r = item.row;
     const p = r.pump || ((item.ev || {}).metrics || {}).pump || {};
     add(p.peak_price || r.peak_price, "#f6d365", "пик");
-    add(p.valley_price || r.valley_price, "#8d97a8", "дно");
+    add(p.anchor_price || p.valley_price || r.valley_price, "#8d97a8", p.kind === "growth" ? "якорь" : "дно");
     const tzOffset = -new Date().getTimezoneOffset() * 60;
     const markers = [];
     if (item.kind === "trade") {
@@ -803,7 +811,11 @@
       } else {
         add(r.exit_price, "#ff9f43", "выход", 0);
       }
-      markers.push({ time: Math.floor(r.opened_at / 1000) + tzOffset, position: "aboveBar", color: "#5dade2", shape: "arrowDown", text: "шорт" });
+      if (r.side === "long") {
+        markers.push({ time: Math.floor(r.opened_at / 1000) + tzOffset, position: "belowBar", color: "#3ddc84", shape: "arrowUp", text: "лонг" });
+      } else {
+        markers.push({ time: Math.floor(r.opened_at / 1000) + tzOffset, position: "aboveBar", color: "#5dade2", shape: "arrowDown", text: "шорт" });
+      }
       if (r.closed_at) markers.push({ time: Math.floor(r.closed_at / 1000) + tzOffset, position: "belowBar", color: "#ff9f43", shape: "arrowUp", text: "выход" });
     } else if (item.kind === "hist" && r.shadow_entry_price) {
       add(r.shadow_entry_price, "#5dade2", "тень: вход", 0);

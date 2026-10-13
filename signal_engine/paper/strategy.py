@@ -31,6 +31,15 @@ from signal_engine.paper.detect import (
     measure_pump_peak,
     paper_entry_blocks,
 )
+from signal_engine.paper.growth_detect import (
+    GROWTH_CHECK_LABELS,
+    GROWTH_MANDATORY,
+    GrowthEvaluation,
+    GrowthInfo,
+    evaluate_growth,
+    find_growth,
+    refresh_growth_peak,
+)
 from signal_engine.paper.position import Position
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.tape import TapeBook, minute_start
@@ -58,6 +67,22 @@ class OpenTrade:
     entry: dict
     candidate_id: int | None
     last_check: int
+
+
+@dataclass
+class GrowthCandidate:
+    id: int
+    symbol: str
+    growth: GrowthInfo
+    started_at: int
+    scans: int = 0
+    fail_counts: dict[str, int] = field(default_factory=dict)
+    best_passed: int = 0
+    last_eval: dict | None = None
+    entered: list[str] = field(default_factory=list)
+    last_trade_id: int | None = None
+    note: str | None = None
+    dirty: bool = True
 
 
 @dataclass
@@ -96,6 +121,7 @@ class PaperStrategy:
         self.balances: dict[str, float] = {}
         self.trades: dict[tuple[str, str], OpenTrade] = {}
         self.candidates: dict[str, Candidate] = {}
+        self.growth_candidates: dict[str, GrowthCandidate] = {}
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -130,6 +156,7 @@ class PaperStrategy:
             variant = str(row["variant"] or config.PAPER_T20_VARIANT)
             self._ensure_balance(variant)
             gap = config.paper_peak_gap_roe(variant)
+            side = "long" if config.paper_is_long(variant) else "short"
             pos = Position(
                 symbol=row["symbol"],
                 opened_at=int(row["opened_at"]),
@@ -145,6 +172,7 @@ class PaperStrategy:
                 next_funding_ts=row["next_funding_ts"],
                 last_price=float(row["last_price"] or row["entry_price"]),
                 peak_gap_roe=gap,
+                side=side,
             )
             # Стоп по правилу варианта: t20 — BE/лок/трейл 20, p10 — пик − gap.
             pos._sync_stop(float(row["last_price"] or row["entry_price"]))
@@ -163,6 +191,24 @@ class PaperStrategy:
             )
         active = sorted(self.store.active_candidates(), key=lambda r: (int(r["peak_ts"] or 0), int(r["id"])))
         for row in active:
+            if str(row["kind"] or "") == "growth":
+                growth = _growth_from_row(row)
+                self.growth_candidates[row["symbol"]] = GrowthCandidate(
+                    id=int(row["id"]),
+                    symbol=row["symbol"],
+                    growth=growth,
+                    started_at=int(row["started_at"]),
+                    scans=int(row["scans"] or 0),
+                    fail_counts=_loads(row["fail_counts"]) or {},
+                    best_passed=int(row["best_passed"] or 0),
+                    last_eval=_loads(row["last_eval"]) or None,
+                    entered=_loads_list(row["variants"]),
+                    last_trade_id=row["trade_id"],
+                    dirty=False,
+                )
+                if growth.peak_price > 0:
+                    self.peak_snapshots[row["symbol"]] = (growth.peak_price, growth.peak_ts)
+                continue
             older = self.candidates.get(row["symbol"])
             if older is not None:
                 self._end_candidate(older, "дубль после перезапуска", now)
@@ -267,12 +313,15 @@ class PaperStrategy:
     def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
         self._refresh_peaks(states, now_ms)
+        self._refresh_growth_peaks(states, now_ms)
         self._update_trades(states, now_ms)
         self._update_shadows(states, now_ms)
         if now_ms >= self._next_detect:
             self._detect(states, now_ms)
+            self._detect_growth(states, now_ms)
             self._next_detect = now_ms + config.PAPER_DETECT_INTERVAL_SEC * 1000
         self._evaluate(states, btc_4h, now_ms)
+        self._evaluate_growth(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -329,6 +378,15 @@ class PaperStrategy:
             cand = self.candidates.get(symbol)
             if cand is not None and apply_peak_measurement(cand.pump, state, now_ms):
                 cand.dirty = True
+
+    def _refresh_growth_peaks(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        for symbol, cand in self.growth_candidates.items():
+            state = states.get(symbol)
+            if state is None:
+                continue
+            if refresh_growth_peak(cand.growth, state, now_ms):
+                cand.dirty = True
+                self.peak_snapshots[symbol] = (cand.growth.peak_price, cand.growth.peak_ts)
 
     def _update_trades(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for trade in list(self.trades.values()):
@@ -435,7 +493,7 @@ class PaperStrategy:
 
     def _detect(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for symbol, state in states.items():
-            if symbol in self.candidates or not state.last_price:
+            if symbol in self.candidates or symbol in self.growth_candidates or not state.last_price:
                 continue
             pump = find_pump(state, self.tape.symbols.get(symbol), now_ms)
             if pump is None:
@@ -461,6 +519,29 @@ class PaperStrategy:
                 pump.growth_pct,
                 pump.trigger,
             )
+
+    def _detect_growth(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        for symbol, state in states.items():
+            if symbol in self.growth_candidates or symbol in self.candidates or not state.last_price:
+                continue
+            growth = find_growth(state, self.tape.symbols.get(symbol), now_ms)
+            if growth is None:
+                continue
+            cid = self.store.insert_candidate(
+                {
+                    "symbol": symbol,
+                    "kind": "growth",
+                    "status": "watching",
+                    "started_at": now_ms,
+                    "updated_at": now_ms,
+                    **_growth_fields(growth),
+                    "fail_counts": {},
+                }
+            )
+            self.growth_candidates[symbol] = GrowthCandidate(
+                id=cid, symbol=symbol, growth=growth, started_at=now_ms
+            )
+            log.info("Тест: кандидат роста %s — ралли +%.1f%%", symbol, growth.rally_pct)
 
     def _ready(self, state: SymbolState, cand: Candidate, now_ms: int) -> bool:
         """Хватает ли истории в памяти, чтобы честно решить, что памп кончился."""
@@ -513,6 +594,113 @@ class PaperStrategy:
             cand.note = "; ".join(notes) or None
             if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
+
+    def _evaluate_growth(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        variant = config.PAPER_LT20_VARIANT
+        cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
+        for symbol, cand in list(self.growth_candidates.items()):
+            state = states.get(symbol)
+            if state is None or not state.last_price:
+                continue
+            tape = self.tape.get(symbol)
+            growth = find_growth(state, tape, now_ms)
+            if growth is None:
+                self._end_growth_candidate(cand, "условия роста больше не выполняются", now_ms)
+                continue
+            cand.growth = growth
+            ev = evaluate_growth(state, tape, growth, self.klines.get(symbol, {}), now_ms)
+            cand.scans += 1
+            for key in ev.failed:
+                cand.fail_counts[key] = cand.fail_counts.get(key, 0) + 1
+            cand.best_passed = max(cand.best_passed, ev.passed_count)
+            cand.last_eval = ev.to_data()
+            cand.dirty = True
+            if not ev.passed:
+                cand.note = "ждём условия" + (" (турбо)" if ev.turbo else "")
+                continue
+            if (variant, symbol) in self.trades:
+                continue
+            if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                continue
+            balance = self.balances[variant]
+            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+            if margin <= 0 or balance - self.used_margin(variant) < margin:
+                cand.note = "нет свободной маржи"
+                continue
+            self._open_growth_trade(cand, state, ev, margin, now_ms)
+
+    def _open_growth_trade(
+        self, cand: GrowthCandidate, state: SymbolState, ev: GrowthEvaluation, margin: float, now_ms: int
+    ) -> None:
+        variant = config.PAPER_LT20_VARIANT
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(cand.symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=cand.symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            side="long",
+        )
+        entry = ev.to_data()
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": cand.symbol,
+                "variant": variant,
+                "candidate_id": cand.id,
+                "kind": "growth",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": ev.score,
+                "grade": grade_for(ev.score),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, cand.symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=cand.symbol,
+            kind="growth",
+            pos=pos,
+            score=ev.score,
+            grade=grade_for(ev.score),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=cand.id,
+            last_check=now_ms,
+        )
+        if variant not in cand.entered:
+            cand.entered.append(variant)
+        cand.last_trade_id = trade_id
+        cand.dirty = True
+        cand.note = "турбо" if ev.turbo else None
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт лонг %s по %s, маржа %.2f USD, турбо=%s, балл %.1f",
+            variant,
+            cand.symbol,
+            price,
+            margin,
+            ev.turbo,
+            ev.score,
+        )
 
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
         price = float(state.last_price)
@@ -626,6 +814,24 @@ class PaperStrategy:
         self.expired_peaks[cand.symbol] = cand.pump.peak_ts
         self.candidates.pop(cand.symbol, None)
 
+    def _end_growth_candidate(self, cand: GrowthCandidate, reason: str, now_ms: int) -> None:
+        status = "entered" if cand.entered else "expired"
+        fields = {
+            "status": status,
+            "ended_at": now_ms,
+            "end_reason": reason,
+            "updated_at": now_ms,
+            "scans": cand.scans,
+            "fail_counts": cand.fail_counts,
+            "best_passed": cand.best_passed,
+            "last_eval": cand.last_eval or {},
+            "variants": cand.entered,
+            "trade_id": cand.last_trade_id,
+            **_growth_fields(cand.growth),
+        }
+        self.store.update_candidate(cand.id, fields)
+        self.growth_candidates.pop(cand.symbol, None)
+
     def _persist(self, now_ms: int, force: bool = False) -> None:
         if not force and now_ms < self._next_persist:
             return
@@ -660,6 +866,24 @@ class PaperStrategy:
                     "variants": cand.entered,
                     "trade_id": cand.last_trade_id,
                     **_pump_fields(cand.pump),
+                },
+                commit=False,
+            )
+            cand.dirty = False
+        for cand in self.growth_candidates.values():
+            if not cand.dirty:
+                continue
+            self.store.update_candidate(
+                cand.id,
+                {
+                    "updated_at": now_ms,
+                    "scans": cand.scans,
+                    "fail_counts": cand.fail_counts,
+                    "best_passed": cand.best_passed,
+                    "last_eval": cand.last_eval or {},
+                    "variants": cand.entered,
+                    "trade_id": cand.last_trade_id,
+                    **_growth_fields(cand.growth),
                 },
                 commit=False,
             )
@@ -722,6 +946,10 @@ class PaperStrategy:
             self.candidates.values(),
             key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.pump.growth_pct),
         )
+        gcands = sorted(
+            self.growth_candidates.values(),
+            key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.growth.rally_pct),
+        )
         accounts = {}
         for variant in VARIANTS:
             used = self.used_margin(variant)
@@ -741,7 +969,7 @@ class PaperStrategy:
             "summary": {
                 "start_balance": config.PAPER_START_BALANCE_USD,
                 "accounts": accounts,
-                "candidates": len(self.candidates),
+                "candidates": len(self.candidates) + len(self.growth_candidates),
                 "shadows_open": len(self.shadows),
                 "btc_4h_pct": _r(btc_4h),
                 "btc_strict": btc_4h is not None and btc_4h >= config.PAPER_BTC_STRICT_4H_PCT,
@@ -752,16 +980,20 @@ class PaperStrategy:
             "variant_labels": VARIANT_LABELS,
             "entry_gate_labels": ENTRY_GATE_LABELS,
             "open_trades": [self._trade_view(t, now_ms) for t in trades],
-            "candidates": [self._candidate_view(c, now_ms) for c in cands],
+            "candidates": [self._candidate_view(c, now_ms) for c in cands]
+            + [self._growth_candidate_view(c, now_ms) for c in gcands],
             "check_labels": CHECK_LABELS,
+            "growth_check_labels": GROWTH_CHECK_LABELS,
             "mandatory": list(MANDATORY),
+            "growth_mandatory": list(GROWTH_MANDATORY),
             "analytics": self._analytics,
         }
 
     def _trade_view(self, trade: OpenTrade, now_ms: int) -> dict:
         pos = trade.pos
         price = pos.last_price
-        pump = dict((trade.entry.get("metrics") or {}).get("pump") or {})
+        metrics = trade.entry.get("metrics") or {}
+        pump = dict(metrics.get("pump") or metrics.get("growth") or {})
         live = self.peak_snapshots.get(trade.symbol)
         if live:
             pump["peak_price"] = live[0]
@@ -771,6 +1003,7 @@ class PaperStrategy:
             "variant": trade.variant,
             "symbol": trade.symbol,
             "kind": trade.kind,
+            "side": trade.pos.side,
             "pump": pump,
             "opened_at": pos.opened_at,
             "duration_min": round((now_ms - pos.opened_at) / 60_000),
@@ -826,6 +1059,24 @@ class PaperStrategy:
             ),
         }
 
+    def _growth_candidate_view(self, cand: GrowthCandidate, now_ms: int) -> dict:
+        ev = cand.last_eval
+        return {
+            "id": cand.id,
+            "symbol": cand.symbol,
+            "episode": "growth",
+            "pump": cand.growth.to_data(),
+            "started_at": cand.started_at,
+            "watch_min": round((now_ms - cand.started_at) / 60_000),
+            "scans": cand.scans,
+            "best_passed": cand.best_passed,
+            "entered": cand.entered,
+            "open_in": [v for v in VARIANTS if (v, cand.symbol) in self.trades],
+            "note": cand.note,
+            "eval": ev,
+            "shadow": None,
+        }
+
 
 def _price_range(state: SymbolState, since_ms: int) -> tuple[float, float, float]:
     last = float(state.last_price or 0)
@@ -847,6 +1098,31 @@ def _expire_reason(pump: PumpInfo, state: SymbolState, now_ms: int) -> str:
     if now_ms - pump.peak_ts > hours * 3_600_000:
         return "истекло время после пика"
     return _REASON_CONDITIONS
+
+
+def _growth_fields(growth: GrowthInfo) -> dict:
+    return {
+        "kind": "growth",
+        "peak_price": growth.peak_price,
+        "peak_ts": growth.peak_ts,
+        "valley_price": growth.anchor_price,
+        "valley_ts": growth.anchor_ts,
+        "growth_pct": growth.rally_pct,
+    }
+
+
+def _growth_from_row(row) -> GrowthInfo:
+    last_eval = _loads(row["last_eval"]) or {}
+    data = (last_eval.get("metrics") or {}).get("growth") or {}
+    return GrowthInfo(
+        anchor_price=float(row["valley_price"] or data.get("anchor_price") or 0),
+        anchor_ts=int(row["valley_ts"] or data.get("anchor_ts") or 0),
+        rally_pct=float(row["growth_pct"] or data.get("rally_pct") or 0),
+        peak_price=float(row["peak_price"] or 0),
+        peak_ts=int(row["peak_ts"] or 0),
+        volume_ratio_4h=data.get("volume_ratio_4h"),
+        buy_share_pct=data.get("buy_share_pct"),
+    )
 
 
 def _pump_fields(pump: PumpInfo) -> dict:

@@ -16,10 +16,12 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.position import (
     Position,
     liquidation_price,
+    long_liquidation_price,
     net_breakeven_stop_price,
     net_roe_stop_price,
     trail_distance_pct,
     trail_stop,
+    trail_stop_long,
 )
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.strategy import PaperStrategy
@@ -117,6 +119,15 @@ class TrailingTest(unittest.TestCase):
         self.assertAlmostEqual(pos.max_roe(), 7.0)
         self.assertAlmostEqual(pos.stop_price, 0.995)
         self.assertEqual(pos.update(0.993, 0.995, 0.995), "trailing_stop")
+
+    def test_long_trail_be_lock(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0, side="long")
+        self.assertIsNone(pos.update(1.0, 1.01, 1.01))
+        self.assertGreater(pos.max_roe(), 0)
+        self.assertIsNone(pos.update(1.008, 1.105, 1.105))
+        self.assertGreaterEqual(pos.max_roe(), 10.0)
+        stop = pos.stop_price
+        self.assertEqual(pos.update(stop - 0.001, stop + 0.001, stop), "trailing_stop")
 
     def test_loss_cap_after_minus(self) -> None:
         pos = Position("X", 0, 1.0, 50.0)
