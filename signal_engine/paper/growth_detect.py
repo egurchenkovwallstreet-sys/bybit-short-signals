@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import config
 from signal_engine.flow import oi_change_pct
-from signal_engine.paper.detect import MIN_MS, HOUR_MS, _r, _check, ema_table, grade_for, merged_15m
+from signal_engine.paper.detect import HOUR_MS, _r, _check, ema_table, grade_for
+from signal_engine.paper.swing_1h import (
+    analyze_growth_swing_1h,
+    pullback_entry_ok,
+    pullback_pct_from_peak,
+)
 from signal_engine.swing_highs import closed_bars
 from signal_engine.paper.tape import SymbolTape
 from signal_engine.state import Bar, SymbolState
@@ -22,6 +26,8 @@ GROWTH_MANDATORY = (
     "volume_avg_4h",
     "ema_above",
     "hh_hl_1h",
+    "hh_structure_12h",
+    "pullback_entry",
 )
 
 GROWTH_CHECK_LABELS = {
@@ -34,6 +40,8 @@ GROWTH_CHECK_LABELS = {
     "volume_avg_4h": "Средний рост объёма за 4 ч ≥ 20%/ч",
     "ema_above": "Цена выше EMA 50/100/200 (15m–4h)",
     "hh_hl_1h": "1H: high и low выше предыдущих",
+    "hh_structure_12h": "Структура HH за 12 ч (1H swing)",
+    "pullback_entry": "Откат 2–5% от HH 1H",
     "turbo_vol_x3": "Турбо: объём ×3 за 4 ч",
     "turbo_buys_75": "Турбо: покупки > 75%",
 }
@@ -74,8 +82,16 @@ class GrowthEvaluation:
         return bool(self.checks.get("ema_above", {}).get("ok"))
 
     @property
+    def structure_ok(self) -> bool:
+        return bool(self.checks.get("hh_structure_12h", {}).get("ok"))
+
+    @property
+    def pullback_ok(self) -> bool:
+        return bool(self.checks.get("pullback_entry", {}).get("ok"))
+
+    @property
     def passed(self) -> bool:
-        if not self.ema_ok:
+        if not self.ema_ok or not self.structure_ok or not self.pullback_ok:
             return False
         if self.turbo:
             return True
@@ -83,13 +99,23 @@ class GrowthEvaluation:
 
     @property
     def failed(self) -> list[str]:
+        out: list[str] = []
+        if not self.ema_ok:
+            out.append("ema_above")
+        if not self.structure_ok:
+            out.append("hh_structure_12h")
+        if not self.pullback_ok:
+            out.append("pullback_entry")
         if self.turbo:
-            return []
-        return [k for k in GROWTH_MANDATORY if not self.checks.get(k, {}).get("ok")]
+            return out
+        for k in GROWTH_MANDATORY:
+            if not self.checks.get(k, {}).get("ok") and k not in out:
+                out.append(k)
+        return out
 
     @property
     def passed_count(self) -> int:
-        return len(GROWTH_MANDATORY) - len(self.failed)
+        return sum(1 for k in GROWTH_MANDATORY if self.checks.get(k, {}).get("ok"))
 
     def to_data(self) -> dict:
         return {
@@ -137,26 +163,28 @@ def _avg_hourly_growth_pct(hourly: list[float]) -> float | None:
     return sum(steps) / len(steps)
 
 
-def find_growth(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> GrowthInfo | None:
-    """Эпизод роста: откат от локального дна 4 ч и текущий ралли."""
-    bars15 = merged_15m(state)
-    if len(bars15) < 8:
+def find_growth(
+    state: SymbolState,
+    tape: SymbolTape | None,
+    now_ms: int,
+    klines: dict[str, list[Bar]] | None = None,
+) -> GrowthInfo | None:
+    """Эпизод роста: HH-структура 1H за 12 ч, пик/якорь по swing 1H."""
+    klines = klines or {}
+    last = float(state.last_price or 0)
+    if last <= 0:
         return None
-    window = config.PAPER_GROWTH_DETECT_HOURS * HOUR_MS
-    recent = [b for b in bars15 if b.timestamp >= now_ms - window]
-    if len(recent) < 4:
+
+    struct = analyze_growth_swing_1h(klines.get("60") or [], now_ms, last)
+    if not struct.valid:
         return None
-    anchor_bar = min(recent, key=lambda b: b.low)
-    anchor = anchor_bar.low
-    peak_bar = max(recent, key=lambda b: b.high)
-    peak = peak_bar.high
-    last = float(state.last_price or bars15[-1].close)
-    if anchor <= 0 or last <= anchor:
+
+    anchor = struct.anchor_price
+    peak = struct.peak_price
+    if anchor <= 0 or peak <= 0 or last <= anchor:
         return None
     rally = (last / anchor - 1.0) * 100.0
     if rally < config.PAPER_GROWTH_MIN_RALLY_PCT:
-        return None
-    if (1 - last / peak) * 100.0 > config.PAPER_GROWTH_MAX_PULLBACK_PCT:
         return None
 
     vol_4h = sum(b.volume for b in state.bars_1m if b.timestamp >= now_ms - 4 * HOUR_MS)
@@ -173,31 +201,40 @@ def find_growth(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> Gro
 
     return GrowthInfo(
         anchor_price=anchor,
-        anchor_ts=anchor_bar.timestamp,
+        anchor_ts=struct.anchor_ts,
         rally_pct=rally,
         peak_price=peak,
-        peak_ts=peak_bar.timestamp,
+        peak_ts=struct.peak_ts,
         volume_ratio_4h=vol_ratio,
         buy_share_pct=buy_share,
     )
 
 
-def refresh_growth_peak(growth: GrowthInfo, state: SymbolState, now_ms: int) -> bool:
-    bars15 = merged_15m(state)
-    window = config.PAPER_GROWTH_DETECT_HOURS * HOUR_MS
-    recent = [b for b in bars15 if b.timestamp >= now_ms - window]
-    if not recent:
+def refresh_growth_peak(
+    growth: GrowthInfo,
+    state: SymbolState,
+    now_ms: int,
+    klines: dict[str, list[Bar]] | None = None,
+) -> bool:
+    klines = klines or {}
+    last = float(state.last_price or growth.peak_price)
+    struct = analyze_growth_swing_1h(klines.get("60") or [], now_ms, last)
+    if not struct.valid:
         return False
-    peak_bar = max(recent, key=lambda b: b.high)
-    peak = peak_bar.high
-    if peak > growth.peak_price + 1e-12:
-        growth.peak_price = peak
-        growth.peak_ts = peak_bar.timestamp
-        last = float(state.last_price or peak)
-        if growth.anchor_price > 0:
-            growth.rally_pct = (last / growth.anchor_price - 1.0) * 100.0
-        return True
-    return False
+    changed = False
+    if struct.peak_price > growth.peak_price + 1e-12:
+        growth.peak_price = struct.peak_price
+        growth.peak_ts = struct.peak_ts
+        changed = True
+    if struct.anchor_price > 0 and (
+        struct.anchor_ts > growth.anchor_ts or struct.anchor_price != growth.anchor_price
+    ):
+        growth.anchor_price = struct.anchor_price
+        growth.anchor_ts = struct.anchor_ts
+        changed = True
+    if growth.anchor_price > 0:
+        growth.rally_pct = (last / growth.anchor_price - 1.0) * 100.0
+    return changed
 
 
 def evaluate_growth(
@@ -211,6 +248,27 @@ def evaluate_growth(
     metrics: dict = {"growth": growth.to_data()}
     last = float(state.last_price or growth.peak_price)
     metrics["last_price"] = last
+
+    struct = analyze_growth_swing_1h(klines.get("60") or [], now_ms, last)
+    pullback_pct = pullback_pct_from_peak(growth.peak_price, last)
+    metrics["pullback_from_peak_pct"] = _r(pullback_pct, 2)
+    metrics["pullback_ok"] = pullback_entry_ok(pullback_pct)
+    metrics["swing_1h"] = struct.to_metrics() if struct.hh_chain else {}
+
+    checks["hh_structure_12h"] = _check(
+        struct.valid and struct.higher_lows_ok,
+        {
+            "hh_count": len(struct.hh_chain),
+            "higher_lows_ok": struct.higher_lows_ok,
+            "hh_hours_between": struct.hh_hours_between,
+        },
+        f"≥ {config.PAPER_GROWTH_MIN_HH_COUNT:g} HH за {config.PAPER_GROWTH_STRUCTURE_HOURS:g} ч",
+    )
+    checks["pullback_entry"] = _check(
+        pullback_entry_ok(pullback_pct),
+        _r(pullback_pct, 2),
+        f"{config.PAPER_GROWTH_PULLBACK_MIN_PCT:g}–{config.PAPER_GROWTH_PULLBACK_MAX_PCT:g}% от пика",
+    )
 
     points = state.oi_points()
     oi_1h = oi_change_pct(points, lookback_min=60) if len(points) >= 2 else None
@@ -273,6 +331,8 @@ def evaluate_growth(
     if len(bars_1h) >= 2:
         a, b = bars_1h[-2], bars_1h[-1]
         hh_hl = b.high > a.high and b.low > a.low
+    if struct.valid and len(struct.inter_lows) >= 1 and len(bars_1h) >= 1:
+        hh_hl = hh_hl or (bars_1h[-1].low > struct.inter_lows[-1])
     checks["hh_hl_1h"] = _check(
         hh_hl,
         {"prev_h": _r(bars_1h[-2].high if len(bars_1h) >= 2 else None, 6), "last_h": _r(bars_1h[-1].high if bars_1h else None, 6)},

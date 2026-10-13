@@ -384,7 +384,7 @@ class PaperStrategy:
             state = states.get(symbol)
             if state is None:
                 continue
-            if refresh_growth_peak(cand.growth, state, now_ms):
+            if refresh_growth_peak(cand.growth, state, now_ms, self.klines.get(symbol, {})):
                 cand.dirty = True
                 self.peak_snapshots[symbol] = (cand.growth.peak_price, cand.growth.peak_ts)
 
@@ -524,7 +524,7 @@ class PaperStrategy:
         for symbol, state in states.items():
             if symbol in self.growth_candidates or symbol in self.candidates or not state.last_price:
                 continue
-            growth = find_growth(state, self.tape.symbols.get(symbol), now_ms)
+            growth = find_growth(state, self.tape.symbols.get(symbol), now_ms, self.klines.get(symbol, {}))
             if growth is None:
                 continue
             cid = self.store.insert_candidate(
@@ -603,7 +603,7 @@ class PaperStrategy:
             if state is None or not state.last_price:
                 continue
             tape = self.tape.get(symbol)
-            growth = find_growth(state, tape, now_ms)
+            growth = find_growth(state, tape, now_ms, self.klines.get(symbol, {}))
             if growth is None:
                 self._end_growth_candidate(cand, "условия роста больше не выполняются", now_ms)
                 continue
