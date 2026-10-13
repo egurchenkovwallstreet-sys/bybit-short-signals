@@ -790,7 +790,7 @@
       paper.lines.push(paper.series.createPriceLine({ price: Number(value), color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
     };
     const r = item.row;
-    const p = ((item.ev || {}).metrics || {}).pump || r.pump || {};
+    const p = r.pump || ((item.ev || {}).metrics || {}).pump || {};
     add(p.peak_price || r.peak_price, "#f6d365", "пик");
     add(p.valley_price || r.valley_price, "#8d97a8", "дно");
     const tzOffset = -new Date().getTimezoneOffset() * 60;

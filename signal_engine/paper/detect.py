@@ -233,8 +233,8 @@ def _precise_peak_ts(state: SymbolState, bucket_ts: int, peak_price: float) -> i
     return best if best is not None else bucket_ts
 
 
-def find_pump(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> PumpInfo | None:
-    """Пик за время жизни кандидата и рост к нему из окон 4 ч / 24 ч / 7 д / 14 д."""
+def measure_pump_peak(state: SymbolState, now_ms: int) -> tuple[float, int] | None:
+    """Актуальный max(high) на 15m в окне жизни пампа — пересчёт на каждом скане."""
     bars15 = merged_15m(state)
     if len(bars15) < 8:
         return None
@@ -247,6 +247,35 @@ def find_pump(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> PumpI
     if peak <= 0:
         return None
     peak_ts = _precise_peak_ts(state, peak_bar.timestamp, peak)
+    return peak, peak_ts
+
+
+def apply_peak_measurement(pump: PumpInfo, state: SymbolState, now_ms: int) -> bool:
+    """Поднять peak_price/peak_ts, если на свечах появился новый хай. True если изменилось."""
+    measured = measure_pump_peak(state, now_ms)
+    if measured is None:
+        return False
+    peak, peak_ts = measured
+    changed = False
+    if peak > pump.peak_price + 1e-12:
+        pump.peak_price = peak
+        pump.peak_ts = peak_ts
+        changed = True
+    elif abs(peak - pump.peak_price) <= pump.peak_price * 1e-9 and peak_ts > pump.peak_ts:
+        pump.peak_ts = peak_ts
+        changed = True
+    return changed
+
+
+def find_pump(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> PumpInfo | None:
+    """Пик за время жизни кандидата и рост к нему из окон 4 ч / 24 ч / 7 д / 14 д."""
+    bars15 = merged_15m(state)
+    if len(bars15) < 8:
+        return None
+    measured = measure_pump_peak(state, now_ms)
+    if measured is None:
+        return None
+    peak, peak_ts = measured
     last = state.last_price or bars15[-1].close
     if last <= 0 or (1 - last / peak) * 100.0 > config.PAPER_MAX_DRAWDOWN_FROM_PEAK_PCT:
         return None

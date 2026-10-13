@@ -44,6 +44,24 @@ def price_for_roe(entry: float, roe: float, leverage: int | None = None) -> floa
     return entry * (1.0 - roe / (100.0 * lev))
 
 
+def net_roe_stop_price(
+    entry: float,
+    margin: float,
+    roe_pct: float,
+    leverage: int | None = None,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """Цена выхода шорта с заданным net ROE (% от маржи)."""
+    lev = leverage or config.PAPER_LEVERAGE
+    if entry <= 0 or margin <= 0:
+        return entry
+    qty = margin * lev / entry
+    fee = config.PAPER_FEE_RATE_TAKER
+    target_pnl = margin * roe_pct / 100.0
+    return (entry * qty - entry_fee + funding_paid - target_pnl) / (qty * (1.0 + fee))
+
+
 def net_breakeven_stop_price(
     entry: float,
     margin: float,
@@ -106,6 +124,7 @@ class Position:
     next_funding_ts: int | None = None
     last_price: float = 0.0
     peak_gap_roe: float = 0.0
+    loss_cap_armed: bool = False
 
     def __post_init__(self) -> None:
         if self.best_price <= 0:
@@ -117,20 +136,33 @@ class Position:
         if self.entry_fee <= 0:
             self.entry_fee = self.notional * config.PAPER_FEE_RATE_TAKER
         if self.stop_price <= 0:
-            self.stop_price = min(
-                self.liq_price,
-                trail_stop(
-                    self.entry_price,
-                    self.best_price,
-                    self.leverage,
-                    self.peak_gap_roe,
-                    margin=self.margin,
-                    entry_fee=self.entry_fee,
-                    funding_paid=self.funding_paid,
-                ),
-            )
+            self._sync_stop(self.last_price if self.last_price > 0 else self.entry_price)
         if self.last_price <= 0:
             self.last_price = self.entry_price
+
+    def _sync_stop(self, last: float) -> None:
+        trail = trail_stop(
+            self.entry_price,
+            self.best_price,
+            self.leverage,
+            self.peak_gap_roe,
+            margin=self.margin,
+            entry_fee=self.entry_fee,
+            funding_paid=self.funding_paid,
+        )
+        stop = min(self.liq_price, trail)
+        if self.loss_cap_armed or self.gross_pnl(last) < 0:
+            self.loss_cap_armed = True
+            cap = net_roe_stop_price(
+                self.entry_price,
+                self.margin,
+                config.PAPER_LOSS_CAP_ROE,
+                self.leverage,
+                self.entry_fee,
+                self.funding_paid,
+            )
+            stop = min(stop, cap)
+        self.stop_price = stop
 
     @property
     def notional(self) -> float:
@@ -177,22 +209,13 @@ class Position:
             self.worst_price = max(self.worst_price, min(high, self.stop_price))
             return "trailing_stop"
         self.worst_price = max(self.worst_price, high)
-        if low < self.best_price:
+        best_changed = low < self.best_price
+        if best_changed:
             self.best_price = low
-            self.stop_price = min(
-                self.liq_price,
-                trail_stop(
-                    self.entry_price,
-                    low,
-                    self.leverage,
-                    self.peak_gap_roe,
-                    margin=self.margin,
-                    entry_fee=self.entry_fee,
-                    funding_paid=self.funding_paid,
-                ),
-            )
-            if last >= self.stop_price:
-                return "trailing_stop"
+        prev_stop = self.stop_price
+        self._sync_stop(last)
+        if self.stop_price < prev_stop - 1e-12 and last >= self.stop_price:
+            return "trailing_stop"
         return None
 
     def close_result(self, reason: str) -> dict:

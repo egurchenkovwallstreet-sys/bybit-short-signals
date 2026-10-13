@@ -23,13 +23,15 @@ from signal_engine.paper.detect import (
     MANDATORY,
     VARIANT_LABELS,
     PumpInfo,
+    apply_peak_measurement,
     btc_change_4h,
     evaluate,
     find_pump,
     grade_for,
+    measure_pump_peak,
     paper_entry_blocks,
 )
-from signal_engine.paper.position import Position, trail_stop
+from signal_engine.paper.position import Position
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.tape import TapeBook, minute_start
 from signal_engine.state import Bar, SymbolState
@@ -97,6 +99,7 @@ class PaperStrategy:
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
+        self.peak_snapshots: dict[str, tuple[float, int]] = {}
         self.started_ms = int(time.time() * 1000)
         self._next_detect = 0
         self._next_persist = 0
@@ -144,18 +147,7 @@ class PaperStrategy:
                 peak_gap_roe=gap,
             )
             # Стоп по правилу варианта: t20 — BE/лок/трейл 20, p10 — пик − gap.
-            pos.stop_price = min(
-                pos.liq_price,
-                trail_stop(
-                    pos.entry_price,
-                    pos.best_price,
-                    pos.leverage,
-                    gap,
-                    margin=pos.margin,
-                    entry_fee=pos.entry_fee,
-                    funding_paid=pos.funding_paid,
-                ),
-            )
+            pos._sync_stop(float(row["last_price"] or row["entry_price"]))
             self.trades[(variant, row["symbol"])] = OpenTrade(
                 id=int(row["id"]),
                 variant=variant,
@@ -190,6 +182,15 @@ class PaperStrategy:
                 last_trade_id=row["trade_id"],
                 dirty=False,
             )
+            if pump.peak_price > 0:
+                self.peak_snapshots[row["symbol"]] = (pump.peak_price, pump.peak_ts)
+        for row in self.store.open_trades():
+            sym = str(row["symbol"])
+            if sym not in self.peak_snapshots:
+                entry = _loads(row["entry_json"]) or {}
+                ep = ((entry.get("metrics") or {}).get("pump") or {})
+                if ep.get("peak_price"):
+                    self.peak_snapshots[sym] = (float(ep["peak_price"]), int(ep.get("peak_ts") or 0))
         for row in self.store.open_shadows():
             pos = Position(
                 symbol=row["symbol"],
@@ -265,6 +266,7 @@ class PaperStrategy:
 
     def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
+        self._refresh_peaks(states, now_ms)
         self._update_trades(states, now_ms)
         self._update_shadows(states, now_ms)
         if now_ms >= self._next_detect:
@@ -308,6 +310,25 @@ class PaperStrategy:
         self.store.add_equity(
             variant, now_ms, self.balances[variant], self.equity(variant), len(self._variant_trades(variant))
         )
+
+    def _refresh_peaks(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        symbols = set(self.candidates.keys())
+        for trade in self.trades.values():
+            symbols.add(trade.symbol)
+        for symbol in symbols:
+            state = states.get(symbol)
+            if state is None:
+                continue
+            measured = measure_pump_peak(state, now_ms)
+            if measured is None:
+                continue
+            peak, peak_ts = measured
+            prev = self.peak_snapshots.get(symbol)
+            if prev is None or peak >= prev[0] - 1e-12:
+                self.peak_snapshots[symbol] = (peak, peak_ts)
+            cand = self.candidates.get(symbol)
+            if cand is not None and apply_peak_measurement(cand.pump, state, now_ms):
+                cand.dirty = True
 
     def _update_trades(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for trade in list(self.trades.values()):
@@ -740,7 +761,11 @@ class PaperStrategy:
     def _trade_view(self, trade: OpenTrade, now_ms: int) -> dict:
         pos = trade.pos
         price = pos.last_price
-        pump = (trade.entry.get("metrics") or {}).get("pump") or {}
+        pump = dict((trade.entry.get("metrics") or {}).get("pump") or {})
+        live = self.peak_snapshots.get(trade.symbol)
+        if live:
+            pump["peak_price"] = live[0]
+            pump["peak_ts"] = live[1]
         return {
             "id": trade.id,
             "variant": trade.variant,

@@ -190,6 +190,8 @@ PAPER_BE_ARM_ROE = _env_float("PAPER_BE_ARM_ROE", 2.0)
 PAPER_LOCK_ARM_ROE = _env_float("PAPER_LOCK_ARM_ROE", 7.0)
 PAPER_LOCK_MIN_ROE = _env_float("PAPER_LOCK_MIN_ROE", 5.0)
 PAPER_TRAIL_GAP_ROE = _env_float("PAPER_TRAIL_GAP_ROE", 20.0)
+# Доп. стоп: после ухода в минус net ROE — не хуже этого уровня (оба варианта).
+PAPER_LOSS_CAP_ROE = _env_float("PAPER_LOSS_CAP_ROE", -15.0)
 
 # Памп: короткий (окно до 4 ч / 24 ч по 15m), длинный (7 д / 14 д по 4H).
 PAPER_SHORT_4H_MIN_PCT = _env_float("PAPER_SHORT_4H_MIN_PCT", 30.0)
