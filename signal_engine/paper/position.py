@@ -175,6 +175,30 @@ def css_trail_stop(
     return min(be, price_for_roe(entry, lock_roe, lev))
 
 
+def css2_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+    scaled_half: bool = False,
+) -> float:
+    """Курсор СС 2: стоп −60% ROE, с +50% ROE — вход, после половины — лок +50% ROE."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    initial = net_roe_stop_price(
+        entry, margin, config.PAPER_CSS2_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    if scaled_half:
+        locked = price_for_roe(entry, config.PAPER_CSS2_LOCK_ROE, lev)
+        return min(initial, locked)
+    if peak < config.PAPER_CSS2_BE_ARM_ROE:
+        return initial
+    return min(initial, net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid))
+
+
 def sc10_trail_stop(
     entry: float,
     best_price: float,
@@ -309,6 +333,7 @@ class Position:
     loss_cap_armed: bool = False
     side: str = "short"
     stop_style: str = "default"
+    scaled_half: bool = False
 
     def __post_init__(self) -> None:
         if self.best_price <= 0:
@@ -329,6 +354,18 @@ class Position:
             self.last_price = self.entry_price
 
     def _sync_stop(self, last: float) -> None:
+        if self.stop_style == "css2":
+            trail = css2_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+                scaled_half=self.scaled_half,
+            )
+            self.stop_price = min(self.liq_price, trail)
+            return
         if self.stop_style == "css":
             trail = css_trail_stop(
                 self.entry_price,
@@ -431,6 +468,23 @@ class Position:
         if self.side == "long":
             return long_roe_pct(self.entry_price, self.worst_price, self.leverage)
         return roe_pct(self.entry_price, self.worst_price, self.leverage)
+
+    def realize_half(self, price: float) -> float:
+        """Закрыть половину шорта по цене. Маржа и комиссия входа делятся пополам."""
+        if self.scaled_half or self.side != "short" or price <= 0 or self.margin <= 0:
+            return 0.0
+        fraction = 0.5
+        gross = (self.entry_price - price) * self.qty * fraction
+        exit_fee = self.qty * fraction * price * config.PAPER_FEE_RATE_TAKER
+        entry_part = self.entry_fee * fraction
+        funding_part = self.funding_paid * fraction
+        pnl = gross - entry_part - exit_fee + funding_part
+        self.entry_fee -= entry_part
+        self.funding_paid -= funding_part
+        self.margin *= 1.0 - fraction
+        self.scaled_half = True
+        self._sync_stop(price)
+        return pnl
 
     def apply_funding(self, now_ms: int, rate: float | None, price: float) -> float:
         """Funding: шорт получает при rate>0, лонг платит."""

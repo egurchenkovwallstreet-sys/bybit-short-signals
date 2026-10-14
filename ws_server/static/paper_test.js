@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623", sc10: "#00c2c7", e5s: "#ff6b8a" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -82,6 +82,9 @@
     if (p.kind === "growth" || p.anchor_price !== undefined) {
       return `Рост: +${num(p.rally_pct ?? p.growth_pct, 1)}% от ${price(p.anchor_price ?? p.valley_price)}`;
     }
+    if (p.kind === "css2") {
+      return `Курсор СС 2: +${num(p.growth_pct, 1)}% от ${price(p.valley_price)} → ${price(p.peak_price)}`;
+    }
     if (p.kind === "css" || p.trigger === "fast") {
       return `Cursor SS: +${num(p.growth_pct, 1)}% от ${price(p.valley_price)} → ${price(p.peak_price)}`;
     }
@@ -95,6 +98,7 @@
     if (!paper.data) return {};
     if (paper.variant === "lt20") return paper.data.growth_check_labels || {};
     if (paper.variant === "css") return paper.data.css_check_labels || {};
+    if (paper.variant === "css2") return paper.data.css2_check_labels || {};
     if (paper.variant === "sc10") return paper.data.sc10_check_labels || {};
     if (paper.variant === "e5s") return paper.data.e5s_check_labels || {};
     return paper.data.check_labels || {};
@@ -103,12 +107,13 @@
     if (!paper.data) return [];
     if (paper.variant === "lt20") return paper.data.growth_mandatory || [];
     if (paper.variant === "css") return paper.data.css_mandatory || [];
+    if (paper.variant === "css2") return paper.data.css2_mandatory || [];
     if (paper.variant === "sc10") return paper.data.sc10_mandatory || [];
     if (paper.variant === "e5s") return paper.data.e5s_mandatory || [];
     return paper.data.mandatory || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css", "sc10", "e5s"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css", "css2", "sc10", "e5s"];
   }
   function candEval(r) {
     const ev = (r && r.eval) || {};
@@ -118,9 +123,10 @@
   function candidateRows() {
     const rows = (paper.data && paper.data.candidates) || [];
     if (paper.variant === "css") return rows.filter((r) => r.episode === "css");
+    if (paper.variant === "css2") return rows.filter((r) => r.episode === "css2");
     if (paper.variant === "lt20") return rows.filter((r) => r.episode === "growth");
     if (paper.variant === "sc10") return [];
-    return rows.filter((r) => r.episode !== "css" && r.episode !== "sc10" && r.episode !== "growth");
+    return rows.filter((r) => r.episode !== "css" && r.episode !== "css2" && r.episode !== "sc10" && r.episode !== "growth");
   }
   function vlabel(v) {
     return ((paper.data && paper.data.variant_labels) || {})[v] || v;

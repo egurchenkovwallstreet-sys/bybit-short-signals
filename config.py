@@ -257,13 +257,15 @@ PAPER_STRONG_TOP_MIN_BARS_1H = _env_int("PAPER_STRONG_TOP_MIN_BARS_1H", 5)
 PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 
 # Бумажные варианты: шорты t20/p10 (шлюз + 5 из 9), лонг lt20 (детектор роста),
-# шорт Cursor SS (css) — свой детектор, шорт e5s — тот же поиск пампа, вход по EMA50 5м.
+# шорт Cursor SS (css) — свой детектор, Курсор СС 2 (css2) — вход по развороту
+# лаборатории, шорт e5s — тот же поиск пампа, вход по EMA50 5м.
 PAPER_SHORT_VARIANTS = ("t20", "p10")
-PAPER_VARIANTS = ("t20", "p10", "lt20", "css", "sc10", "e5s")
+PAPER_VARIANTS = ("t20", "p10", "lt20", "css", "css2", "sc10", "e5s")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_LT20_VARIANT = "lt20"
 PAPER_CSS_VARIANT = "css"
+PAPER_CSS2_VARIANT = "css2"
 PAPER_SC10_VARIANT = "sc10"
 PAPER_E5S_VARIANT = "e5s"
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
@@ -287,6 +289,8 @@ def paper_is_long(variant: str) -> bool:
 def paper_stop_style(variant: str) -> str:
     if variant == PAPER_CSS_VARIANT:
         return "css"
+    if variant == PAPER_CSS2_VARIANT:
+        return "css2"
     if variant == PAPER_SC10_VARIANT:
         return "sc10"
     if variant == PAPER_E5S_VARIANT:
@@ -340,6 +344,30 @@ PAPER_CSS_INITIAL_STOP_ROE = _env_float("PAPER_CSS_INITIAL_STOP_ROE", -15.0)
 PAPER_CSS_BE_ARM_ROE = _env_float("PAPER_CSS_BE_ARM_ROE", 10.0)
 PAPER_CSS_TRAIL_GAP_ROE = _env_float("PAPER_CSS_TRAIL_GAP_ROE", 20.0)
 PAPER_CSS_MAX_ENTRIES = _env_int("PAPER_CSS_MAX_ENTRIES", 3)
+
+# Курсор СС 2: быстрый памп ≥40% за ≤6 ч, вход на откате 5–8% после разворота.
+PAPER_CSS2_MIN_GROWTH_PCT = _env_float("PAPER_CSS2_MIN_GROWTH_PCT", 40.0)
+PAPER_CSS2_MAX_LEG_HOURS = _env_float("PAPER_CSS2_MAX_LEG_HOURS", 6.0)
+PAPER_CSS2_LOOKBACK_HOURS = _env_float("PAPER_CSS2_LOOKBACK_HOURS", 12.0)
+PAPER_CSS2_MIN_TURNOVER_USDT = _env_float("PAPER_CSS2_MIN_TURNOVER_USDT", 1_000_000.0)
+PAPER_CSS2_SINCE_PEAK_MIN = _env_float("PAPER_CSS2_SINCE_PEAK_MIN", 20.0)
+PAPER_CSS2_SINCE_PEAK_MAX = _env_float("PAPER_CSS2_SINCE_PEAK_MAX", 180.0)
+PAPER_CSS2_DD_MIN_PCT = _env_float("PAPER_CSS2_DD_MIN_PCT", 5.0)
+PAPER_CSS2_DD_MAX_PCT = _env_float("PAPER_CSS2_DD_MAX_PCT", 8.0)
+PAPER_CSS2_WATCH_MAX_DD_PCT = _env_float("PAPER_CSS2_WATCH_MAX_DD_PCT", 25.0)
+PAPER_CSS2_LATE_MIN = _env_float("PAPER_CSS2_LATE_MIN", 60.0)
+PAPER_CSS2_MEGAVOL_RATIO = _env_float("PAPER_CSS2_MEGAVOL_RATIO", 80.0)
+PAPER_CSS2_BUY_SHARE_5M_MAX = _env_float("PAPER_CSS2_BUY_SHARE_5M_MAX", 45.0)
+PAPER_CSS2_SELL_SHARE_MIN_PCT = _env_float("PAPER_CSS2_SELL_SHARE_MIN_PCT", 50.0)
+PAPER_CSS2_OI_1H_MAX_PCT = _env_float("PAPER_CSS2_OI_1H_MAX_PCT", 1.0)
+PAPER_CSS2_SHORT_LIQ_MAX_RATIO = _env_float("PAPER_CSS2_SHORT_LIQ_MAX_RATIO", 0.15)
+PAPER_CSS2_STOP_ROE = _env_float("PAPER_CSS2_STOP_ROE", -60.0)
+PAPER_CSS2_BE_ARM_ROE = _env_float("PAPER_CSS2_BE_ARM_ROE", 50.0)
+PAPER_CSS2_HALF_DD_PCT = _env_float("PAPER_CSS2_HALF_DD_PCT", 15.0)
+PAPER_CSS2_TARGET_DD_PCT = _env_float("PAPER_CSS2_TARGET_DD_PCT", 20.0)
+PAPER_CSS2_LOCK_ROE = _env_float("PAPER_CSS2_LOCK_ROE", 50.0)
+PAPER_CSS2_TIME_FLAT_MIN = _env_float("PAPER_CSS2_TIME_FLAT_MIN", 120.0)
+PAPER_CSS2_TIME_FLAT_BAND_PCT = _env_float("PAPER_CSS2_TIME_FLAT_BAND_PCT", 2.0)
 
 # Скальп sc10: старт хода 1м, лонг и шорт, трейл 10% ROE с входа.
 PAPER_SC10_RANGE_BARS = _env_int("PAPER_SC10_RANGE_BARS", 15)

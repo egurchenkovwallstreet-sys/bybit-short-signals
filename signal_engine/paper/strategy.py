@@ -40,6 +40,16 @@ from signal_engine.paper.css_detect import (
     find_css_pump,
     refresh_css_peak,
 )
+from signal_engine.paper.css2_detect import (
+    CSS2_CHECK_LABELS,
+    CSS2_MANDATORY,
+    Css2Evaluation,
+    Css2PumpInfo,
+    closed_15m_above_peak,
+    evaluate_css2,
+    find_css2_pump,
+    peak_on_open_15m,
+)
 from signal_engine.paper.sc10_detect import (
     SC10_CHECK_LABELS,
     SC10_MANDATORY,
@@ -125,6 +135,23 @@ class CssCandidate:
 
 
 @dataclass
+class Css2Candidate:
+    id: int
+    symbol: str
+    pump: Css2PumpInfo
+    started_at: int
+    scans: int = 0
+    fail_counts: dict[str, int] = field(default_factory=dict)
+    best_passed: int = 0
+    last_eval: dict | None = None
+    entered: list[str] = field(default_factory=list)
+    last_trade_id: int | None = None
+    note: str | None = None
+    dirty: bool = True
+    entries_used: int = 0
+
+
+@dataclass
 class Candidate:
     id: int
     symbol: str
@@ -162,6 +189,8 @@ class PaperStrategy:
         self.candidates: dict[str, Candidate] = {}
         self.growth_candidates: dict[str, GrowthCandidate] = {}
         self.css_candidates: dict[str, CssCandidate] = {}
+        self.css2_candidates: dict[str, Css2Candidate] = {}
+        self.css2_blocked: dict[str, int] = {}
         self._sc10_used_bars: dict[str, int] = {}
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
@@ -182,6 +211,9 @@ class PaperStrategy:
         self.store.open()
         now = int(time.time() * 1000)
         self.started_ms = now
+        blocked = _loads(self.store.get_kv("css2_blocked")) or {}
+        if isinstance(blocked, dict):
+            self.css2_blocked = {str(k): int(v) for k, v in blocked.items() if v}
         if self.store.get_kv("started_at") is None:
             self.store.set_kv("started_at", str(now))
         for variant in VARIANTS:
@@ -216,6 +248,7 @@ class PaperStrategy:
                 peak_gap_roe=gap,
                 side=side,
                 stop_style=config.paper_stop_style(variant),
+                scaled_half=bool((_loads(row["entry_json"]) or {}).get("css2_half")),
             )
             # Стоп по правилу варианта: t20 — +0.5% net/лок/трейл 20, p10 — +0.5% net и пик − gap.
             pos._sync_stop(float(row["last_price"] or row["entry_price"]))
@@ -257,6 +290,26 @@ class PaperStrategy:
                     self.peak_snapshots[row["symbol"]] = (growth.peak_price, growth.peak_ts)
                 continue
             if str(row["kind"] or "") == "sc10":
+                continue
+            if str(row["kind"] or "") == "css2":
+                pump = _css2_from_row(row)
+                css2_state = (_loads(row["last_eval"]) or {}).get("css2_state") or {}
+                self.css2_candidates[row["symbol"]] = Css2Candidate(
+                    id=int(row["id"]),
+                    symbol=row["symbol"],
+                    pump=pump,
+                    started_at=int(row["started_at"]),
+                    scans=int(row["scans"] or 0),
+                    fail_counts=_loads(row["fail_counts"]) or {},
+                    best_passed=int(row["best_passed"] or 0),
+                    last_eval=_loads(row["last_eval"]) or None,
+                    entered=_loads_list(row["variants"]),
+                    last_trade_id=row["trade_id"],
+                    dirty=False,
+                    entries_used=int(css2_state.get("entries_used") or 0),
+                )
+                if pump.peak_price > 0:
+                    self.peak_snapshots[row["symbol"]] = (pump.peak_price, pump.peak_ts)
                 continue
             if str(row["kind"] or "") == "css":
                 pump = _css_from_row(row)
@@ -344,12 +397,13 @@ class PaperStrategy:
         )
         self._opened = True
         log.info(
-            "Тест стратегии: балансы %s, открытых %s, кандидатов %s, роста %s, Cursor SS %s, теневых %s",
+            "Тест стратегии: балансы %s, открытых %s, кандидатов %s, роста %s, Cursor SS %s, СС 2 %s, теневых %s",
             ", ".join(f"{v} {self.balances[v]:.2f}" for v in VARIANTS),
             len(self.trades),
             len(self.candidates),
             len(self.growth_candidates),
             len(self.css_candidates),
+            len(self.css2_candidates),
             len(self.shadows),
         )
 
@@ -366,7 +420,12 @@ class PaperStrategy:
         self.tape.ingest(message)
 
     def kline_wanted(self) -> list[str]:
-        return sorted(set(self.candidates) | set(self.growth_candidates) | set(self.css_candidates))
+        return sorted(
+            set(self.candidates)
+            | set(self.growth_candidates)
+            | set(self.css_candidates)
+            | set(self.css2_candidates)
+        )
 
     def on_klines(self, symbol: str, interval: str, candles: list[dict]) -> None:
         bars = []
@@ -401,10 +460,12 @@ class PaperStrategy:
             self._detect(states, now_ms)
             self._detect_growth(states, now_ms)
             self._detect_css(states, now_ms)
+            self._detect_css2(states, now_ms)
             self._next_detect = now_ms + config.PAPER_DETECT_INTERVAL_SEC * 1000
         self._evaluate(states, btc_4h, now_ms)
         self._evaluate_growth(states, now_ms)
         self._evaluate_css(states, now_ms)
+        self._evaluate_css2(states, btc_state=states.get(config.PAPER_BTC_SYMBOL), now_ms=now_ms)
         self._evaluate_sc10(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
@@ -498,6 +559,11 @@ class PaperStrategy:
             low, high, last = _price_range(state, trade.last_check)
             trade.last_check = now_ms
             self._funding(pos, trade.symbol, state, now_ms)
+            if trade.variant == config.PAPER_CSS2_VARIANT and high < pos.stop_price and high < pos.liq_price:
+                managed = self._css2_favorable(trade, state, low, last, now_ms)
+                if managed:
+                    self._close_trade(trade, managed, state, now_ms)
+                    continue
             reason = pos.update(low, high, last)
             if reason:
                 self._close_trade(trade, reason, state, now_ms)
@@ -556,6 +622,8 @@ class PaperStrategy:
         self._next_analytics = 0
         if variant == config.PAPER_CSS_VARIANT:
             self._on_css_trade_closed(trade, pos, now_ms)
+        if variant == config.PAPER_CSS2_VARIANT:
+            self._on_css2_trade_closed(trade, now_ms)
         log.info(
             "Тест [%s]: закрыт шорт %s (%s), P&L %+.2f USD (%+.1f%%), баланс %.2f",
             variant,
@@ -1015,6 +1083,240 @@ class PaperStrategy:
         self.store.update_candidate(cand.id, fields)
         self.css_candidates.pop(cand.symbol, None)
 
+    def _detect_css2(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        for symbol, state in states.items():
+            if symbol in self.css2_candidates or not state.last_price:
+                continue
+            pump = find_css2_pump(state, now_ms)
+            if pump is None:
+                continue
+            blocked = self.css2_blocked.get(symbol, 0)
+            if blocked and pump.valley_ts <= blocked:
+                continue
+            cid = self.store.insert_candidate(
+                {
+                    "symbol": symbol,
+                    "kind": "css2",
+                    "status": "watching",
+                    "started_at": now_ms,
+                    "updated_at": now_ms,
+                    **_css2_fields(pump),
+                    "fail_counts": {},
+                }
+            )
+            self.css2_candidates[symbol] = Css2Candidate(id=cid, symbol=symbol, pump=pump, started_at=now_ms)
+            log.info("Тест: кандидат Курсор СС 2 %s — быстрый памп +%.1f%%", symbol, pump.growth_pct)
+
+    def _evaluate_css2(self, states: dict[str, SymbolState], btc_state: SymbolState | None, now_ms: int) -> None:
+        variant = config.PAPER_CSS2_VARIANT
+        for symbol, cand in list(self.css2_candidates.items()):
+            state = states.get(symbol)
+            if state is None or not state.last_price:
+                continue
+            if (variant, symbol) in self.trades:
+                continue
+            pump = find_css2_pump(state, now_ms)
+            if pump is None or pump.valley_ts != cand.pump.valley_ts:
+                last = float(state.last_price or 0)
+                dd = (1.0 - last / cand.pump.peak_price) * 100.0 if cand.pump.peak_price > 0 and last > 0 else 0.0
+                since = (now_ms - cand.pump.peak_ts) / 60_000
+                if dd > config.PAPER_CSS2_WATCH_MAX_DD_PCT or since > config.PAPER_CSS2_SINCE_PEAK_MAX:
+                    self._end_css2_candidate(cand, "окно Курсор СС 2 закрыто", now_ms)
+                continue
+            if pump.peak_price > cand.pump.peak_price:
+                cand.pump = pump
+                cand.dirty = True
+            else:
+                cand.pump.growth_pct = pump.growth_pct
+                cand.pump.volume_ratio = pump.volume_ratio
+            tape = self.tape.symbols.get(symbol)
+            ev = evaluate_css2(state, tape, btc_state, cand.pump, self.klines.get(symbol, {}), now_ms)
+            cand.scans += 1
+            cand.best_passed = max(cand.best_passed, ev.passed_count)
+            for key in ev.failed:
+                cand.fail_counts[key] = cand.fail_counts.get(key, 0) + 1
+            cand.last_eval = _css2_eval_with_state(ev.to_data(), cand)
+            cand.dirty = True
+            if cand.entries_used >= 1:
+                continue
+            if not ev.passed:
+                cand.note = None
+                continue
+            balance = self.balances[variant]
+            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+            if margin <= 0 or balance - self.used_margin(variant) < margin:
+                cand.note = "нет свободной маржи"
+                continue
+            self._open_css2_trade(cand, state, ev, margin, now_ms)
+
+    def _open_css2_trade(
+        self, cand: Css2Candidate, state: SymbolState, ev: Css2Evaluation, margin: float, now_ms: int
+    ) -> None:
+        variant = config.PAPER_CSS2_VARIANT
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(cand.symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=cand.symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            stop_style="css2",
+        )
+        entry = _css2_eval_with_state(ev.to_data(), cand)
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": cand.symbol,
+                "variant": variant,
+                "candidate_id": cand.id,
+                "kind": "css2",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": ev.score,
+                "grade": grade_for(ev.score),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, cand.symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=cand.symbol,
+            kind="css2",
+            pos=pos,
+            score=ev.score,
+            grade=grade_for(ev.score),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=cand.id,
+            last_check=now_ms,
+        )
+        cand.entries_used = 1
+        if variant not in cand.entered:
+            cand.entered.append(variant)
+        cand.last_trade_id = trade_id
+        cand.dirty = True
+        cand.note = "вход 1/1"
+        cand.last_eval = _css2_eval_with_state(ev.to_data(), cand)
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт шорт %s по %s, маржа %.2f USD, стоп −60%% ROE",
+            variant,
+            cand.symbol,
+            price,
+            margin,
+        )
+
+    def _css2_peak(self, trade: OpenTrade) -> float:
+        pump = ((trade.entry.get("metrics") or {}).get("pump") or {})
+        return float(pump.get("peak_price") or 0)
+
+    def _css2_favorable(
+        self, trade: OpenTrade, state: SymbolState, low: float, last: float, now_ms: int
+    ) -> str | None:
+        """Цели и плоский выход. Стоп уже не задет в этом тике."""
+        pos = trade.pos
+        peak = self._css2_peak(trade)
+        if peak <= 0 or low <= 0:
+            return None
+        if closed_15m_above_peak(state, peak, pos.opened_at, now_ms) or peak_on_open_15m(state, peak, now_ms):
+            pos.stop_price = last
+            pos.last_price = last
+            return "peak_reclaimed"
+        target = peak * (1.0 - config.PAPER_CSS2_TARGET_DD_PCT / 100.0)
+        if low <= target:
+            pos.stop_price = target
+            pos.last_price = target
+            if low < pos.best_price:
+                pos.best_price = low
+            return "target_20"
+        half = peak * (1.0 - config.PAPER_CSS2_HALF_DD_PCT / 100.0)
+        if not pos.scaled_half and low <= half:
+            pnl = pos.realize_half(half)
+            self.balances[trade.variant] += pnl
+            self.store.set_kv(f"balance:{trade.variant}", str(self.balances[trade.variant]))
+            trade.entry["css2_half"] = True
+            self.store.update_trade(
+                trade.id,
+                {
+                    "margin": pos.margin,
+                    "notional": pos.notional,
+                    "qty": pos.qty,
+                    "entry_fee": pos.entry_fee,
+                    "funding_paid": pos.funding_paid,
+                    "stop_price": pos.stop_price,
+                    "best_price": min(pos.best_price, half),
+                    "entry_json": trade.entry,
+                },
+            )
+            log.info(
+                "Тест [%s]: %s половина на откате %.0f%%, P&L %+.2f USD",
+                trade.variant,
+                trade.symbol,
+                config.PAPER_CSS2_HALF_DD_PCT,
+                pnl,
+            )
+        age_min = (now_ms - pos.opened_at) / 60_000
+        band = abs(last / pos.entry_price - 1.0) * 100.0
+        no_new_low = low >= pos.entry_price * 0.999 and pos.best_price >= pos.entry_price * 0.999
+        if (
+            age_min >= config.PAPER_CSS2_TIME_FLAT_MIN
+            and band <= config.PAPER_CSS2_TIME_FLAT_BAND_PCT
+            and no_new_low
+        ):
+            pos.stop_price = last
+            pos.last_price = last
+            return "time_flat"
+        return None
+
+    def _on_css2_trade_closed(self, trade: OpenTrade, now_ms: int) -> None:
+        cand = self.css2_candidates.get(trade.symbol)
+        valley = 0
+        if cand is not None:
+            valley = cand.pump.valley_ts
+            self._end_css2_candidate(cand, "Курсор СС 2: один вход на долину", now_ms)
+        else:
+            pump = ((trade.entry.get("metrics") or {}).get("pump") or {})
+            valley = int(pump.get("valley_ts") or 0)
+        if valley:
+            self.css2_blocked[trade.symbol] = max(self.css2_blocked.get(trade.symbol, 0), valley)
+            self.store.set_kv("css2_blocked", json.dumps(self.css2_blocked))
+
+    def _end_css2_candidate(self, cand: Css2Candidate, reason: str, now_ms: int) -> None:
+        status = "entered" if cand.entered else "expired"
+        self.store.update_candidate(
+            cand.id,
+            {
+                "status": status,
+                "ended_at": now_ms,
+                "end_reason": reason,
+                "updated_at": now_ms,
+                "scans": cand.scans,
+                "fail_counts": cand.fail_counts,
+                "best_passed": cand.best_passed,
+                "last_eval": _css2_eval_with_state(cand.last_eval or {}, cand),
+                "variants": cand.entered,
+                "trade_id": cand.last_trade_id,
+                **_css2_fields(cand.pump),
+            },
+        )
+        self.css2_candidates.pop(cand.symbol, None)
+
     def _evaluate_sc10(self, states: dict[str, SymbolState], now_ms: int) -> None:
         variant = config.PAPER_SC10_VARIANT
         btc = states.get(config.PAPER_BTC_SYMBOL)
@@ -1317,6 +1619,24 @@ class PaperStrategy:
                 commit=False,
             )
             cand.dirty = False
+        for cand in self.css2_candidates.values():
+            if not cand.dirty:
+                continue
+            self.store.update_candidate(
+                cand.id,
+                {
+                    "updated_at": now_ms,
+                    "scans": cand.scans,
+                    "fail_counts": cand.fail_counts,
+                    "best_passed": cand.best_passed,
+                    "last_eval": _css2_eval_with_state(cand.last_eval or {}, cand),
+                    "variants": cand.entered,
+                    "trade_id": cand.last_trade_id,
+                    **_css2_fields(cand.pump),
+                },
+                commit=False,
+            )
+            cand.dirty = False
         for shadow in self.shadows.values():
             self.store.update_candidate(
                 shadow.candidate_id,
@@ -1383,6 +1703,10 @@ class PaperStrategy:
             self.css_candidates.values(),
             key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.pump.growth_pct),
         )
+        c2cands = sorted(
+            self.css2_candidates.values(),
+            key=lambda c: (-((c.last_eval or {}).get("passed_count") or 0), -c.pump.growth_pct),
+        )
         accounts = {}
         for variant in VARIANTS:
             used = self.used_margin(variant)
@@ -1404,7 +1728,8 @@ class PaperStrategy:
                 "accounts": accounts,
                 "candidates": len(self.candidates)
                 + len(self.growth_candidates)
-                + len(self.css_candidates),
+                + len(self.css_candidates)
+                + len(self.css2_candidates),
                 "shadows_open": len(self.shadows),
                 "btc_4h_pct": _r(btc_4h),
                 "btc_strict": btc_4h is not None and btc_4h >= config.PAPER_BTC_STRICT_4H_PCT,
@@ -1417,16 +1742,19 @@ class PaperStrategy:
             "open_trades": [self._trade_view(t, now_ms) for t in trades],
             "candidates": [self._candidate_view(c, now_ms) for c in cands]
             + [self._growth_candidate_view(c, now_ms) for c in gcands]
-            + [self._css_candidate_view(c, now_ms) for c in ccands],
+            + [self._css_candidate_view(c, now_ms) for c in ccands]
+            + [self._css2_candidate_view(c, now_ms) for c in c2cands],
             "check_labels": CHECK_LABELS,
             "growth_check_labels": GROWTH_CHECK_LABELS,
             "css_check_labels": CSS_CHECK_LABELS,
+            "css2_check_labels": CSS2_CHECK_LABELS,
             "sc10_check_labels": SC10_CHECK_LABELS,
             "e5s_check_labels": E5S_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
             "growth_flex": list(GROWTH_FLEX),
             "css_mandatory": list(CSS_MANDATORY),
+            "css2_mandatory": list(CSS2_MANDATORY),
             "sc10_mandatory": list(SC10_MANDATORY),
             "e5s_mandatory": list(E5S_MANDATORY),
             "analytics": self._analytics,
@@ -1540,6 +1868,24 @@ class PaperStrategy:
             "rearm_needed": cand.rearm_needed,
         }
 
+    def _css2_candidate_view(self, cand: Css2Candidate, now_ms: int) -> dict:
+        return {
+            "id": cand.id,
+            "symbol": cand.symbol,
+            "episode": "css2",
+            "pump": cand.pump.to_data(),
+            "started_at": cand.started_at,
+            "watch_min": round((now_ms - cand.started_at) / 60_000),
+            "scans": cand.scans,
+            "best_passed": cand.best_passed,
+            "entered": cand.entered,
+            "open_in": [v for v in VARIANTS if (v, cand.symbol) in self.trades],
+            "note": cand.note,
+            "eval": cand.last_eval,
+            "shadow": None,
+            "entries_used": cand.entries_used,
+        }
+
 
 def _price_range(state: SymbolState, since_ms: int) -> tuple[float, float, float]:
     last = float(state.last_price or 0)
@@ -1561,6 +1907,36 @@ def _expire_reason(pump: PumpInfo, state: SymbolState, now_ms: int) -> str:
     if now_ms - pump.peak_ts > hours * 3_600_000:
         return "истекло время после пика"
     return _REASON_CONDITIONS
+
+
+def _css2_fields(pump: Css2PumpInfo) -> dict:
+    return {
+        "kind": "css2",
+        "peak_price": pump.peak_price,
+        "peak_ts": pump.peak_ts,
+        "valley_price": pump.valley_price,
+        "valley_ts": pump.valley_ts,
+        "growth_pct": pump.growth_pct,
+    }
+
+
+def _css2_from_row(row) -> Css2PumpInfo:
+    last_eval = _loads(row["last_eval"]) or {}
+    data = (last_eval.get("metrics") or {}).get("pump") or {}
+    return Css2PumpInfo(
+        valley_price=float(row["valley_price"] or data.get("valley_price") or 0),
+        valley_ts=int(row["valley_ts"] or data.get("valley_ts") or 0),
+        peak_price=float(row["peak_price"] or 0),
+        peak_ts=int(row["peak_ts"] or 0),
+        growth_pct=float(row["growth_pct"] or data.get("growth_pct") or 0),
+        volume_ratio=data.get("volume_ratio"),
+    )
+
+
+def _css2_eval_with_state(ev: dict, cand: Css2Candidate) -> dict:
+    out = dict(ev)
+    out["css2_state"] = {"entries_used": cand.entries_used}
+    return out
 
 
 def _css_fields(pump: CssPumpInfo) -> dict:
