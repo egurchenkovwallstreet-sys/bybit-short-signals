@@ -398,12 +398,15 @@ PAPER_E5S_PLUS5_LOCK_NET_ROE = _env_float("PAPER_E5S_PLUS5_LOCK_NET_ROE", 1.0)
 PAPER_E5S_BE_ARM_ROE = _env_float("PAPER_E5S_BE_ARM_ROE", 10.0)
 PAPER_E5S_TRAIL_GAP_ROE = _env_float("PAPER_E5S_TRAIL_GAP_ROE", 20.0)
 
-# Молния: тот же вход, что t20/p10. −10% ROE → +2% чистый BE → +7% пол +3% net и трейл 3 п.п.
+# Молния: −10% ROE, +2.5%→+2%, +6%→+4%, +7%→+5%, дальше трейл пик − 20 п.п. как в ТЗ.
 PAPER_MLN_INITIAL_STOP_ROE = _env_float("PAPER_MLN_INITIAL_STOP_ROE", -10.0)
-PAPER_MLN_BE_ARM_ROE = _env_float("PAPER_MLN_BE_ARM_ROE", 2.0)
-PAPER_MLN_LOCK_ARM_ROE = _env_float("PAPER_MLN_LOCK_ARM_ROE", 7.0)
-PAPER_MLN_LOCK_NET_ROE = _env_float("PAPER_MLN_LOCK_NET_ROE", 3.0)
-PAPER_MLN_TRAIL_GAP_ROE = _env_float("PAPER_MLN_TRAIL_GAP_ROE", 3.0)
+PAPER_MLN_LOCK2_ARM_ROE = _env_float("PAPER_MLN_LOCK2_ARM_ROE", 2.5)
+PAPER_MLN_LOCK2_ROE = _env_float("PAPER_MLN_LOCK2_ROE", 2.0)
+PAPER_MLN_LOCK4_ARM_ROE = _env_float("PAPER_MLN_LOCK4_ARM_ROE", 6.0)
+PAPER_MLN_LOCK4_ROE = _env_float("PAPER_MLN_LOCK4_ROE", 4.0)
+PAPER_MLN_LOCK5_ARM_ROE = _env_float("PAPER_MLN_LOCK5_ARM_ROE", 7.0)
+PAPER_MLN_LOCK5_ROE = _env_float("PAPER_MLN_LOCK5_ROE", 5.0)
+PAPER_MLN_TRAIL_GAP_ROE = _env_float("PAPER_MLN_TRAIL_GAP_ROE", 20.0)
 
 # После перезапуска свечи в памяти не сразу полные: кандидата не снимаем
 # «по условиям пампа», пока не прошло столько минут и не набралась история.

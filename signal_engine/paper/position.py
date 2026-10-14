@@ -260,22 +260,22 @@ def mln_trail_stop(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
-    """Молния: −10% ROE, с +2% — чистый безубыток, с +7% — не хуже +3% net и трейл 3 п.п."""
+    """Молния: −10% ROE, +2.5%→+2%, +6%→+4%, +7%→+5%, дальше трейл пик − 20 п.п."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
     initial = net_roe_stop_price(
         entry, margin, config.PAPER_MLN_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
     )
-    if peak < config.PAPER_MLN_BE_ARM_ROE:
+    if peak < config.PAPER_MLN_LOCK2_ARM_ROE - 1e-6:
         return initial
-    be = net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
-    if peak < config.PAPER_MLN_LOCK_ARM_ROE:
-        return min(initial, be)
-    floor = net_roe_stop_price(
-        entry, margin, config.PAPER_MLN_LOCK_NET_ROE, lev, entry_fee, funding_paid
-    )
-    trailed = price_for_roe(entry, peak - config.PAPER_MLN_TRAIL_GAP_ROE, lev)
-    return min(initial, be, floor, trailed)
+    stop = min(initial, price_for_roe(entry, config.PAPER_MLN_LOCK2_ROE, lev))
+    if peak < config.PAPER_MLN_LOCK4_ARM_ROE - 1e-6:
+        return stop
+    stop = min(stop, price_for_roe(entry, config.PAPER_MLN_LOCK4_ROE, lev))
+    if peak < config.PAPER_MLN_LOCK5_ARM_ROE - 1e-6:
+        return stop
+    trail = max(config.PAPER_MLN_LOCK5_ROE, peak - config.PAPER_MLN_TRAIL_GAP_ROE)
+    return min(stop, price_for_roe(entry, trail, lev))
 
 
 def _net_lock_price(
