@@ -112,8 +112,23 @@
     if (paper.variant === "e5s") return paper.data.e5s_mandatory || [];
     return paper.data.mandatory || [];
   }
+  const TABLE_HIDDEN = { lt20: true, sc10: true };
   function variants() {
     return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "lt20", "css", "css2", "sc10", "e5s"];
+  }
+  function variantProfit(v) {
+    const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
+    const a = account(v);
+    const t = vstats(v).trades || {};
+    const equity = a.equity != null ? a.equity : a.balance != null ? a.balance : t.balance != null ? t.balance : start;
+    return Number(equity) - start;
+  }
+  function tableVariants() {
+    const all = variants();
+    return all
+      .filter((v) => !TABLE_HIDDEN[v])
+      .slice()
+      .sort((a, b) => variantProfit(b) - variantProfit(a) || all.indexOf(a) - all.indexOf(b));
   }
   function candEval(r) {
     const ev = (r && r.eval) || {};
@@ -150,8 +165,8 @@
   function onSnapshot(data) {
     if (!data) return;
     paper.data = data;
-    const vs = variants();
-    if (vs.length && !vs.includes(paper.variant)) paper.variant = vs[0];
+    const rows = tableVariants();
+    if (rows.length && !rows.includes(paper.variant)) paper.variant = rows[0];
     if (!isVisible()) return;
     render();
   }
@@ -220,7 +235,7 @@
       <th>Вариант</th><th>Баланс</th><th>Equity</th><th>Итог P&amp;L</th><th>Сутки P&amp;L</th>
       <th>Закрыто</th><th>Win rate</th><th>PF</th>
       <th>Ср. ROE</th><th>Макс. просадка</th><th>Открыто</th><th>Маржа в работе</th>
-    </tr></thead><tbody>${variants()
+    </tr></thead><tbody>${tableVariants()
       .map((v) => {
         const a = account(v);
         const t = vstats(v).trades || {};
@@ -296,7 +311,7 @@
     const box = document.getElementById("paper-equity");
     if (!box || typeof echarts === "undefined") return;
     if (!paper.equityChart) paper.equityChart = echarts.init(box, null, { renderer: "canvas" });
-    const series = variants().map((v) => {
+    const series = tableVariants().map((v) => {
       const rows = vstats(v).equity || [];
       const color = VARIANT_COLORS[v] || "#8e9aab";
       return {
