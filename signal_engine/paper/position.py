@@ -1,8 +1,8 @@
 """Виртуальный изолированный шорт: ликвидация, трейлинг-стоп, комиссии, funding.
 
 ROE — прибыль в % от маржи без комиссий: (вход − цена) / вход × плечо × 100.
-t20: при пике ≥ 2% стоп на net-безубыток (комиссии вход/выход), при ≥ 7% — не хуже +5%,
-дальше трейл «пик − 20 п.п.». p10: бумажный трейл 10%→2% цены плюс лок пик − 10.
+t20: при пике ≥ 2% стоп на +1% ROE, при ≥ 7% — не хуже +5%, дальше трейл «пик − 20 п.п.».
+p10: с +2% тоже лок +1%; бумажный трейл 10%→2% цены плюс лок пик − 10 с пика ≥ 10%.
 """
 
 from __future__ import annotations
@@ -209,18 +209,23 @@ def trail_stop(
 ) -> float:
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
+    early = (
+        price_for_roe(entry, config.PAPER_BE_LOCK_ROE, lev)
+        if peak >= config.PAPER_BE_ARM_ROE
+        else None
+    )
     if peak_gap_roe > 0:
         paper = best_price * (1.0 + trail_distance_pct(peak) / 100.0)
-        if peak < peak_gap_roe:
-            return paper
-        lock_px = price_for_roe(entry, peak - peak_gap_roe, lev)
-        return min(paper, lock_px)
+        stop = paper
+        if early is not None:
+            stop = min(stop, early)
+        if peak >= peak_gap_roe:
+            stop = min(stop, price_for_roe(entry, peak - peak_gap_roe, lev))
+        return stop
     if peak < config.PAPER_BE_ARM_ROE:
         return liquidation_price(entry, lev)
     if peak < config.PAPER_LOCK_ARM_ROE:
-        if margin > 0:
-            return net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
-        return price_for_roe(entry, 0.0, lev)
+        return early if early is not None else price_for_roe(entry, config.PAPER_BE_LOCK_ROE, lev)
     lock_roe = max(config.PAPER_LOCK_MIN_ROE, peak - config.PAPER_TRAIL_GAP_ROE)
     return price_for_roe(entry, lock_roe, lev)
 

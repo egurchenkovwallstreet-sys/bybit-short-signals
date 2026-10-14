@@ -17,8 +17,8 @@ from signal_engine.paper.position import (
     Position,
     liquidation_price,
     long_liquidation_price,
-    net_breakeven_stop_price,
     net_roe_stop_price,
+    price_for_roe,
     trail_distance_pct,
     trail_stop,
     trail_stop_long,
@@ -107,14 +107,14 @@ class TrailingTest(unittest.TestCase):
         fees = 500 * config.PAPER_FEE_RATE_TAKER + 500 / 1.0 * 0.72 * config.PAPER_FEE_RATE_TAKER
         self.assertAlmostEqual(result["pnl_usd"], gross - fees, places=6)
 
-    def test_be_at_two_pct_then_lock_five_at_seven(self) -> None:
+    def test_plus1_at_two_pct_then_lock_five_at_seven(self) -> None:
         pos = Position("X", 0, 1.0, 50.0)
         self.assertIsNone(pos.update(0.999, 1.0, 0.999))
         self.assertAlmostEqual(pos.max_roe(), 1.0)
         self.assertAlmostEqual(pos.stop_price, pos.liq_price)
         self.assertIsNone(pos.update(0.998, 1.0, 0.998))
         self.assertAlmostEqual(pos.max_roe(), 2.0)
-        self.assertAlmostEqual(pos.stop_price, net_breakeven_stop_price(1.0, 50.0, 10, pos.entry_fee))
+        self.assertAlmostEqual(pos.stop_price, price_for_roe(1.0, config.PAPER_BE_LOCK_ROE, 10))
         self.assertIsNone(pos.update(0.993, 0.998, 0.993))
         self.assertAlmostEqual(pos.max_roe(), 7.0)
         self.assertAlmostEqual(pos.stop_price, 0.995)
@@ -140,21 +140,30 @@ class TrailingTest(unittest.TestCase):
         result = pos.close_result("trailing_stop")
         self.assertAlmostEqual(result["roe_pct"], config.PAPER_LOSS_CAP_ROE, places=1)
 
-    def test_be_stop_closes_non_negative(self) -> None:
+    def test_plus1_stop_after_two_pct(self) -> None:
         pos = Position("X", 0, 1.0, 50.0)
         self.assertIsNone(pos.update(0.998, 1.0, 0.998))
         self.assertAlmostEqual(pos.max_roe(), 2.0)
-        stop = pos.stop_price
+        stop = price_for_roe(1.0, config.PAPER_BE_LOCK_ROE, 10)
+        self.assertAlmostEqual(pos.stop_price, stop)
         self.assertEqual(pos.update(stop, stop + 0.001, stop), "trailing_stop")
         result = pos.close_result("trailing_stop")
-        self.assertGreaterEqual(result["pnl_usd"], -0.001)
-        self.assertGreaterEqual(result["roe_pct"], -0.01)
+        self.assertAlmostEqual(result["roe_pct"], pos.net_roe(stop), places=4)
+
+    def test_p10_locks_plus1_after_two_pct(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0, peak_gap_roe=10.0)
+        self.assertIsNone(pos.update(0.998, 1.0, 0.998))
+        self.assertAlmostEqual(pos.max_roe(), 2.0)
+        self.assertAlmostEqual(pos.stop_price, price_for_roe(1.0, config.PAPER_BE_LOCK_ROE, 10))
 
     def test_peak_gap_not_before_ten_roe(self) -> None:
         pos = Position("X", 0, 1.0, 50.0, peak_gap_roe=10.0)
+        self.assertIsNone(pos.update(0.999, 1.0, 0.999))
+        self.assertAlmostEqual(pos.max_roe(), 1.0)
+        self.assertAlmostEqual(pos.stop_price, pos.liq_price)
         self.assertIsNone(pos.update(0.995, 1.0, 0.995))
         self.assertAlmostEqual(pos.max_roe(), 5.0)
-        self.assertAlmostEqual(pos.stop_price, 0.995 * 1.10)
+        self.assertAlmostEqual(pos.stop_price, price_for_roe(1.0, config.PAPER_BE_LOCK_ROE, 10))
 
     def test_peak_gap_locks_ten_pp_behind(self) -> None:
         # t20: пик 40% → max(5, 20) = 20% → 0.98. p10: лок 30% → 0.97.

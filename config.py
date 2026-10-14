@@ -185,8 +185,9 @@ PAPER_TRAIL_TIGHTEN_TO_ROE = _env_float("PAPER_TRAIL_TIGHTEN_TO_ROE", 300.0)
 PAPER_TRAIL_MIN_DIST_PCT = _env_float("PAPER_TRAIL_MIN_DIST_PCT", 2.0)
 # Только вариант p10: после пика ROE не ниже этого стоп держит «пик − gap» п.п.
 PAPER_TRAIL_PEAK_GAP_ROE = _env_float("PAPER_TRAIL_PEAK_GAP_ROE", 10.0)
-# t20: +2% gross ROE → стоп на net-безубыток, +7% → пол +5%, дальше трейл пик − 20 п.п. ROE.
+# t20 и p10: пик ≥ +2% gross ROE → стоп +1%; t20 с +7% → пол +5%, дальше трейл пик − 20 п.п.
 PAPER_BE_ARM_ROE = _env_float("PAPER_BE_ARM_ROE", 2.0)
+PAPER_BE_LOCK_ROE = _env_float("PAPER_BE_LOCK_ROE", 1.0)
 PAPER_LOCK_ARM_ROE = _env_float("PAPER_LOCK_ARM_ROE", 7.0)
 PAPER_LOCK_MIN_ROE = _env_float("PAPER_LOCK_MIN_ROE", 5.0)
 PAPER_TRAIL_GAP_ROE = _env_float("PAPER_TRAIL_GAP_ROE", 20.0)
