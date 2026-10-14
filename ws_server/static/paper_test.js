@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -113,7 +113,7 @@
     return paper.data.mandatory || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css", "css2", "sc10", "e5s"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "lt20", "css", "css2", "sc10", "e5s"];
   }
   function candEval(r) {
     const ev = (r && r.eval) || {};

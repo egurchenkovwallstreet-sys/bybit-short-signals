@@ -50,6 +50,7 @@ CHECK_LABELS = {
 VARIANT_LABELS = {
     "t20": "+3%/+10% net / трейл 20%",
     "p10": "+3%/+10% net / пик −10",
+    "mln": "Молния",
     "lt20": "Лонг t20",
     "css": "Cursor SS",
     "css2": "Курсор СС 2",

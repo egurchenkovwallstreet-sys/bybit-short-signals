@@ -9,7 +9,7 @@ from pathlib import Path
 import config
 from signal_engine.paper.detect import find_pump
 from signal_engine.paper.e5s_detect import evaluate_e5s
-from signal_engine.paper.position import Position, e5s_trail_stop, net_breakeven_stop_price, net_roe_stop_price
+from signal_engine.paper.position import Position, e5s_trail_stop, net_roe_stop_price
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.state import Bar
@@ -43,24 +43,31 @@ def _dump_last_closed_5m(state, price: float = 1.10) -> None:
 
 
 class E5sStopTest(unittest.TestCase):
-    def test_stop_stays_minus_20_before_plus_10(self) -> None:
-        stop = e5s_trail_stop(1.0, 0.995, 10, margin=50.0, entry_fee=0.0275)
+    def test_stop_stays_minus_20_before_plus_5(self) -> None:
+        # +4% ROE при ×10 = цена 0.996
+        stop = e5s_trail_stop(1.0, 0.996, 10, margin=50.0, entry_fee=0.0275)
         initial = net_roe_stop_price(1.0, 50.0, -20.0, 10, 0.0275, 0.0)
         self.assertAlmostEqual(stop, initial, places=6)
 
-    def test_be_after_plus_10_roe(self) -> None:
-        be = net_breakeven_stop_price(1.0, 50.0, 10, 0.0275, 0.0)
-        stop = e5s_trail_stop(1.0, 0.99, 10, margin=50.0, entry_fee=0.0275)
-        self.assertAlmostEqual(stop, be, places=6)
+    def test_plus_1_net_after_plus_5_roe(self) -> None:
+        locked = net_roe_stop_price(1.0, 50.0, 1.0, 10, 0.0275, 0.0)
+        stop = e5s_trail_stop(1.0, 0.995, 10, margin=50.0, entry_fee=0.0275)
+        self.assertAlmostEqual(stop, locked, places=6)
+        self.assertLess(stop, 1.0)
 
-    def test_position_keeps_minus_20_until_ten(self) -> None:
+    def test_plus_10_does_not_loosen_the_plus_1_lock(self) -> None:
+        locked = net_roe_stop_price(1.0, 50.0, 1.0, 10, 0.0275, 0.0)
+        stop = e5s_trail_stop(1.0, 0.99, 10, margin=50.0, entry_fee=0.0275)
+        self.assertAlmostEqual(stop, locked, places=6)
+
+    def test_position_locks_plus_1_at_five_roe(self) -> None:
         pos = Position("X", 0, 1.0, 50.0, stop_style="e5s")
         self.assertIsNone(pos.update(0.999, 1.0, 0.999))
         initial = net_roe_stop_price(1.0, 50.0, -20.0, 10, pos.entry_fee, 0.0)
         self.assertAlmostEqual(pos.stop_price, initial, places=5)
-        self.assertIsNone(pos.update(0.99, 1.0, 0.99))
-        be = net_breakeven_stop_price(1.0, 50.0, 10, pos.entry_fee, 0.0)
-        self.assertAlmostEqual(pos.stop_price, be, places=5)
+        self.assertIsNone(pos.update(0.995, 1.0, 0.995))
+        locked = net_roe_stop_price(1.0, 50.0, 1.0, 10, pos.entry_fee, 0.0)
+        self.assertAlmostEqual(pos.stop_price, locked, places=5)
 
 
 class E5sDetectTest(unittest.TestCase):

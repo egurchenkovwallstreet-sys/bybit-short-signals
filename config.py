@@ -256,13 +256,14 @@ PAPER_STRONG_TOP_MIN_HOURS_AFTER = _env_float("PAPER_STRONG_TOP_MIN_HOURS_AFTER"
 PAPER_STRONG_TOP_MIN_BARS_1H = _env_int("PAPER_STRONG_TOP_MIN_BARS_1H", 5)
 PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 
-# Бумажные варианты: шорты t20/p10 (шлюз + 5 из 9), лонг lt20 (детектор роста),
+# Бумажные варианты: шорты t20/p10/mln (шлюз + 5 из 9), лонг lt20 (детектор роста),
 # шорт Cursor SS (css) — свой детектор, Курсор СС 2 (css2) — вход по развороту
 # лаборатории, шорт e5s — тот же поиск пампа, вход по EMA50 5м.
-PAPER_SHORT_VARIANTS = ("t20", "p10")
-PAPER_VARIANTS = ("t20", "p10", "lt20", "css", "css2", "sc10", "e5s")
+PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
+PAPER_VARIANTS = ("t20", "p10", "mln", "lt20", "css", "css2", "sc10", "e5s")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
+PAPER_MLN_VARIANT = "mln"
 PAPER_LT20_VARIANT = "lt20"
 PAPER_CSS_VARIANT = "css"
 PAPER_CSS2_VARIANT = "css2"
@@ -295,6 +296,8 @@ def paper_stop_style(variant: str) -> str:
         return "sc10"
     if variant == PAPER_E5S_VARIANT:
         return "e5s"
+    if variant == PAPER_MLN_VARIANT:
+        return "mln"
     return "default"
 
 
@@ -390,8 +393,17 @@ PAPER_E5S_EMA_PERIOD = _env_int("PAPER_E5S_EMA_PERIOD", 50)
 PAPER_E5S_SELL_SHARE_MIN_PCT = _env_float("PAPER_E5S_SELL_SHARE_MIN_PCT", 60.0)
 PAPER_E5S_PEAK_BARS_5M = _env_int("PAPER_E5S_PEAK_BARS_5M", 5)
 PAPER_E5S_INITIAL_STOP_ROE = _env_float("PAPER_E5S_INITIAL_STOP_ROE", -20.0)
+PAPER_E5S_PLUS5_ARM_ROE = _env_float("PAPER_E5S_PLUS5_ARM_ROE", 5.0)
+PAPER_E5S_PLUS5_LOCK_NET_ROE = _env_float("PAPER_E5S_PLUS5_LOCK_NET_ROE", 1.0)
 PAPER_E5S_BE_ARM_ROE = _env_float("PAPER_E5S_BE_ARM_ROE", 10.0)
 PAPER_E5S_TRAIL_GAP_ROE = _env_float("PAPER_E5S_TRAIL_GAP_ROE", 20.0)
+
+# Молния: тот же вход, что t20/p10. −10% ROE → +2% чистый BE → +7% пол +3% net и трейл 3 п.п.
+PAPER_MLN_INITIAL_STOP_ROE = _env_float("PAPER_MLN_INITIAL_STOP_ROE", -10.0)
+PAPER_MLN_BE_ARM_ROE = _env_float("PAPER_MLN_BE_ARM_ROE", 2.0)
+PAPER_MLN_LOCK_ARM_ROE = _env_float("PAPER_MLN_LOCK_ARM_ROE", 7.0)
+PAPER_MLN_LOCK_NET_ROE = _env_float("PAPER_MLN_LOCK_NET_ROE", 3.0)
+PAPER_MLN_TRAIL_GAP_ROE = _env_float("PAPER_MLN_TRAIL_GAP_ROE", 3.0)
 
 # После перезапуска свечи в памяти не сразу полные: кандидата не снимаем
 # «по условиям пампа», пока не прошло столько минут и не набралась история.

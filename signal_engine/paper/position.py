@@ -230,19 +230,52 @@ def e5s_trail_stop(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
-    """e5s: стоп −20% ROE, с пика ≥ +10% — net-безубыток, дальше трейл 20 п.п."""
+    """e5s: −20% ROE, с +5% — +1% net, с +10% — не хуже безубытка, дальше трейл 20 п.п."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
     initial = net_roe_stop_price(
         entry, margin, config.PAPER_E5S_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
     )
+    if peak < config.PAPER_E5S_PLUS5_ARM_ROE:
+        return initial
+    plus = net_roe_stop_price(
+        entry, margin, config.PAPER_E5S_PLUS5_LOCK_NET_ROE, lev, entry_fee, funding_paid
+    )
     if peak < config.PAPER_E5S_BE_ARM_ROE:
+        return min(initial, plus)
+    be = net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
+    stop = min(initial, plus, be)
+    lock_roe = peak - config.PAPER_E5S_TRAIL_GAP_ROE
+    if lock_roe > 0:
+        stop = min(stop, price_for_roe(entry, lock_roe, lev))
+    return stop
+
+
+def mln_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """Молния: −10% ROE, с +2% — чистый безубыток, с +7% — не хуже +3% net и трейл 3 п.п."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    initial = net_roe_stop_price(
+        entry, margin, config.PAPER_MLN_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    if peak < config.PAPER_MLN_BE_ARM_ROE:
         return initial
     be = net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
-    lock_roe = peak - config.PAPER_E5S_TRAIL_GAP_ROE
-    if lock_roe <= 0:
-        return be
-    return min(be, price_for_roe(entry, lock_roe, lev))
+    if peak < config.PAPER_MLN_LOCK_ARM_ROE:
+        return min(initial, be)
+    floor = net_roe_stop_price(
+        entry, margin, config.PAPER_MLN_LOCK_NET_ROE, lev, entry_fee, funding_paid
+    )
+    trailed = price_for_roe(entry, peak - config.PAPER_MLN_TRAIL_GAP_ROE, lev)
+    return min(initial, be, floor, trailed)
 
 
 def _net_lock_price(
@@ -394,6 +427,17 @@ class Position:
             return
         if self.stop_style == "e5s":
             trail = e5s_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+            )
+            self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "mln":
+            trail = mln_trail_stop(
                 self.entry_price,
                 self.best_price,
                 self.leverage,
