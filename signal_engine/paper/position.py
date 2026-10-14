@@ -230,7 +230,7 @@ def e5s_trail_stop(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
-    """e5s: −20% ROE, с +5% — +1% net, с +10% — не хуже безубытка, дальше трейл 20 п.п."""
+    """e5s: −20% ROE, с +5% — +1% net, с +10% — стоп +5% и трейл пик − 20 п.п., не ниже +5%."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
     initial = net_roe_stop_price(
@@ -243,9 +243,32 @@ def e5s_trail_stop(
     )
     if peak < config.PAPER_E5S_BE_ARM_ROE:
         return min(initial, plus)
-    be = net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
-    stop = min(initial, plus, be)
-    lock_roe = peak - config.PAPER_E5S_TRAIL_GAP_ROE
+    lock_roe = max(config.PAPER_E5S_PLUS10_LOCK_ROE, peak - config.PAPER_E5S_TRAIL_GAP_ROE)
+    return min(initial, plus, price_for_roe(entry, lock_roe, lev))
+
+
+def e5p_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """EMA 5+: −20% ROE, с +5% — +1% net и трейл пик − 3 п.п. ROE, не ниже +1% net."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    initial = net_roe_stop_price(
+        entry, margin, config.PAPER_E5S_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    if peak < config.PAPER_E5S_PLUS5_ARM_ROE:
+        return initial
+    plus = net_roe_stop_price(
+        entry, margin, config.PAPER_E5S_PLUS5_LOCK_NET_ROE, lev, entry_fee, funding_paid
+    )
+    stop = min(initial, plus)
+    lock_roe = peak - config.PAPER_E5P_TRAIL_GAP_ROE
     if lock_roe > 0:
         stop = min(stop, price_for_roe(entry, lock_roe, lev))
     return stop
@@ -427,6 +450,17 @@ class Position:
             return
         if self.stop_style == "e5s":
             trail = e5s_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+            )
+            self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "e5p":
+            trail = e5p_trail_stop(
                 self.entry_price,
                 self.best_price,
                 self.leverage,

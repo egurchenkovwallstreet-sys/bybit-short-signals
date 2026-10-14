@@ -59,7 +59,11 @@ class E5sEvaluation:
             "passed": self.passed,
             "passed_count": self.passed_count,
             "failed": self.failed,
-            "variants": [config.PAPER_E5S_VARIANT] if self.passed else [],
+            "variants": (
+                [v for v in (config.PAPER_E5S_VARIANT, config.PAPER_E5P_VARIANT) if v in config.PAPER_VARIANTS]
+                if self.passed
+                else []
+            ),
             "entry_blocked": [],
         }
 

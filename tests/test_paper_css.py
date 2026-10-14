@@ -132,49 +132,17 @@ class CssDetectTest(unittest.TestCase):
 
 
 class CssStrategyTest(unittest.TestCase):
-    def test_opens_on_dump_not_on_shelf(self) -> None:
+    def test_removed_from_the_board(self) -> None:
+        self.assertNotIn("css", config.PAPER_VARIANTS)
         with tempfile.TemporaryDirectory() as tmp:
             strategy = PaperStrategy(PaperStore(Path(tmp) / "paper.db"))
             strategy.open()
-            quiet = css_state(dump=False)
-            strategy.tape.symbols[quiet.symbol] = css_tape(dump=False)
-            view = strategy.scan({quiet.symbol: quiet}, NOW)["data"]
-            self.assertTrue(any(c.get("episode") == "css" for c in view["candidates"]))
+            dumped = css_state(dump=True)
+            strategy.tape.symbols[dumped.symbol] = css_tape(dump=True)
+            view = strategy.scan({dumped.symbol: dumped}, NOW)["data"]
+            self.assertNotIn("css", view["variants"])
+            self.assertFalse(any(c.get("episode") == "css" for c in view["candidates"]))
             self.assertFalse(any(t["variant"] == "css" for t in view["open_trades"]))
-
-            dumped = css_state(dump=True)
-            strategy.tape.symbols[dumped.symbol] = css_tape(dump=True)
-            view = strategy.scan({dumped.symbol: dumped}, NOW + 30_000)["data"]
-            css_trades = [t for t in view["open_trades"] if t["variant"] == "css"]
-            self.assertEqual(len(css_trades), 1)
-            pos = strategy.trades[("css", dumped.symbol)].pos
-            self.assertEqual(pos.stop_style, "css")
-            initial = net_roe_stop_price(
-                pos.entry_price, pos.margin, -15.0, pos.leverage, pos.entry_fee, 0.0
-            )
-            self.assertAlmostEqual(pos.stop_price, initial, places=5)
-            strategy.close()
-
-    def test_stop_then_rearm(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            strategy = PaperStrategy(PaperStore(Path(tmp) / "paper.db"))
-            strategy.open()
-            quiet = css_state(dump=False)
-            strategy.tape.symbols[quiet.symbol] = css_tape(dump=False)
-            strategy.scan({quiet.symbol: quiet}, NOW)
-            dumped = css_state(dump=True)
-            strategy.tape.symbols[dumped.symbol] = css_tape(dump=True)
-            strategy.scan({dumped.symbol: dumped}, NOW + 30_000)
-            self.assertIn(("css", dumped.symbol), strategy.trades)
-            pos = strategy.trades[("css", dumped.symbol)].pos
-            stop = pos.stop_price
-            dumped.bars_1m.append(Bar(NOW + MIN, stop, stop + 0.01, stop, stop + 0.01, 10.0))
-            dumped.last_price = stop + 0.01
-            strategy.scan({dumped.symbol: dumped}, NOW + MIN + 1000)
-            self.assertNotIn(("css", dumped.symbol), strategy.trades)
-            cand = strategy.css_candidates[dumped.symbol]
-            self.assertTrue(cand.rearm_needed)
-            self.assertEqual(cand.entries_used, 1)
             strategy.close()
 
 

@@ -270,6 +270,10 @@ class PaperStrategy:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("pump") or {}).get("bar_ts") or 0)
                 if bar_ts:
                     self._sc10_used_bars[row["symbol"]] = bar_ts
+        if config.PAPER_CSS_VARIANT not in VARIANTS:
+            dropped_css = self.store.expire_kind_watching("css", "Cursor SS снят с теста", now)
+            if dropped_css:
+                log.info("Тест: сняты кандидаты Cursor SS: %s", dropped_css)
         active = sorted(self.store.active_candidates(), key=lambda r: (int(r["peak_ts"] or 0), int(r["id"])))
         for row in active:
             if str(row["kind"] or "") == "growth":
@@ -454,18 +458,21 @@ class PaperStrategy:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
         self._refresh_peaks(states, now_ms)
         self._refresh_growth_peaks(states, now_ms)
-        self._refresh_css_peaks(states, now_ms)
+        if config.PAPER_CSS_VARIANT in VARIANTS:
+            self._refresh_css_peaks(states, now_ms)
         self._update_trades(states, now_ms)
         self._update_shadows(states, now_ms)
         if now_ms >= self._next_detect:
             self._detect(states, now_ms)
             self._detect_growth(states, now_ms)
-            self._detect_css(states, now_ms)
+            if config.PAPER_CSS_VARIANT in VARIANTS:
+                self._detect_css(states, now_ms)
             self._detect_css2(states, now_ms)
             self._next_detect = now_ms + config.PAPER_DETECT_INTERVAL_SEC * 1000
         self._evaluate(states, btc_4h, now_ms)
         self._evaluate_growth(states, now_ms)
-        self._evaluate_css(states, now_ms)
+        if config.PAPER_CSS_VARIANT in VARIANTS:
+            self._evaluate_css(states, now_ms)
         self._evaluate_css2(states, btc_state=states.get(config.PAPER_BTC_SYMBOL), now_ms=now_ms)
         self._evaluate_sc10(states, now_ms)
         self._persist(now_ms)
@@ -788,17 +795,19 @@ class PaperStrategy:
                     continue
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
             if e5s_ev.passed:
-                variant = config.PAPER_E5S_VARIANT
-                if (variant, symbol) not in self.trades:
+                for variant in e5s_ev.to_data()["variants"]:
+                    label = VARIANT_LABELS.get(variant, variant)
+                    if (variant, symbol) in self.trades:
+                        continue
                     if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
-                        notes.append("EMA50 5м: пауза после сделки")
-                    else:
-                        balance = self.balances[variant]
-                        margin = balance * config.PAPER_MARGIN_PCT / 100.0
-                        if margin <= 0 or balance - self.used_margin(variant) < margin:
-                            notes.append("EMA50 5м: нет свободной маржи")
-                        else:
-                            self._open_trade(variant, cand, state, e5s_ev, margin, now_ms)
+                        notes.append(f"{label}: пауза после сделки")
+                        continue
+                    balance = self.balances[variant]
+                    margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                    if margin <= 0 or balance - self.used_margin(variant) < margin:
+                        notes.append(f"{label}: нет свободной маржи")
+                        continue
+                    self._open_trade(variant, cand, state, e5s_ev, margin, now_ms)
             cand.note = "; ".join(notes) or None
             if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
@@ -1482,7 +1491,7 @@ class PaperStrategy:
             price,
             margin,
             ev.passed_count,
-            len(E5S_MANDATORY) if variant == config.PAPER_E5S_VARIANT else len(MANDATORY),
+            len(E5S_MANDATORY) if variant in (config.PAPER_E5S_VARIANT, config.PAPER_E5P_VARIANT) else len(MANDATORY),
             ev.score,
         )
 

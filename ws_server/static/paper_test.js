@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -100,7 +100,7 @@
     if (paper.variant === "css") return paper.data.css_check_labels || {};
     if (paper.variant === "css2") return paper.data.css2_check_labels || {};
     if (paper.variant === "sc10") return paper.data.sc10_check_labels || {};
-    if (paper.variant === "e5s") return paper.data.e5s_check_labels || {};
+    if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_check_labels || {};
     return paper.data.check_labels || {};
   }
   function mandatory() {
@@ -109,12 +109,12 @@
     if (paper.variant === "css") return paper.data.css_mandatory || [];
     if (paper.variant === "css2") return paper.data.css2_mandatory || [];
     if (paper.variant === "sc10") return paper.data.sc10_mandatory || [];
-    if (paper.variant === "e5s") return paper.data.e5s_mandatory || [];
+    if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_mandatory || [];
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "lt20", "css", "css2", "sc10", "e5s"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "lt20", "css2", "sc10", "e5s", "e5p"];
   }
   function variantProfit(v) {
     const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
@@ -132,7 +132,7 @@
   }
   function candEval(r) {
     const ev = (r && r.eval) || {};
-    if (paper.variant === "e5s") return ev.e5s || ev;
+    if (paper.variant === "e5s" || paper.variant === "e5p") return ev.e5s || ev;
     return ev;
   }
   function candidateRows() {

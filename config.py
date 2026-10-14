@@ -257,10 +257,11 @@ PAPER_STRONG_TOP_MIN_BARS_1H = _env_int("PAPER_STRONG_TOP_MIN_BARS_1H", 5)
 PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 
 # Бумажные варианты: шорты t20/p10/mln (шлюз + 5 из 9), лонг lt20 (детектор роста),
-# шорт Cursor SS (css) — свой детектор, Курсор СС 2 (css2) — вход по развороту
-# лаборатории, шорт e5s — тот же поиск пампа, вход по EMA50 5м.
+# Курсор СС 2 (css2) — вход по развороту лаборатории,
+# шорты e5s / e5p — тот же поиск пампа, вход по EMA50 5м.
+# Cursor SS (css) с вкладки снят: новые сделки не открываются.
 PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
-PAPER_VARIANTS = ("t20", "p10", "mln", "lt20", "css", "css2", "sc10", "e5s")
+PAPER_VARIANTS = ("t20", "p10", "mln", "lt20", "css2", "sc10", "e5s", "e5p")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -269,6 +270,7 @@ PAPER_CSS_VARIANT = "css"
 PAPER_CSS2_VARIANT = "css2"
 PAPER_SC10_VARIANT = "sc10"
 PAPER_E5S_VARIANT = "e5s"
+PAPER_E5P_VARIANT = "e5p"
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
@@ -296,6 +298,8 @@ def paper_stop_style(variant: str) -> str:
         return "sc10"
     if variant == PAPER_E5S_VARIANT:
         return "e5s"
+    if variant == PAPER_E5P_VARIANT:
+        return "e5p"
     if variant == PAPER_MLN_VARIANT:
         return "mln"
     return "default"
@@ -388,7 +392,9 @@ PAPER_SC10_BREAK_MIN_PCT = _env_float("PAPER_SC10_BREAK_MIN_PCT", 0.15)
 PAPER_SC10_TRAIL_GAP_ROE = _env_float("PAPER_SC10_TRAIL_GAP_ROE", 10.0)
 PAPER_SC10_REENTRY_SEC = _env_int("PAPER_SC10_REENTRY_SEC", 120)
 
-# Шорт e5s: тот же поиск пампа, вход — закрытая 5м под EMA50.
+# Шорты e5s / e5p: тот же поиск пампа, вход — закрытая 5м под EMA50.
+# e5s: −20% → с +5% лок +1% net → с +10% стоп +5% и трейл пик − 20 п.п., не ниже +5%.
+# e5p: те же −20% и лок +1% net с +5%, сразу после лока трейл пик − 3 п.п. ROE.
 PAPER_E5S_EMA_PERIOD = _env_int("PAPER_E5S_EMA_PERIOD", 50)
 PAPER_E5S_SELL_SHARE_MIN_PCT = _env_float("PAPER_E5S_SELL_SHARE_MIN_PCT", 60.0)
 PAPER_E5S_PEAK_BARS_5M = _env_int("PAPER_E5S_PEAK_BARS_5M", 5)
@@ -396,7 +402,9 @@ PAPER_E5S_INITIAL_STOP_ROE = _env_float("PAPER_E5S_INITIAL_STOP_ROE", -20.0)
 PAPER_E5S_PLUS5_ARM_ROE = _env_float("PAPER_E5S_PLUS5_ARM_ROE", 5.0)
 PAPER_E5S_PLUS5_LOCK_NET_ROE = _env_float("PAPER_E5S_PLUS5_LOCK_NET_ROE", 1.0)
 PAPER_E5S_BE_ARM_ROE = _env_float("PAPER_E5S_BE_ARM_ROE", 10.0)
+PAPER_E5S_PLUS10_LOCK_ROE = _env_float("PAPER_E5S_PLUS10_LOCK_ROE", 5.0)
 PAPER_E5S_TRAIL_GAP_ROE = _env_float("PAPER_E5S_TRAIL_GAP_ROE", 20.0)
+PAPER_E5P_TRAIL_GAP_ROE = _env_float("PAPER_E5P_TRAIL_GAP_ROE", 3.0)
 
 # Молния: −10% ROE, +2.5%→+2%, +6%→+4%, +7%→+5%, дальше трейл пик − 20 п.п. как в ТЗ.
 PAPER_MLN_INITIAL_STOP_ROE = _env_float("PAPER_MLN_INITIAL_STOP_ROE", -10.0)

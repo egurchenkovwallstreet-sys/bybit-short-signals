@@ -56,6 +56,7 @@ VARIANT_LABELS = {
     "css2": "Курсор СС 2",
     "sc10": "Скальп 10",
     "e5s": "EMA50 5м",
+    "e5p": "EMA 5+",
 }
 
 ENTRY_GATE_LABELS = {
