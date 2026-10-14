@@ -18,6 +18,7 @@ from signal_engine.paper.position import (
     liquidation_price,
     long_liquidation_price,
     net_roe_stop_price,
+    price_for_roe,
     trail_distance_pct,
     trail_stop,
     trail_stop_long,
@@ -173,6 +174,22 @@ class TrailingTest(unittest.TestCase):
             pos.stop_price,
             net_roe_stop_price(1.0, 50.0, config.PAPER_BE_LOCK_NET_ROE, 10, pos.entry_fee),
         )
+
+    def test_p10_at_ten_locks_net_two(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0, peak_gap_roe=10.0)
+        self.assertIsNone(pos.update(0.99, 1.0, 0.99))
+        self.assertAlmostEqual(pos.max_roe(), 10.0)
+        lock2 = net_roe_stop_price(1.0, 50.0, config.PAPER_PLUS10_LOCK_NET_ROE, 10, pos.entry_fee)
+        self.assertAlmostEqual(pos.stop_price, lock2)
+        self.assertLess(pos.stop_price, price_for_roe(1.0, 0.0, 10))
+
+    def test_t20_at_ten_keeps_five_floor(self) -> None:
+        pos = Position("X", 0, 1.0, 50.0)
+        self.assertIsNone(pos.update(0.99, 1.0, 0.99))
+        self.assertAlmostEqual(pos.max_roe(), 10.0)
+        lock2 = net_roe_stop_price(1.0, 50.0, config.PAPER_PLUS10_LOCK_NET_ROE, 10, pos.entry_fee)
+        self.assertAlmostEqual(pos.stop_price, 0.995)
+        self.assertLess(pos.stop_price, lock2)
 
     def test_peak_gap_locks_ten_pp_behind(self) -> None:
         # t20: пик 40% → max(5, 20) = 20% → 0.98. p10: лок 30% → 0.97.
