@@ -57,6 +57,9 @@ VARIANT_LABELS = {
     "sc10": "Скальп 10",
     "e5s": "EMA50 5м",
     "e5p": "EMA 5+",
+    "t20p": "Трейл 20+",
+    "p10p": "10 п.п.+",
+    "mlnp": "Молния+",
 }
 
 ENTRY_GATE_LABELS = {

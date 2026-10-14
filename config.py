@@ -256,15 +256,21 @@ PAPER_STRONG_TOP_MIN_HOURS_AFTER = _env_float("PAPER_STRONG_TOP_MIN_HOURS_AFTER"
 PAPER_STRONG_TOP_MIN_BARS_1H = _env_int("PAPER_STRONG_TOP_MIN_BARS_1H", 5)
 PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 
-# Бумажные варианты: шорты t20/p10/mln (шлюз + 5 из 9), лонг lt20 (детектор роста),
+# Бумажные варианты: шорты t20/p10/mln (шлюз + 5 из 9),
+# копии t20p/p10p/mlnp — тот же выход, но обязательный вход (не 5 из 9),
+# лонг lt20 (детектор роста),
 # Курсор СС 2 (css2) — вход по развороту лаборатории,
 # шорты e5s / e5p — тот же поиск пампа, вход по EMA50 5м.
 # Cursor SS (css) с вкладки снят: новые сделки не открываются.
 PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
-PAPER_VARIANTS = ("t20", "p10", "mln", "lt20", "css2", "sc10", "e5s", "e5p")
+PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
+PAPER_VARIANTS = ("t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
+PAPER_T20P_VARIANT = "t20p"
+PAPER_P10P_VARIANT = "p10p"
+PAPER_MLNP_VARIANT = "mlnp"
 PAPER_LT20_VARIANT = "lt20"
 PAPER_CSS_VARIANT = "css"
 PAPER_CSS2_VARIANT = "css2"
@@ -284,6 +290,12 @@ PAPER_ENTRY_LATE_EXT_MAX_DRAWDOWN_PCT = _env_float("PAPER_ENTRY_LATE_EXT_MAX_DRA
 PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT = _env_float("PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT", 60.0)
 PAPER_ENTRY_LATE_EXT_SELL_WINDOWS_REQUIRED = _env_int("PAPER_ENTRY_LATE_EXT_SELL_WINDOWS_REQUIRED", 2)
 
+# Копии t20p/p10p/mlnp: все пункты обязательны, «5 из 9» и покупки ≥70% не используются.
+PAPER_PLUS_NO_HIGH_BARS = _env_int("PAPER_PLUS_NO_HIGH_BARS", 7)
+PAPER_PLUS_SELL_SHARE_MIN_PCT = _env_float("PAPER_PLUS_SELL_SHARE_MIN_PCT", 55.0)
+PAPER_PLUS_LATE_SINCE_MIN = _env_float("PAPER_PLUS_LATE_SINCE_MIN", 180.0)
+PAPER_PLUS_LATE_MAX_DD_PCT = _env_float("PAPER_PLUS_LATE_MAX_DD_PCT", 15.0)
+
 
 def paper_is_long(variant: str) -> bool:
     return variant == PAPER_LT20_VARIANT
@@ -300,14 +312,16 @@ def paper_stop_style(variant: str) -> str:
         return "e5s"
     if variant == PAPER_E5P_VARIANT:
         return "e5p"
-    if variant == PAPER_MLN_VARIANT:
+    if variant in (PAPER_MLN_VARIANT, PAPER_MLNP_VARIANT):
         return "mln"
     return "default"
 
 
 def paper_peak_gap_roe(variant: str) -> float:
-    """Лок «пик − gap» только у p10; t20/lt20 — свои правила ROE."""
-    return PAPER_TRAIL_PEAK_GAP_ROE if variant == PAPER_P10_VARIANT else 0.0
+    """Лок «пик − gap» у p10 и копии 10 п.п.+; t20/lt20 — свои правила ROE."""
+    if variant in (PAPER_P10_VARIANT, PAPER_P10P_VARIANT):
+        return PAPER_TRAIL_PEAK_GAP_ROE
+    return 0.0
 
 
 # Лонг lt20: −10% → BE в плюсе → +10% лок +5% → трейл 20 п.п.

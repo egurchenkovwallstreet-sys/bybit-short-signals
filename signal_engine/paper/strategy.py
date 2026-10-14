@@ -3,8 +3,9 @@
 Кандидат — один памп одной монеты. Пока он жив, каждые 3 секунды проверяются
 все обязательные условия. Три варианта с одним входом (шлюз + 5 из 9) и разными
 выходами: t20 (+3%→+0.5% / +10%→+2% net / +7%→+5% / трейл 20 п.п.), p10 (те же net-локи и пик − 10)
-и Молния (−10% ROE, +2.5%→+2%, +6%→+4%, +7%→+5%, дальше трейл пик − 20 п.п.). У каждого
-свой счёт. Не хватило ровно одного из 9 — теневая сделка.
+и Молния (−10% ROE, +2.5%→+2%, +6%→+4%, +7%→+5%, дальше трейл пик − 20 п.п.).
+Копии Трейл 20+ / 10 п.п.+ / Молния+ берут тот же выход, но входят только когда
+прошли все жёсткие проверки plus_detect. У каждого свой счёт. Не хватило ровно одного из 9 — теневая сделка.
 Всё пишется в SQLite для анализа.
 """
 
@@ -61,6 +62,12 @@ from signal_engine.paper.e5s_detect import (
     E5S_CHECK_LABELS,
     E5S_MANDATORY,
     evaluate_e5s,
+)
+from signal_engine.paper.plus_detect import (
+    PLUS_CHECK_LABELS,
+    PLUS_MANDATORY,
+    evaluate_plus,
+    plus_hit_first_stop,
 )
 from signal_engine.paper.growth_detect import (
     GROWTH_CHECK_LABELS,
@@ -192,6 +199,7 @@ class PaperStrategy:
         self.css_candidates: dict[str, CssCandidate] = {}
         self.css2_candidates: dict[str, Css2Candidate] = {}
         self.css2_blocked: dict[str, int] = {}
+        self.plus_blocked: dict[str, set[int]] = {}
         self._sc10_used_bars: dict[str, int] = {}
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
@@ -215,6 +223,13 @@ class PaperStrategy:
         blocked = _loads(self.store.get_kv("css2_blocked")) or {}
         if isinstance(blocked, dict):
             self.css2_blocked = {str(k): int(v) for k, v in blocked.items() if v}
+        plus_blocked = _loads(self.store.get_kv("plus_blocked_peaks")) or {}
+        if isinstance(plus_blocked, dict):
+            self.plus_blocked = {
+                str(symbol): {int(ts) for ts in peaks if ts}
+                for symbol, peaks in plus_blocked.items()
+                if isinstance(peaks, list)
+            }
         if self.store.get_kv("started_at") is None:
             self.store.set_kv("started_at", str(now))
         for variant in VARIANTS:
@@ -632,6 +647,8 @@ class PaperStrategy:
             self._on_css_trade_closed(trade, pos, now_ms)
         if variant == config.PAPER_CSS2_VARIANT:
             self._on_css2_trade_closed(trade, now_ms)
+        if variant in config.PAPER_PLUS_VARIANTS:
+            self._on_plus_trade_closed(trade, result)
         log.info(
             "Тест [%s]: закрыт шорт %s (%s), P&L %+.2f USD (%+.1f%%), баланс %.2f",
             variant,
@@ -770,12 +787,14 @@ class PaperStrategy:
             cand.pump = pump
             ev = evaluate(state, tape, pump, self.klines.get(symbol, {}), btc_4h, now_ms)
             e5s_ev = evaluate_e5s(state, tape, pump, self.klines.get(symbol, {}), now_ms)
+            plus_ev = evaluate_plus(state, tape, self.klines.get(symbol, {}), now_ms, ev)
             cand.scans += 1
             for key in ev.failed:
                 cand.fail_counts[key] = cand.fail_counts.get(key, 0) + 1
             cand.best_passed = max(cand.best_passed, ev.passed_count)
             data = ev.to_data()
             data["e5s"] = e5s_ev.to_data()
+            data["plus"] = plus_ev.to_data()
             cand.last_eval = data
             cand.dirty = True
             notes = []
@@ -808,6 +827,24 @@ class PaperStrategy:
                         notes.append(f"{label}: нет свободной маржи")
                         continue
                     self._open_trade(variant, cand, state, e5s_ev, margin, now_ms)
+            if plus_ev.passed:
+                peak_ts = int(cand.pump.peak_ts or 0)
+                if peak_ts and peak_ts in self.plus_blocked.get(symbol, ()):
+                    notes.append("копии: этот пик уже закрыт первым стопом")
+                else:
+                    for variant in config.PAPER_PLUS_VARIANTS:
+                        label = VARIANT_LABELS.get(variant, variant)
+                        if (variant, symbol) in self.trades:
+                            continue
+                        if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                            notes.append(f"{label}: пауза после сделки")
+                            continue
+                        balance = self.balances[variant]
+                        margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                        if margin <= 0 or balance - self.used_margin(variant) < margin:
+                            notes.append(f"{label}: нет свободной маржи")
+                            continue
+                        self._open_trade(variant, cand, state, plus_ev, margin, now_ms)
             cand.note = "; ".join(notes) or None
             if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
@@ -1307,6 +1344,21 @@ class PaperStrategy:
             self.css2_blocked[trade.symbol] = max(self.css2_blocked.get(trade.symbol, 0), valley)
             self.store.set_kv("css2_blocked", json.dumps(self.css2_blocked))
 
+    def _on_plus_trade_closed(self, trade: OpenTrade, result: dict) -> None:
+        roe = float(result.get("roe_pct") or 0.0)
+        if not plus_hit_first_stop(trade.variant, roe, trade.pos.max_roe()):
+            return
+        pump = (trade.entry.get("metrics") or {}).get("pump") or {}
+        peak_ts = int(pump.get("peak_ts") or 0)
+        if peak_ts <= 0:
+            return
+        peaks = self.plus_blocked.setdefault(trade.symbol, set())
+        if peak_ts in peaks:
+            return
+        peaks.add(peak_ts)
+        payload = {symbol: sorted(values)[-30:] for symbol, values in self.plus_blocked.items() if values}
+        self.store.set_kv("plus_blocked_peaks", json.dumps(payload))
+
     def _end_css2_candidate(self, cand: Css2Candidate, reason: str, now_ms: int) -> None:
         status = "entered" if cand.entered else "expired"
         self.store.update_candidate(
@@ -1491,7 +1543,13 @@ class PaperStrategy:
             price,
             margin,
             ev.passed_count,
-            len(E5S_MANDATORY) if variant in (config.PAPER_E5S_VARIANT, config.PAPER_E5P_VARIANT) else len(MANDATORY),
+            (
+                len(E5S_MANDATORY)
+                if variant in (config.PAPER_E5S_VARIANT, config.PAPER_E5P_VARIANT)
+                else len(PLUS_MANDATORY)
+                if variant in config.PAPER_PLUS_VARIANTS
+                else len(MANDATORY)
+            ),
             ev.score,
         )
 
@@ -1760,6 +1818,7 @@ class PaperStrategy:
             "css2_check_labels": CSS2_CHECK_LABELS,
             "sc10_check_labels": SC10_CHECK_LABELS,
             "e5s_check_labels": E5S_CHECK_LABELS,
+            "plus_check_labels": PLUS_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
             "growth_flex": list(GROWTH_FLEX),
@@ -1767,6 +1826,7 @@ class PaperStrategy:
             "css2_mandatory": list(CSS2_MANDATORY),
             "sc10_mandatory": list(SC10_MANDATORY),
             "e5s_mandatory": list(E5S_MANDATORY),
+            "plus_mandatory": list(PLUS_MANDATORY),
             "analytics": self._analytics,
         }
 

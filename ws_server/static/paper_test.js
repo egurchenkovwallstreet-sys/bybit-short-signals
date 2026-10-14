@@ -32,7 +32,8 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703" };
+  const PLUS_VARIANTS = { t20p: true, p10p: true, mlnp: true };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -101,6 +102,7 @@
     if (paper.variant === "css2") return paper.data.css2_check_labels || {};
     if (paper.variant === "sc10") return paper.data.sc10_check_labels || {};
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_check_labels || {};
+    if (PLUS_VARIANTS[paper.variant]) return paper.data.plus_check_labels || {};
     return paper.data.check_labels || {};
   }
   function mandatory() {
@@ -110,11 +112,12 @@
     if (paper.variant === "css2") return paper.data.css2_mandatory || [];
     if (paper.variant === "sc10") return paper.data.sc10_mandatory || [];
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_mandatory || [];
+    if (PLUS_VARIANTS[paper.variant]) return paper.data.plus_mandatory || [];
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "lt20", "css2", "sc10", "e5s", "e5p"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p"];
   }
   function variantProfit(v) {
     const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
@@ -133,6 +136,7 @@
   function candEval(r) {
     const ev = (r && r.eval) || {};
     if (paper.variant === "e5s" || paper.variant === "e5p") return ev.e5s || ev;
+    if (PLUS_VARIANTS[paper.variant]) return ev.plus || { checks: {}, passed_count: undefined };
     return ev;
   }
   function candidateRows() {
