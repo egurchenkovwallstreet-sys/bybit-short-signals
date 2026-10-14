@@ -66,9 +66,10 @@ class Swing1HTest(unittest.TestCase):
 
     def test_pullback_entry_band(self) -> None:
         peak = 130.0
-        self.assertFalse(pullback_entry_ok(pullback_pct_from_peak(peak, 128.7)))  # ~1%
+        self.assertFalse(pullback_entry_ok(pullback_pct_from_peak(peak, 129.5)))  # ~0.4%
         self.assertTrue(pullback_entry_ok(pullback_pct_from_peak(peak, 126.1)))  # ~3%
-        self.assertFalse(pullback_entry_ok(pullback_pct_from_peak(peak, 119.6)))  # ~8%
+        self.assertTrue(pullback_entry_ok(pullback_pct_from_peak(peak, 121.0)))  # ~6.9%
+        self.assertFalse(pullback_entry_ok(pullback_pct_from_peak(peak, 118.0)))  # ~9.2%
 
     def test_find_growth_needs_structure(self) -> None:
         state = SymbolState("GUSDT")
@@ -81,7 +82,7 @@ class Swing1HTest(unittest.TestCase):
 
     def test_evaluate_turbo_needs_pullback_and_ema(self) -> None:
         state = SymbolState("GUSDT")
-        state.last_price = 128.5  # ~1.2% откат — не вход
+        state.last_price = 129.8  # ~0.15% откат — не вход
         state.bars_1m = []
         for h in range(10):
             ts = NOW - h * HOUR

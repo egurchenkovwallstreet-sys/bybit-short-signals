@@ -37,15 +37,15 @@ CSS_MANDATORY = (
 )
 
 CSS_CHECK_LABELS = {
-    "pump_volume": "Объём на пампа ×8+",
-    "pump_buys": "Покупки на пампа ≥65%",
+    "pump_volume": f"Объём на пампа ×{config.PAPER_CSS_VOLUME_MIN_RATIO:g}+",
+    "pump_buys": f"Покупки на пампа ≥{config.PAPER_CSS_BUY_SHARE_MIN_PCT:g}%",
     "no_new_high_15m": "Закрытая 15м без нового хая",
     "volume_fade": "Объём затих после климакса",
     "buys_faded": "Агрессивные покупки упали",
     "short_liq_faded": "Ликвидации шортов затихли",
     "sells_dominate": "Продажи преобладают 5/10/15 мин",
     "dump_break": "Дамп: пробой низа полки",
-    "drawdown_ok": "Откат от пика ≤15%",
+    "drawdown_ok": f"Откат от пика ≤{config.PAPER_CSS_MAX_DRAWDOWN_PCT:g}%",
 }
 
 
@@ -133,7 +133,7 @@ def _precise_peak_ts(state: SymbolState, bucket_ts: int, peak_price: float) -> i
 
 
 def find_css_pump(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> CssPumpInfo | None:
-    """Быстрый памп из базы: +20% за ≤4 ч, не многодневный грайнд."""
+    """Быстрый памп из базы: +12% за ≤6 ч, не многодневный грайнд."""
     bars15 = merged_15m(state)
     if len(bars15) < 8:
         return None
@@ -251,10 +251,11 @@ def evaluate_css(
         f"≥ ×{config.PAPER_CSS_VOLUME_MIN_RATIO:g}",
     )
     bs = pump.buy_share_pct
+    buys_ok = bs is None or bs >= config.PAPER_CSS_BUY_SHARE_MIN_PCT
     checks["pump_buys"] = _check(
-        bs is not None and bs >= config.PAPER_CSS_BUY_SHARE_MIN_PCT,
+        buys_ok,
         _r(bs, 1) if bs is not None else f"нет ленты ({pump.tape_minutes} мин)",
-        f"≥ {config.PAPER_CSS_BUY_SHARE_MIN_PCT:g}%",
+        f"≥ {config.PAPER_CSS_BUY_SHARE_MIN_PCT:g}% или нет ленты",
     )
 
     closed15 = closed_bars(klines.get("15") or merged_15m(state), "15", now_ms)
@@ -320,7 +321,6 @@ def evaluate_css(
         _fill_stall(pump, state, now_ms)
         if (
             checks["no_new_high_15m"]["ok"]
-            and fading
             and pump.stall_low is not None
             and last >= pump.stall_low
         ):

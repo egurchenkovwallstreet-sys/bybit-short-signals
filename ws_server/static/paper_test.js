@@ -111,8 +111,9 @@
   function candidateRows() {
     const rows = (paper.data && paper.data.candidates) || [];
     if (paper.variant === "css") return rows.filter((r) => r.episode === "css");
+    if (paper.variant === "lt20") return rows.filter((r) => r.episode === "growth");
     if (paper.variant === "sc10") return [];
-    return rows.filter((r) => r.episode !== "css" && r.episode !== "sc10");
+    return rows.filter((r) => r.episode !== "css" && r.episode !== "sc10" && r.episode !== "growth");
   }
   function vlabel(v) {
     return ((paper.data && paper.data.variant_labels) || {})[v] || v;

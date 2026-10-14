@@ -48,7 +48,8 @@ from signal_engine.paper.sc10_detect import (
 )
 from signal_engine.paper.growth_detect import (
     GROWTH_CHECK_LABELS,
-    GROWTH_MANDATORY,
+    GROWTH_CORE,
+    GROWTH_FLEX,
     GrowthEvaluation,
     GrowthInfo,
     evaluate_growth,
@@ -590,7 +591,7 @@ class PaperStrategy:
 
     def _detect(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for symbol, state in states.items():
-            if symbol in self.candidates or symbol in self.growth_candidates or not state.last_price:
+            if symbol in self.candidates or not state.last_price:
                 continue
             pump = find_pump(state, self.tape.symbols.get(symbol), now_ms)
             if pump is None:
@@ -619,7 +620,7 @@ class PaperStrategy:
 
     def _detect_growth(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for symbol, state in states.items():
-            if symbol in self.growth_candidates or symbol in self.candidates or not state.last_price:
+            if symbol in self.growth_candidates or not state.last_price:
                 continue
             growth = find_growth(state, self.tape.symbols.get(symbol), now_ms, self.klines.get(symbol, {}))
             if growth is None:
@@ -723,8 +724,13 @@ class PaperStrategy:
             tape = self.tape.get(symbol)
             growth = find_growth(state, tape, now_ms, self.klines.get(symbol, {}))
             if growth is None:
-                self._end_growth_candidate(cand, "условия роста больше не выполняются", now_ms)
-                continue
+                last = float(state.last_price)
+                peak = cand.growth.peak_price
+                dd = (peak - last) / peak * 100.0 if peak > 0 else 999.0
+                if dd > config.PAPER_GROWTH_MAX_PULLBACK_PCT or last <= cand.growth.anchor_price:
+                    self._end_growth_candidate(cand, "условия роста больше не выполняются", now_ms)
+                    continue
+                growth = cand.growth
             cand.growth = growth
             ev = evaluate_growth(state, tape, growth, self.klines.get(symbol, {}), now_ms)
             cand.scans += 1
@@ -830,8 +836,16 @@ class PaperStrategy:
             tape = self.tape.get(symbol)
             pump = find_css_pump(state, tape, now_ms)
             if pump is None:
-                self._end_css_candidate(cand, "условия Cursor SS больше не выполняются", now_ms)
-                continue
+                last = float(state.last_price)
+                peak = cand.pump.peak_price
+                dd = (1.0 - last / peak) * 100.0 if peak > 0 else 999.0
+                age_ms = now_ms - cand.pump.peak_ts
+                if dd > config.PAPER_CSS_MAX_DRAWDOWN_PCT or age_ms > int(
+                    config.PAPER_CSS_LIFETIME_HOURS * 3_600_000
+                ):
+                    self._end_css_candidate(cand, "условия Cursor SS больше не выполняются", now_ms)
+                    continue
+                pump = cand.pump
             if pump.peak_price > cand.pump.peak_price + 1e-12:
                 cand.rearm_needed = False
             pump.stall_frozen = cand.pump.stall_frozen and pump.peak_price <= cand.pump.peak_price + 1e-12
@@ -1388,7 +1402,8 @@ class PaperStrategy:
             "css_check_labels": CSS_CHECK_LABELS,
             "sc10_check_labels": SC10_CHECK_LABELS,
             "mandatory": list(MANDATORY),
-            "growth_mandatory": list(GROWTH_MANDATORY),
+            "growth_mandatory": list(GROWTH_CORE),
+            "growth_flex": list(GROWTH_FLEX),
             "css_mandatory": list(CSS_MANDATORY),
             "sc10_mandatory": list(SC10_MANDATORY),
             "analytics": self._analytics,

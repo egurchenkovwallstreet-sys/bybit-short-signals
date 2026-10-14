@@ -16,7 +16,12 @@ from signal_engine.swing_highs import closed_bars
 from signal_engine.paper.tape import SymbolTape
 from signal_engine.state import Bar, SymbolState
 
-GROWTH_MANDATORY = (
+GROWTH_CORE = (
+    "hh_structure_12h",
+    "pullback_entry",
+    "ema_above",
+)
+GROWTH_FLEX = (
     "oi_1h_up",
     "oi_4h_up",
     "buys_rising_1h",
@@ -24,26 +29,27 @@ GROWTH_MANDATORY = (
     "volume_up_1h",
     "volume_up_4h",
     "volume_avg_4h",
-    "ema_above",
     "hh_hl_1h",
-    "hh_structure_12h",
-    "pullback_entry",
 )
+GROWTH_MANDATORY = GROWTH_CORE + GROWTH_FLEX
 
 GROWTH_CHECK_LABELS = {
     "oi_1h_up": "OI ↑ за 1 ч",
     "oi_4h_up": "OI ↑ за 4 ч",
     "buys_rising_1h": "Покупки растут за 1 ч",
-    "buy_share_60": "Покупки > 60%",
-    "volume_up_1h": "Объём ↑ за 1 ч ≥ 20%",
-    "volume_up_4h": "Объём ↑ за 4 ч ≥ 20%",
-    "volume_avg_4h": "Средний рост объёма за 4 ч ≥ 20%/ч",
-    "ema_above": "Цена выше EMA 50/100/200 (15m–4h)",
+    "buy_share_60": f"Покупки > {config.PAPER_GROWTH_BUY_SHARE_MIN:g}%",
+    "volume_up_1h": f"Объём ↑ за 1 ч ≥ {config.PAPER_GROWTH_VOL_GROWTH_MIN_PCT:g}%",
+    "volume_up_4h": f"Объём ↑ за 4 ч ≥ {config.PAPER_GROWTH_VOL_GROWTH_MIN_PCT:g}%",
+    "volume_avg_4h": f"Средний рост объёма за 4 ч ≥ {config.PAPER_GROWTH_VOL_GROWTH_MIN_PCT:g}%/ч",
+    "ema_above": "Цена выше EMA50 на 15m и 1H",
     "hh_hl_1h": "1H: high и low выше предыдущих",
     "hh_structure_12h": "Структура HH за 12 ч (1H swing)",
-    "pullback_entry": "Откат 2–5% от HH 1H",
-    "turbo_vol_x3": "Турбо: объём ×3 за 4 ч",
-    "turbo_buys_75": "Турбо: покупки > 75%",
+    "pullback_entry": (
+        f"Откат {config.PAPER_GROWTH_PULLBACK_MIN_PCT:g}–"
+        f"{config.PAPER_GROWTH_PULLBACK_MAX_PCT:g}% от HH 1H"
+    ),
+    "turbo_vol_x3": f"Турбо: объём ×{config.PAPER_GROWTH_TURBO_VOL_RATIO:g} за 4 ч",
+    "turbo_buys_75": f"Турбо: покупки ≥ {config.PAPER_GROWTH_BUY_SHARE_TURBO:g}%",
 }
 
 
@@ -90,12 +96,16 @@ class GrowthEvaluation:
         return bool(self.checks.get("pullback_entry", {}).get("ok"))
 
     @property
+    def flex_passed(self) -> int:
+        return sum(1 for k in GROWTH_FLEX if self.checks.get(k, {}).get("ok"))
+
+    @property
     def passed(self) -> bool:
         if not self.ema_ok or not self.structure_ok or not self.pullback_ok:
             return False
         if self.turbo:
             return True
-        return all(self.checks[k]["ok"] for k in GROWTH_MANDATORY)
+        return self.flex_passed >= config.PAPER_GROWTH_FLEX_MIN
 
     @property
     def failed(self) -> list[str]:
@@ -108,9 +118,10 @@ class GrowthEvaluation:
             out.append("pullback_entry")
         if self.turbo:
             return out
-        for k in GROWTH_MANDATORY:
-            if not self.checks.get(k, {}).get("ok") and k not in out:
-                out.append(k)
+        if self.flex_passed < config.PAPER_GROWTH_FLEX_MIN:
+            for k in GROWTH_FLEX:
+                if not self.checks.get(k, {}).get("ok") and k not in out:
+                    out.append(k)
         return out
 
     @property
@@ -315,15 +326,26 @@ def evaluate_growth(
     )
 
     emas = ema_table(klines, now_ms)
+    ema_keys = config.PAPER_GROWTH_EMA_KEYS
     above = all(
-        row.get("close") is not None and row.get("ema") is not None and row["close"] > row["ema"]
-        for row in emas.values()
+        emas.get(k, {}).get("close") is not None
+        and emas.get(k, {}).get("ema") is not None
+        and emas[k]["close"] > emas[k]["ema"]
+        for k in ema_keys
     )
-    failed_emas = [k for k, v in emas.items() if not (v.get("close") and v.get("ema") and v["close"] > v["ema"])]
+    failed_emas = [
+        k
+        for k in ema_keys
+        if not (
+            emas.get(k, {}).get("close")
+            and emas.get(k, {}).get("ema")
+            and emas[k]["close"] > emas[k]["ema"]
+        )
+    ]
     checks["ema_above"] = _check(
         above,
-        {"ok_count": len(emas) - len(failed_emas), "total": len(emas), "missing": failed_emas[:5]},
-        "все TF × EMA50/100/200",
+        {"ok_count": len(ema_keys) - len(failed_emas), "total": len(ema_keys), "missing": failed_emas},
+        "15m и 1H выше EMA50",
     )
 
     bars_1h = closed_bars(klines.get("60") or [], "60", now_ms)
@@ -344,7 +366,7 @@ def evaluate_growth(
         vol_ratio = vol_4h / vol_4h_prev
     turbo_vol = vol_ratio is not None and vol_ratio >= config.PAPER_GROWTH_TURBO_VOL_RATIO
     turbo_buys = buy_share is not None and buy_share >= config.PAPER_GROWTH_BUY_SHARE_TURBO
-    turbo_oi = (oi_1h is not None and oi_1h > 0) and (oi_4h is not None and oi_4h > 0)
+    turbo_oi = (oi_1h is not None and oi_1h > 0) or (oi_4h is not None and oi_4h > 0)
     turbo = turbo_vol and turbo_buys and turbo_oi and above
 
     checks["turbo_vol_x3"] = _check(

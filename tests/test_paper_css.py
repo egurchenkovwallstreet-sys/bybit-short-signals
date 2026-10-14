@@ -111,6 +111,15 @@ class CssDetectTest(unittest.TestCase):
         self.assertFalse(ev.checks["dump_break"]["ok"])
         self.assertFalse(ev.passed)
 
+    def test_missing_tape_does_not_block_buys(self) -> None:
+        state = css_state(dump=True)
+        pump = find_css_pump(state, None, NOW)
+        self.assertIsNotNone(pump)
+        assert pump is not None
+        self.assertIsNone(pump.buy_share_pct)
+        ev = evaluate_css(state, SymbolTape(), pump, {}, NOW)
+        self.assertTrue(ev.checks["pump_buys"]["ok"])
+
     def test_dump_enables_entry(self) -> None:
         state = css_state(dump=True)
         tape = css_tape(dump=True)
