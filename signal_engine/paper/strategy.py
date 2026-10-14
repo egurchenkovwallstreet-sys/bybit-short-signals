@@ -46,6 +46,11 @@ from signal_engine.paper.sc10_detect import (
     Sc10Evaluation,
     evaluate_sc10,
 )
+from signal_engine.paper.e5s_detect import (
+    E5S_CHECK_LABELS,
+    E5S_MANDATORY,
+    evaluate_e5s,
+)
 from signal_engine.paper.growth_detect import (
     GROWTH_CHECK_LABELS,
     GROWTH_CORE,
@@ -688,11 +693,14 @@ class PaperStrategy:
                 continue
             cand.pump = pump
             ev = evaluate(state, tape, pump, self.klines.get(symbol, {}), btc_4h, now_ms)
+            e5s_ev = evaluate_e5s(state, tape, pump, self.klines.get(symbol, {}), now_ms)
             cand.scans += 1
             for key in ev.failed:
                 cand.fail_counts[key] = cand.fail_counts.get(key, 0) + 1
             cand.best_passed = max(cand.best_passed, ev.passed_count)
-            cand.last_eval = ev.to_data()
+            data = ev.to_data()
+            data["e5s"] = e5s_ev.to_data()
+            cand.last_eval = data
             cand.dirty = True
             notes = []
             if ev.entry_blocked:
@@ -710,6 +718,18 @@ class PaperStrategy:
                     notes.append(f"{VARIANT_LABELS.get(variant, variant)}: нет свободной маржи")
                     continue
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
+            if e5s_ev.passed:
+                variant = config.PAPER_E5S_VARIANT
+                if (variant, symbol) not in self.trades:
+                    if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                        notes.append("EMA50 5м: пауза после сделки")
+                    else:
+                        balance = self.balances[variant]
+                        margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                        if margin <= 0 or balance - self.used_margin(variant) < margin:
+                            notes.append("EMA50 5м: нет свободной маржи")
+                        else:
+                            self._open_trade(variant, cand, state, e5s_ev, margin, now_ms)
             cand.note = "; ".join(notes) or None
             if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
@@ -1103,6 +1123,7 @@ class PaperStrategy:
             margin=margin,
             next_funding_ts=nft,
             peak_gap_roe=config.paper_peak_gap_roe(variant),
+            stop_style=config.paper_stop_style(variant),
         )
         entry = ev.to_data()
         trade_id = self.store.insert_trade(
@@ -1158,7 +1179,7 @@ class PaperStrategy:
             price,
             margin,
             ev.passed_count,
-            len(MANDATORY),
+            len(E5S_MANDATORY) if variant == config.PAPER_E5S_VARIANT else len(MANDATORY),
             ev.score,
         )
 
@@ -1401,11 +1422,13 @@ class PaperStrategy:
             "growth_check_labels": GROWTH_CHECK_LABELS,
             "css_check_labels": CSS_CHECK_LABELS,
             "sc10_check_labels": SC10_CHECK_LABELS,
+            "e5s_check_labels": E5S_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
             "growth_flex": list(GROWTH_FLEX),
             "css_mandatory": list(CSS_MANDATORY),
             "sc10_mandatory": list(SC10_MANDATORY),
+            "e5s_mandatory": list(E5S_MANDATORY),
             "analytics": self._analytics,
         }
 

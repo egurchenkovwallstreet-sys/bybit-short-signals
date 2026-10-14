@@ -84,7 +84,7 @@ class SignalService:
             self.engine.watches.close()
 
     async def _paper_kline_loop(self) -> None:
-        """Свечи 15m/30m/1H/4H с глубиной под EMA200 — только для кандидатов теста."""
+        """Свечи 5m/15m/30m/1H/4H с глубиной под EMA — только для кандидатов теста."""
         from collector.rest_client import BybitRest
 
         paper = self.engine.paper
@@ -97,7 +97,7 @@ class SignalService:
                     fetched = paper.kline_at.get(symbol, 0.0)
                     if time.time() - fetched < config.PAPER_KLINE_REFRESH_SEC:
                         continue
-                    for interval in config.PAPER_EMA_INTERVALS:
+                    for interval in (*config.PAPER_EMA_INTERVALS, "5"):
                         try:
                             message = await rest.fetch_klines(symbol, interval, config.PAPER_KLINE_LIMIT)
                         except asyncio.CancelledError:

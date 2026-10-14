@@ -197,6 +197,30 @@ def sc10_trail_stop(
     return net_roe_stop_price(entry, margin, peak - gap, lev, entry_fee, funding_paid)
 
 
+def e5s_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """e5s: стоп −20% ROE, с пика ≥ +10% — net-безубыток, дальше трейл 20 п.п."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    initial = net_roe_stop_price(
+        entry, margin, config.PAPER_E5S_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    if peak < config.PAPER_E5S_BE_ARM_ROE:
+        return initial
+    be = net_breakeven_stop_price(entry, margin, lev, entry_fee, funding_paid)
+    lock_roe = peak - config.PAPER_E5S_TRAIL_GAP_ROE
+    if lock_roe <= 0:
+        return be
+    return min(be, price_for_roe(entry, lock_roe, lev))
+
+
 def _net_lock_price(
     entry: float,
     margin: float,
@@ -330,6 +354,17 @@ class Position:
                 self.stop_price = max(self.liq_price, trail)
             else:
                 self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "e5s":
+            trail = e5s_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+            )
+            self.stop_price = min(self.liq_price, trail)
             return
         if self.side == "long":
             trail = trail_stop_long(

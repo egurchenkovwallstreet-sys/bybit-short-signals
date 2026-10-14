@@ -53,6 +53,7 @@ VARIANT_LABELS = {
     "lt20": "Лонг t20",
     "css": "Cursor SS",
     "sc10": "Скальп 10",
+    "e5s": "EMA50 5м",
 }
 
 ENTRY_GATE_LABELS = {

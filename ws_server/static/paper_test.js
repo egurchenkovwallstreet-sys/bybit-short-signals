@@ -32,7 +32,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623", sc10: "#00c2c7" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", lt20: "#3ddc84", css: "#f5a623", sc10: "#00c2c7", e5s: "#ff6b8a" };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -96,6 +96,7 @@
     if (paper.variant === "lt20") return paper.data.growth_check_labels || {};
     if (paper.variant === "css") return paper.data.css_check_labels || {};
     if (paper.variant === "sc10") return paper.data.sc10_check_labels || {};
+    if (paper.variant === "e5s") return paper.data.e5s_check_labels || {};
     return paper.data.check_labels || {};
   }
   function mandatory() {
@@ -103,10 +104,16 @@
     if (paper.variant === "lt20") return paper.data.growth_mandatory || [];
     if (paper.variant === "css") return paper.data.css_mandatory || [];
     if (paper.variant === "sc10") return paper.data.sc10_mandatory || [];
+    if (paper.variant === "e5s") return paper.data.e5s_mandatory || [];
     return paper.data.mandatory || [];
   }
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css", "sc10"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "lt20", "css", "sc10", "e5s"];
+  }
+  function candEval(r) {
+    const ev = (r && r.eval) || {};
+    if (paper.variant === "e5s") return ev.e5s || ev;
+    return ev;
   }
   function candidateRows() {
     const rows = (paper.data && paper.data.candidates) || [];
@@ -392,7 +399,7 @@
       <th>Вершина</th><th>Подходит / в сделке</th><th>Сила</th><th>Тень</th>
     </tr></thead><tbody>${rows
       .map((r) => {
-        const ev = r.eval || {};
+        const ev = candEval(r);
         const m = ev.metrics || {};
         const p = r.pump || {};
         const ss = m.sell_share || {};
@@ -565,7 +572,7 @@
     }
     if (sel.type === "cand") {
       const r = (paper.data.candidates || []).find((x) => x.id === sel.id);
-      return r ? { kind: "cand", row: r, symbol: r.symbol, ev: r.eval } : null;
+      return r ? { kind: "cand", row: r, symbol: r.symbol, ev: candEval(r) } : null;
     }
     if (sel.type === "hist") {
       const r = (paper.history || []).find((x) => x.id === sel.id);
