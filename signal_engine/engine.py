@@ -82,10 +82,6 @@ class Engine:
                 if opened is not None:
                     changed.append(opened.to_message("open", now_ms))
                 continue
-            if not _meets_turnover(state):
-                self._close(signal, "LOW_VOLUME", state.last_price or signal.last_price, now_ms)
-                changed.append(signal.to_message("close", now_ms))
-                continue
             outcome = classify_outcome(signal.entry_price, state.last_price or signal.last_price, signal.created_at, now_ms)
             if outcome is not None:
                 self._close(signal, outcome, state.last_price or signal.last_price, now_ms)
@@ -253,9 +249,6 @@ class Engine:
     def _board(self, now_ms: int) -> dict:
         grouped: dict[int, list[Signal]] = {level: [] for level in (5, 4, 3, 2, 1)}
         for signal in self.open_signals.values():
-            state = self.symbols.get(signal.symbol)
-            if state is not None and not _meets_turnover(state):
-                continue
             grouped[signal.strength].append(signal)
         columns = []
         for level in (5, 4, 3, 2, 1):

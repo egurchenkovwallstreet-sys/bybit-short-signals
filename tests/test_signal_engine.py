@@ -401,6 +401,36 @@ class EngineTest(unittest.TestCase):
             self.assertEqual((wins, total), (1, 1))
             store.close()
 
+    def test_low_turnover_does_not_close_open_signal(self) -> None:
+        closes, volumes = _strong_pump_series()
+        now = START + (len(closes) - 1) * 60_000
+        with tempfile.TemporaryDirectory() as folder:
+            engine, store = _engine(folder)
+            engine.ingest(_ticker("LOWUSDT", turnover=2_000_000.0))
+            engine.ingest(_klines("LOWUSDT", closes, volumes))
+            opened = engine.scan(now)
+            self.assertTrue(any(item["type"] == "signal" and item["data"]["event"] == "open" for item in opened))
+            engine.ingest(
+                {
+                    "symbol": "LOWUSDT",
+                    "timestamp": now + 30_000,
+                    "type": "ticker",
+                    "data": {"turnover_24h": 100_000.0},
+                }
+            )
+            later = engine.scan(now + 60_000)
+            self.assertFalse(any(item["type"] == "signal" and item["data"].get("outcome") == "LOW_VOLUME" for item in later))
+            self.assertIn("LOWUSDT", engine.open_signals)
+            board = [item for item in later if item["type"] == "board"][0]
+            symbols = [
+                signal["symbol"]
+                for column in board["data"]["columns"]
+                for signal in column["signals"]
+            ]
+            self.assertIn("LOWUSDT", symbols)
+            self.assertEqual(store.load_open()[0].symbol, "LOWUSDT")
+            store.close()
+
     def test_liquidation_and_time_exit(self) -> None:
         closes, volumes = _strong_pump_series()
         now = START + (len(closes) - 1) * 60_000

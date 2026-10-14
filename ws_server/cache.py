@@ -301,8 +301,6 @@ class MarketCache:
             signals = []
             for signal in column.get("signals") or []:
                 symbol = signal.get("symbol") or ""
-                if not self._signal_turnover_ok(symbol):
-                    continue
                 item = self._enrich_signal(symbol, dict(signal))
                 item["mini"] = self.mini_closes(symbol)
                 entry = item.get("entry_price")
