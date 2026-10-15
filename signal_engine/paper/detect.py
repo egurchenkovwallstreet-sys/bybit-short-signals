@@ -61,6 +61,32 @@ VARIANT_LABELS = {
     "p10p": "10 п.п.+",
     "mlnp": "Молния+",
     "c3": "Курсор3",
+    "mt1": "Мини тест 1",
+    "mt2": "Мини тест 2",
+}
+
+MINI_MANDATORY = (
+    "five_of_nine",
+    "trigger_4h_24h",
+    "since_peak",
+    "drawdown",
+    "price_20m",
+    "buys_faded",
+    "long_liq_quiet",
+    "ema_intact",
+    "score_cap",
+)
+
+MINI_CHECK_LABELS = {
+    "five_of_nine": "Шлюз образцов и любые 5 из 9",
+    "trigger_4h_24h": "Памп только 4ч или сутки",
+    "since_peak": f"С пика {config.PAPER_MINI_SINCE_PEAK_MIN:g}–{config.PAPER_MINI_SINCE_PEAK_MAX:g} мин, без позднего допуска",
+    "drawdown": f"Откат от пика ≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
+    "price_20m": f"Цена за 20 мин ≥ {config.PAPER_MINI_MIN_PRICE_20M_PCT:g}%",
+    "buys_faded": f"Покупки 15 мин ≤ {config.PAPER_BUYS_FADE_MAX_RATIO * 100:g}% от пика",
+    "long_liq_quiet": f"Ликвидации лонгов 15 мин ≤ ${config.PAPER_MINI_LONG_LIQ_MAX_USD:g}",
+    "ema_intact": "Ни одна EMA не пробита",
+    "score_cap": f"Оценка ≤ {config.PAPER_MINI_MAX_SCORE:g}",
 }
 
 C3_MANDATORY = (
@@ -300,7 +326,23 @@ def apply_peak_measurement(pump: PumpInfo, state: SymbolState, now_ms: int) -> b
     return changed
 
 
-def find_pump(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> PumpInfo | None:
+def mini_pump_floors() -> dict[str, float]:
+    """Пороги роста Мини теста: на 40% ниже образцов. Сравнение окон то же."""
+    scale = config.PAPER_MINI_PUMP_SCALE
+    return {
+        "4h": config.PAPER_SHORT_4H_MIN_PCT * scale,
+        "24h": config.PAPER_SHORT_24H_MIN_PCT * scale,
+        "7d": config.PAPER_LONG_7D_MIN_PCT * scale,
+        "14d": config.PAPER_LONG_14D_MIN_PCT * scale,
+    }
+
+
+def find_pump(
+    state: SymbolState,
+    tape: SymbolTape | None,
+    now_ms: int,
+    floors: dict[str, float] | None = None,
+) -> PumpInfo | None:
     """Пик за время жизни кандидата и рост к нему из окон 4 ч / 24 ч / 7 д / 14 д."""
     bars15 = merged_15m(state)
     if len(bars15) < 8:
@@ -320,17 +362,21 @@ def find_pump(state: SymbolState, tape: SymbolTape | None, now_ms: int) -> PumpI
     v14 = _valley(bars4h, peak_ts, 14 * 24 * HOUR_MS)
     growth = {"4h": _growth(peak, v4h), "24h": _growth(peak, v24), "7d": _growth(peak, v7d), "14d": _growth(peak, v14)}
 
+    floor_4h = config.PAPER_SHORT_4H_MIN_PCT if floors is None else floors["4h"]
+    floor_24h = config.PAPER_SHORT_24H_MIN_PCT if floors is None else floors["24h"]
+    floor_7d = config.PAPER_LONG_7D_MIN_PCT if floors is None else floors["7d"]
+    floor_14d = config.PAPER_LONG_14D_MIN_PCT if floors is None else floors["14d"]
     since_peak = now_ms - peak_ts
     choice: tuple[str, str, Bar, float] | None = None
     if since_peak <= config.PAPER_SHORT_LIFETIME_HOURS * HOUR_MS:
-        if growth["4h"] is not None and growth["4h"] > config.PAPER_SHORT_4H_MIN_PCT:
+        if growth["4h"] is not None and growth["4h"] > floor_4h:
             choice = ("short", "4h", v4h, growth["4h"])
-        elif growth["24h"] is not None and growth["24h"] >= config.PAPER_SHORT_24H_MIN_PCT:
+        elif growth["24h"] is not None and growth["24h"] >= floor_24h:
             choice = ("short", "24h", v24, growth["24h"])
     if choice is None and since_peak <= config.PAPER_LONG_LIFETIME_HOURS * HOUR_MS:
-        if growth["7d"] is not None and growth["7d"] >= config.PAPER_LONG_7D_MIN_PCT:
+        if growth["7d"] is not None and growth["7d"] >= floor_7d:
             choice = ("long", "7d", v7d, growth["7d"])
-        elif growth["14d"] is not None and growth["14d"] >= config.PAPER_LONG_14D_MIN_PCT:
+        elif growth["14d"] is not None and growth["14d"] >= floor_14d:
             choice = ("long", "14d", v14, growth["14d"])
     if choice is None:
         return None
@@ -629,6 +675,75 @@ def cursor3_view(metrics: dict, score: float, strict_btc: bool = False) -> dict:
         "passed_count": len(C3_MANDATORY) - len(failed),
         "failed": failed,
         "variants": [config.PAPER_C3_VARIANT] if passed else [],
+    }
+
+
+def mini_view(ev: Evaluation) -> dict:
+    """Мини тест: шлюз и 5 из 9, плюс отсев входов, которые дали большой минус на образцах."""
+    metrics = ev.metrics
+    pump = metrics.get("pump") or {}
+    trigger = str(pump.get("trigger") or "")
+    since = _c3_num(metrics.get("since_peak_min"))
+    drawdown = _c3_num(metrics.get("drawdown_from_peak_pct"))
+    price_20m = _c3_num(metrics.get("price_20m_pct"))
+    buys_fade = _c3_num(metrics.get("buys_fade_ratio"))
+    long_liq = _c3_num(metrics.get("long_liq_15m_usd"))
+    broken = metrics.get("ema_broken")
+    broken_n = len(broken) if isinstance(broken, list) else None
+    score_n = _c3_num(ev.score)
+    gate = paper_entry_blocks(metrics)
+    five_ok = ev.passed_count >= config.PAPER_V5_MIN_PASSED and not gate
+    five_value = f"{ev.passed_count}/9"
+    if gate:
+        five_value = f"{five_value}, шлюз: {', '.join(gate)}"
+    checks = {
+        "five_of_nine": _check(five_ok, five_value, f"≥ {config.PAPER_V5_MIN_PASSED} и шлюз открыт"),
+        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "4h или 24h"),
+        "since_peak": _check(
+            since is not None and config.PAPER_MINI_SINCE_PEAK_MIN <= since <= config.PAPER_MINI_SINCE_PEAK_MAX,
+            None if since is None else round(since),
+            f"{config.PAPER_MINI_SINCE_PEAK_MIN:g}–{config.PAPER_MINI_SINCE_PEAK_MAX:g} мин",
+        ),
+        "drawdown": _check(
+            drawdown is not None and drawdown <= config.PAPER_MINI_MAX_DRAWDOWN_PCT,
+            drawdown,
+            f"≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
+        ),
+        "price_20m": _check(
+            price_20m is not None and price_20m >= config.PAPER_MINI_MIN_PRICE_20M_PCT,
+            price_20m,
+            f"≥ {config.PAPER_MINI_MIN_PRICE_20M_PCT:g}%",
+        ),
+        "buys_faded": _check(
+            buys_fade is not None and buys_fade <= config.PAPER_BUYS_FADE_MAX_RATIO,
+            buys_fade,
+            f"≤ {config.PAPER_BUYS_FADE_MAX_RATIO:g}",
+        ),
+        "long_liq_quiet": _check(
+            long_liq is not None and long_liq <= config.PAPER_MINI_LONG_LIQ_MAX_USD,
+            None if long_liq is None else round(long_liq),
+            f"≤ ${config.PAPER_MINI_LONG_LIQ_MAX_USD:g}",
+        ),
+        "ema_intact": _check(broken_n == 0, broken_n, "0"),
+        "score_cap": _check(
+            score_n is not None and score_n <= config.PAPER_MINI_MAX_SCORE,
+            None if score_n is None else round(score_n, 1),
+            f"≤ {config.PAPER_MINI_MAX_SCORE:g}",
+        ),
+    }
+    failed = [key for key in MINI_MANDATORY if not checks[key]["ok"]]
+    passed = not failed
+    return {
+        "checks": checks,
+        "metrics": metrics,
+        "score": round(score_n or 0.0, 1),
+        "grade": grade_for(score_n or 0.0),
+        "strict_btc": ev.strict_btc,
+        "passed": passed,
+        "passed_count": len(MINI_MANDATORY) - len(failed),
+        "failed": failed,
+        "variants": list(config.PAPER_MINI_VARIANTS) if passed else [],
+        "entry_blocked": gate,
     }
 
 

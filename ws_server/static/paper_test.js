@@ -32,8 +32,9 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51" };
   const PLUS_VARIANTS = { t20p: true, p10p: true, mlnp: true };
+  const MINI_VARIANTS = { mt1: true, mt2: true };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -103,6 +104,7 @@
     if (paper.variant === "sc10") return paper.data.sc10_check_labels || {};
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_check_labels || {};
     if (paper.variant === "c3") return paper.data.c3_check_labels || {};
+    if (MINI_VARIANTS[paper.variant]) return paper.data.mini_check_labels || {};
     if (PLUS_VARIANTS[paper.variant]) return paper.data.plus_check_labels || {};
     return paper.data.check_labels || {};
   }
@@ -114,12 +116,13 @@
     if (paper.variant === "sc10") return paper.data.sc10_mandatory || [];
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_mandatory || [];
     if (paper.variant === "c3") return paper.data.c3_mandatory || [];
+    if (MINI_VARIANTS[paper.variant]) return paper.data.mini_mandatory || [];
     if (PLUS_VARIANTS[paper.variant]) return paper.data.plus_mandatory || [];
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2"];
   }
   function variantProfit(v) {
     const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
@@ -139,6 +142,7 @@
     const ev = (r && r.eval) || {};
     if (paper.variant === "e5s" || paper.variant === "e5p") return ev.e5s || ev;
     if (paper.variant === "c3") return ev.c3 || { checks: {}, passed_count: undefined, failed: [] };
+    if (MINI_VARIANTS[paper.variant]) return ev.mini || { checks: {}, passed_count: undefined, failed: [] };
     if (PLUS_VARIANTS[paper.variant]) return ev.plus || { checks: {}, passed_count: undefined };
     return ev;
   }
@@ -450,7 +454,7 @@
           <td>${pct(m.oi_1h_pct)} / ${pct(m.oi_4h_pct)}</td>
           <td>${m.funding_rate === null || m.funding_rate === undefined ? "—" : num(m.funding_rate * 100, 4) + "%"}</td>
           <td>${checkDots(ev)} ${passed}/${total}</td>
-          <td>${esc(paper.variant === "c3" ? (failed.join(", ") || "—") : (r.note || blocked.join(", ") || failed.join(", ") || "—"))}</td>
+          <td>${esc(paper.variant === "c3" || MINI_VARIANTS[paper.variant] ? (failed.join(", ") || "—") : (r.note || blocked.join(", ") || failed.join(", ") || "—"))}</td>
           <td>${st ? `${st.interval === "60" ? "1H" : "30m"} −${num(st.diff_pct, 1)}%` : "—"}</td>
           <td>${fits}${inTrade ? `<br><span class="quiet">в сделке:</span> ${inTrade}` : ""}</td>
           <td class="grade-${ev.grade || "C"}">${ev.grade || "—"} · ${num(ev.score, 1)}</td>

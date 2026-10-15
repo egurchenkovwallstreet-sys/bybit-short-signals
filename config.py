@@ -265,7 +265,9 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 # Cursor SS (css) с вкладки снят: новые сделки не открываются.
 PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
 PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
-PAPER_VARIANTS = ("t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3")
+PAPER_VARIANTS = (
+    "t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2",
+)
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -279,6 +281,9 @@ PAPER_SC10_VARIANT = "sc10"
 PAPER_E5S_VARIANT = "e5s"
 PAPER_E5P_VARIANT = "e5p"
 PAPER_C3_VARIANT = "c3"
+PAPER_MT1_VARIANT = "mt1"
+PAPER_MT2_VARIANT = "mt2"
+PAPER_MINI_VARIANTS = (PAPER_MT1_VARIANT, PAPER_MT2_VARIANT)
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
@@ -308,6 +313,16 @@ PAPER_C3_LONG_LIQ_MAX_USD = _env_float("PAPER_C3_LONG_LIQ_MAX_USD", 200.0)
 PAPER_C3_MAX_SCORE = _env_float("PAPER_C3_MAX_SCORE", 12.0)
 PAPER_C3_TRIGGERS = ("4h", "24h")
 
+# Мини тест 1 / 2: пороги роста пампа на 40% ниже образцов. Выход mt1 как t20, mt2 как p10.
+PAPER_MINI_PUMP_SCALE = _env_float("PAPER_MINI_PUMP_SCALE", 0.6)
+PAPER_MINI_SINCE_PEAK_MIN = _env_float("PAPER_MINI_SINCE_PEAK_MIN", 6.0)
+PAPER_MINI_SINCE_PEAK_MAX = _env_float("PAPER_MINI_SINCE_PEAK_MAX", 180.0)
+PAPER_MINI_MAX_DRAWDOWN_PCT = _env_float("PAPER_MINI_MAX_DRAWDOWN_PCT", 10.0)
+PAPER_MINI_MIN_PRICE_20M_PCT = _env_float("PAPER_MINI_MIN_PRICE_20M_PCT", 0.0)
+PAPER_MINI_LONG_LIQ_MAX_USD = _env_float("PAPER_MINI_LONG_LIQ_MAX_USD", 200.0)
+PAPER_MINI_MAX_SCORE = _env_float("PAPER_MINI_MAX_SCORE", 12.0)
+PAPER_MINI_TRIGGERS = ("4h", "24h")
+
 
 def paper_is_long(variant: str) -> bool:
     return variant == PAPER_LT20_VARIANT
@@ -331,7 +346,7 @@ def paper_stop_style(variant: str) -> str:
 
 def paper_peak_gap_roe(variant: str) -> float:
     """Лок «пик − gap» у p10 и копии 10 п.п.+; t20/lt20 — свои правила ROE."""
-    if variant in (PAPER_P10_VARIANT, PAPER_P10P_VARIANT):
+    if variant in (PAPER_P10_VARIANT, PAPER_P10P_VARIANT, PAPER_MT2_VARIANT):
         return PAPER_TRAIL_PEAK_GAP_ROE
     return 0.0
 

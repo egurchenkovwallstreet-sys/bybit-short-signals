@@ -34,7 +34,11 @@ from signal_engine.paper.detect import (
     paper_entry_blocks,
     C3_CHECK_LABELS,
     C3_MANDATORY,
+    MINI_CHECK_LABELS,
+    MINI_MANDATORY,
     cursor3_view,
+    mini_pump_floors,
+    mini_view,
 )
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
@@ -190,6 +194,7 @@ class Candidate:
     last_trade_id: int | None = None
     note: str | None = None
     dirty: bool = True
+    soft: bool = False
 
 
 @dataclass
@@ -386,6 +391,7 @@ class PaperStrategy:
                 entered=_loads_list(row["variants"]),
                 last_trade_id=row["trade_id"],
                 dirty=False,
+                soft=str(row["kind"] or "") == "mini",
             )
             if pump.peak_price > 0:
                 self.peak_snapshots[row["symbol"]] = (pump.peak_price, pump.peak_ts)
@@ -708,22 +714,30 @@ class PaperStrategy:
             if symbol in self.candidates or not state.last_price:
                 continue
             pump = find_pump(state, self.tape.symbols.get(symbol), now_ms)
+            soft = False
+            if pump is None:
+                pump = find_pump(state, self.tape.symbols.get(symbol), now_ms, mini_pump_floors())
+                soft = pump is not None
             if pump is None:
                 continue
             if self.expired_peaks.get(symbol) == pump.peak_ts:
                 continue
+            fields = _pump_fields(pump)
+            if soft:
+                fields["kind"] = "mini"
             cid = self.store.insert_candidate(
                 {
                     "symbol": symbol,
-                    "kind": pump.kind,
                     "status": "watching",
                     "started_at": now_ms,
                     "updated_at": now_ms,
-                    **_pump_fields(pump),
+                    **fields,
                     "fail_counts": {},
                 }
             )
-            self.candidates[symbol] = Candidate(id=cid, symbol=symbol, pump=pump, started_at=now_ms)
+            self.candidates[symbol] = Candidate(
+                id=cid, symbol=symbol, pump=pump, started_at=now_ms, soft=soft
+            )
             log.info(
                 "Тест: кандидат %s — %s памп +%.1f%% (%s)",
                 symbol,
@@ -793,7 +807,7 @@ class PaperStrategy:
             if state is None or not state.last_price:
                 continue
             tape = self.tape.get(symbol)
-            pump = find_pump(state, tape, now_ms)
+            pump = find_pump(state, tape, now_ms, mini_pump_floors() if cand.soft else None)
             if pump is None:
                 reason = _expire_reason(cand.pump, state, now_ms)
                 if reason == _REASON_CONDITIONS and not self._ready(state, cand, now_ms):
@@ -813,6 +827,9 @@ class PaperStrategy:
             data["plus"] = plus_ev.to_data()
             c3 = cursor3_view(ev.metrics, ev.score, ev.strict_btc)
             data["c3"] = c3
+            data["mini"] = mini_view(ev)
+            if cand.soft:
+                data["variants"] = []
             cand.last_eval = data
             cand.dirty = True
             notes = []
@@ -820,7 +837,9 @@ class PaperStrategy:
                 notes.append(
                     "Вход закрыт: " + "; ".join(ENTRY_GATE_LABELS.get(k, k) for k in ev.entry_blocked)
                 )
-            for variant in ev.variants:
+            if cand.soft:
+                notes.append("мягкий памп: только Мини тест")
+            for variant in () if cand.soft else ev.variants:
                 if (variant, symbol) in self.trades:
                     continue
                 if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
@@ -831,7 +850,7 @@ class PaperStrategy:
                     notes.append(f"{VARIANT_LABELS.get(variant, variant)}: нет свободной маржи")
                     continue
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
-            if e5s_ev.passed:
+            if e5s_ev.passed and not cand.soft:
                 for variant in e5s_ev.to_data()["variants"]:
                     label = VARIANT_LABELS.get(variant, variant)
                     if (variant, symbol) in self.trades:
@@ -845,7 +864,7 @@ class PaperStrategy:
                         notes.append(f"{label}: нет свободной маржи")
                         continue
                     self._open_trade(variant, cand, state, e5s_ev, margin, now_ms)
-            if plus_ev.passed:
+            if plus_ev.passed and not cand.soft:
                 peak_ts = int(cand.pump.peak_ts or 0)
                 if peak_ts and peak_ts in self.plus_blocked.get(symbol, ()):
                     notes.append("копии: этот пик уже закрыт первым стопом")
@@ -863,7 +882,7 @@ class PaperStrategy:
                             notes.append(f"{label}: нет свободной маржи")
                             continue
                         self._open_trade(variant, cand, state, plus_ev, margin, now_ms)
-            if c3["passed"]:
+            if c3["passed"] and not cand.soft:
                 variant = config.PAPER_C3_VARIANT
                 label = VARIANT_LABELS.get(variant, variant)
                 if (variant, symbol) in self.trades:
@@ -877,8 +896,22 @@ class PaperStrategy:
                         notes.append(f"{label}: нет свободной маржи")
                     else:
                         self._open_trade(variant, cand, state, _EvalView(c3), margin, now_ms)
+            if data["mini"]["passed"]:
+                for variant in config.PAPER_MINI_VARIANTS:
+                    label = VARIANT_LABELS.get(variant, variant)
+                    if (variant, symbol) in self.trades:
+                        continue
+                    if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                        notes.append(f"{label}: пауза после сделки")
+                        continue
+                    balance = self.balances[variant]
+                    margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                    if margin <= 0 or balance - self.used_margin(variant) < margin:
+                        notes.append(f"{label}: нет свободной маржи")
+                        continue
+                    self._open_trade(variant, cand, state, _EvalView(data["mini"]), margin, now_ms)
             cand.note = "; ".join(notes) or None
-            if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
+            if not cand.soft and not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
 
     def _evaluate_growth(self, states: dict[str, SymbolState], now_ms: int) -> None:
@@ -1576,7 +1609,9 @@ class PaperStrategy:
             margin,
             ev.passed_count,
             (
-                len(C3_MANDATORY)
+                len(MINI_MANDATORY)
+                if variant in config.PAPER_MINI_VARIANTS
+                else len(C3_MANDATORY)
                 if variant == config.PAPER_C3_VARIANT
                 else len(E5S_MANDATORY)
                 if variant in (config.PAPER_E5S_VARIANT, config.PAPER_E5P_VARIANT)
@@ -1680,7 +1715,7 @@ class PaperStrategy:
                     "last_eval": cand.last_eval or {},
                     "variants": cand.entered,
                     "trade_id": cand.last_trade_id,
-                    **_pump_fields(cand.pump),
+                    **_pump_fields(cand.pump, soft=cand.soft),
                 },
                 commit=False,
             )
@@ -1854,6 +1889,7 @@ class PaperStrategy:
             "e5s_check_labels": E5S_CHECK_LABELS,
             "plus_check_labels": PLUS_CHECK_LABELS,
             "c3_check_labels": C3_CHECK_LABELS,
+            "mini_check_labels": MINI_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
             "growth_flex": list(GROWTH_FLEX),
@@ -1863,6 +1899,7 @@ class PaperStrategy:
             "e5s_mandatory": list(E5S_MANDATORY),
             "plus_mandatory": list(PLUS_MANDATORY),
             "c3_mandatory": list(C3_MANDATORY),
+            "mini_mandatory": list(MINI_MANDATORY),
             "analytics": self._analytics,
         }
 
@@ -2111,9 +2148,9 @@ def _growth_from_row(row) -> GrowthInfo:
     )
 
 
-def _pump_fields(pump: PumpInfo) -> dict:
+def _pump_fields(pump: PumpInfo, soft: bool = False) -> dict:
     return {
-        "kind": pump.kind,
+        "kind": "mini" if soft else pump.kind,
         "peak_price": pump.peak_price,
         "peak_ts": pump.peak_ts,
         "valley_price": pump.valley_price,

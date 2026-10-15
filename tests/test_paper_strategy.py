@@ -11,6 +11,9 @@ from signal_engine.paper.detect import (
     find_pump,
     paper_entry_blocks,
     cursor3_view,
+    mini_pump_floors,
+    mini_view,
+    Evaluation,
     round_level_near,
     strong_top,
 )
@@ -638,6 +641,90 @@ class Cursor3EntryTest(unittest.TestCase):
         self.assertEqual(cursor3_view(metrics, 12)["failed"], [])
         metrics["since_peak_min"] = 181
         self.assertIn("since_peak", cursor3_view(metrics, 12)["failed"])
+
+
+def _mini_metrics() -> dict:
+    return {
+        "pump": {"trigger": "4h", "volume_ratio": 12},
+        "since_peak_min": 40,
+        "drawdown_from_peak_pct": 4.0,
+        "price_20m_pct": 0.4,
+        "buys_fade_ratio": 0.3,
+        "long_liq_15m_usd": 0,
+        "ema_broken": [],
+    }
+
+
+def _mini_ev(metrics: dict, score: float = 8.0, passed: int = 9) -> Evaluation:
+    keys = (
+        "pump_volume",
+        "pump_buys",
+        "stall",
+        "buys_faded",
+        "sells_dominate",
+        "volume_fade",
+        "short_liq_faded",
+        "oi_1h_negative",
+        "btc_guard",
+    )
+    checks = {key: {"ok": i < passed, "value": 1, "need": "x"} for i, key in enumerate(keys)}
+    return Evaluation(checks, metrics, score, {}, False)
+
+
+class MiniTestEntryTest(unittest.TestCase):
+    def test_soft_floors_are_forty_percent_lower(self) -> None:
+        floors = mini_pump_floors()
+        self.assertEqual(floors["4h"], 18)
+        self.assertEqual(floors["24h"], 30)
+        self.assertEqual(floors["7d"], 48)
+        self.assertEqual(floors["14d"], 60)
+        self.assertIsNone(find_pump(pumped_state(), pumped_tape(), NOW, {"4h": 99, "24h": 99, "7d": 99, "14d": 99}))
+        soft = find_pump(pumped_state(), pumped_tape(), NOW, floors)
+        self.assertIsNotNone(soft)
+
+    def test_passes_with_sample_gate_and_loss_cuts(self) -> None:
+        view = mini_view(_mini_ev(_mini_metrics()))
+        self.assertTrue(view["passed"])
+        self.assertEqual(view["variants"], ["mt1", "mt2"])
+        self.assertEqual(config.paper_peak_gap_roe("mt1"), 0.0)
+        self.assertEqual(config.paper_peak_gap_roe("mt2"), config.PAPER_TRAIL_PEAK_GAP_ROE)
+        self.assertEqual(config.paper_stop_style("mt1"), "default")
+        self.assertEqual(config.paper_stop_style("mt2"), "default")
+
+    def test_late_extension_does_not_open_mini(self) -> None:
+        metrics = _mini_metrics()
+        metrics.update(
+            {
+                "since_peak_min": 200,
+                "drawdown_from_peak_pct": 8.0,
+                "oi_1h_pct": -1.0,
+                "oi_4h_pct": -1.0,
+                "volume_ratio_20m": 0.4,
+                "sell_share": {"5m": 70.0, "10m": 68.0, "15m": 66.0},
+            }
+        )
+        failed = mini_view(_mini_ev(metrics))["failed"]
+        self.assertIn("since_peak", failed)
+        self.assertNotIn("five_of_nine", failed)
+
+    def test_loss_profile_is_blocked(self) -> None:
+        metrics = _mini_metrics()
+        metrics["pump"] = {"trigger": "7d", "volume_ratio": 12}
+        self.assertIn("trigger_4h_24h", mini_view(_mini_ev(metrics))["failed"])
+        metrics = _mini_metrics()
+        metrics["drawdown_from_peak_pct"] = 12
+        self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["drawdown"])
+        metrics = _mini_metrics()
+        metrics["price_20m_pct"] = -0.2
+        self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["price_20m"])
+        metrics = _mini_metrics()
+        metrics["long_liq_15m_usd"] = 9000
+        self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["long_liq_quiet"])
+        metrics = _mini_metrics()
+        metrics["ema_broken"] = ["15m_EMA50"]
+        self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["ema_intact"])
+        self.assertEqual(mini_view(_mini_ev(_mini_metrics(), score=15))["failed"], ["score_cap"])
+        self.assertIn("five_of_nine", mini_view(_mini_ev(_mini_metrics(), passed=4))["failed"])
 
 
 if __name__ == "__main__":
