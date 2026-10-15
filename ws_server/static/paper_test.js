@@ -304,8 +304,7 @@
     const losses = pnls.filter((p) => p < 0);
     const profit = wins.reduce((acc, p) => acc + p, 0);
     const loss = losses.reduce((acc, p) => acc + p, 0);
-    const stored = account(variant).balance;
-    const base = stored == null ? ((paper.data && paper.data.summary) || {}).start_balance || 1000 : Number(stored);
+    const base = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
     return {
       n: pnls.length,
       wins: wins.length,
@@ -355,11 +354,11 @@
     const keys = ["all", "month", "week", "yesterday", "now"];
     if (!keys.includes(paper.period)) paper.period = "all";
     const notes = {
-      all: "Все закрытые сделки живых стратегий. Процент прибыли и убытка — к стартовым $1000.",
-      month: "Закрытые с 1-го числа текущего месяца, 00:00 МСК. Процент — к капиталу на начало месяца.",
-      week: "Закрытые с полуночи МСК семь суток назад. Процент — к капиталу на начало этой недели.",
-      yesterday: "Закрытые за полные предыдущие сутки, 00:00–24:00 МСК. Процент — к капиталу на начало тех суток.",
-      now: "Открытые позиции. Процент — плавающий результат к текущему балансу.",
+      all: "Все закрытые сделки живых стратегий. Прибыль, убыток и итог — в процентах от стартовых $1000.",
+      month: "Закрытые с 1-го числа текущего месяца, 00:00 МСК. Процент от стартовых $1000.",
+      week: "Закрытые с полуночи МСК семь суток назад. Процент от стартовых $1000.",
+      yesterday: "Закрытые за полные предыдущие сутки, 00:00–24:00 МСК. Процент от стартовых $1000.",
+      now: "Открытые позиции. Плавающий результат в процентах от стартовых $1000.",
     };
     if (note) {
       const stamp = analytics.period_as_of ? ` Снимок ${analytics.period_as_of} МСК.` : "";

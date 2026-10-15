@@ -100,7 +100,7 @@ def _variant_stats(
         "by_trigger": _group(closed, _trigger_label),
         "by_passed": _group(closed, _passed_label),
         "equity": _equity(conn, variant),
-        "periods": _closed_periods(conn, variant, closed, bounds or period_bounds(now_ms)),
+        "periods": _closed_periods(closed, bounds or period_bounds(now_ms)),
     }
 
 
@@ -128,33 +128,19 @@ def _pnl_pack(pnls: list[float], base: float) -> dict[str, Any]:
     }
 
 
-def _equity_before(conn: sqlite3.Connection, variant: str, ts_ms: int) -> float:
-    row = conn.execute(
-        "SELECT equity FROM paper_equity_v WHERE variant = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
-        (variant, ts_ms),
-    ).fetchone()
-    if row is not None:
-        return float(row["equity"])
-    return float(config.PAPER_START_BALANCE_USD)
-
-
-def _closed_periods(
-    conn: sqlite3.Connection, variant: str, rows: list[sqlite3.Row], bounds: dict[str, Any]
-) -> dict[str, Any]:
+def _closed_periods(rows: list[sqlite3.Row], bounds: dict[str, Any]) -> dict[str, Any]:
+    """Процент прибыли, убытка и итога всегда от стартовых $1000, общий депозит теста."""
     start = float(config.PAPER_START_BALANCE_USD)
 
-    def take(pred, base: float) -> dict[str, Any]:
+    def take(pred) -> dict[str, Any]:
         pnls = [float(r["pnl_usd"] or 0) for r in rows if r["closed_at"] and pred(int(r["closed_at"]))]
-        return _pnl_pack(pnls, base)
+        return _pnl_pack(pnls, start)
 
     return {
-        "all": take(lambda _ts: True, start),
-        "month": take(lambda ts: ts >= int(bounds["month"]), _equity_before(conn, variant, int(bounds["month"]))),
-        "week": take(lambda ts: ts >= int(bounds["week"]), _equity_before(conn, variant, int(bounds["week"]))),
-        "yesterday": take(
-            lambda ts: int(bounds["yesterday_from"]) <= ts < int(bounds["yesterday_to"]),
-            _equity_before(conn, variant, int(bounds["yesterday_from"])),
-        ),
+        "all": take(lambda _ts: True),
+        "month": take(lambda ts: ts >= int(bounds["month"])),
+        "week": take(lambda ts: ts >= int(bounds["week"])),
+        "yesterday": take(lambda ts: int(bounds["yesterday_from"]) <= ts < int(bounds["yesterday_to"])),
     }
 
 
