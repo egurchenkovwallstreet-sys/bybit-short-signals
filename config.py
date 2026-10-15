@@ -261,10 +261,11 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 # лонг lt20 (детектор роста),
 # Курсор СС 2 (css2) — вход по развороту лаборатории,
 # шорты e5s / e5p — тот же поиск пампа, вход по EMA50 5м.
+# Курсор3 (c3) — тот же поиск пампа и выход Трейл 20, вход из восьми обязательных пунктов.
 # Cursor SS (css) с вкладки снят: новые сделки не открываются.
 PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
 PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
-PAPER_VARIANTS = ("t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p")
+PAPER_VARIANTS = ("t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -277,6 +278,7 @@ PAPER_CSS2_VARIANT = "css2"
 PAPER_SC10_VARIANT = "sc10"
 PAPER_E5S_VARIANT = "e5s"
 PAPER_E5P_VARIANT = "e5p"
+PAPER_C3_VARIANT = "c3"
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
@@ -295,6 +297,16 @@ PAPER_PLUS_NO_HIGH_BARS = _env_int("PAPER_PLUS_NO_HIGH_BARS", 7)
 PAPER_PLUS_SELL_SHARE_MIN_PCT = _env_float("PAPER_PLUS_SELL_SHARE_MIN_PCT", 55.0)
 PAPER_PLUS_LATE_SINCE_MIN = _env_float("PAPER_PLUS_LATE_SINCE_MIN", 180.0)
 PAPER_PLUS_LATE_MAX_DD_PCT = _env_float("PAPER_PLUS_LATE_MAX_DD_PCT", 15.0)
+
+# Курсор3: все восемь пунктов обязательны, «5 из 9» и поздний шлюз не используются.
+# Выход — как у t20 (paper_stop_style default, без пик−10).
+PAPER_C3_SINCE_PEAK_MIN = _env_float("PAPER_C3_SINCE_PEAK_MIN", 6.0)
+PAPER_C3_SINCE_PEAK_MAX = _env_float("PAPER_C3_SINCE_PEAK_MAX", 180.0)
+PAPER_C3_MAX_DRAWDOWN_PCT = _env_float("PAPER_C3_MAX_DRAWDOWN_PCT", 10.0)
+PAPER_C3_MIN_PRICE_20M_PCT = _env_float("PAPER_C3_MIN_PRICE_20M_PCT", 0.0)
+PAPER_C3_LONG_LIQ_MAX_USD = _env_float("PAPER_C3_LONG_LIQ_MAX_USD", 200.0)
+PAPER_C3_MAX_SCORE = _env_float("PAPER_C3_MAX_SCORE", 12.0)
+PAPER_C3_TRIGGERS = ("4h", "24h")
 
 
 def paper_is_long(variant: str) -> bool:

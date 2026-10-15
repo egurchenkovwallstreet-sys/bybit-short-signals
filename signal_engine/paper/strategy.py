@@ -32,6 +32,9 @@ from signal_engine.paper.detect import (
     grade_for,
     measure_pump_peak,
     paper_entry_blocks,
+    C3_CHECK_LABELS,
+    C3_MANDATORY,
+    cursor3_view,
 )
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
@@ -157,6 +160,19 @@ class Css2Candidate:
     note: str | None = None
     dirty: bool = True
     entries_used: int = 0
+
+
+class _EvalView:
+    """Чужой набор проверок в том виде, в каком его ждёт открытие сделки."""
+
+    def __init__(self, data: dict):
+        self.score = float(data.get("score") or 0)
+        self.strict_btc = bool(data.get("strict_btc"))
+        self.passed_count = int(data.get("passed_count") or 0)
+        self._data = data
+
+    def to_data(self) -> dict:
+        return self._data
 
 
 @dataclass
@@ -795,6 +811,8 @@ class PaperStrategy:
             data = ev.to_data()
             data["e5s"] = e5s_ev.to_data()
             data["plus"] = plus_ev.to_data()
+            c3 = cursor3_view(ev.metrics, ev.score, ev.strict_btc)
+            data["c3"] = c3
             cand.last_eval = data
             cand.dirty = True
             notes = []
@@ -845,6 +863,20 @@ class PaperStrategy:
                             notes.append(f"{label}: нет свободной маржи")
                             continue
                         self._open_trade(variant, cand, state, plus_ev, margin, now_ms)
+            if c3["passed"]:
+                variant = config.PAPER_C3_VARIANT
+                label = VARIANT_LABELS.get(variant, variant)
+                if (variant, symbol) in self.trades:
+                    pass
+                elif now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                    notes.append(f"{label}: пауза после сделки")
+                else:
+                    balance = self.balances[variant]
+                    margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                    if margin <= 0 or balance - self.used_margin(variant) < margin:
+                        notes.append(f"{label}: нет свободной маржи")
+                    else:
+                        self._open_trade(variant, cand, state, _EvalView(c3), margin, now_ms)
             cand.note = "; ".join(notes) or None
             if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
@@ -1544,7 +1576,9 @@ class PaperStrategy:
             margin,
             ev.passed_count,
             (
-                len(E5S_MANDATORY)
+                len(C3_MANDATORY)
+                if variant == config.PAPER_C3_VARIANT
+                else len(E5S_MANDATORY)
                 if variant in (config.PAPER_E5S_VARIANT, config.PAPER_E5P_VARIANT)
                 else len(PLUS_MANDATORY)
                 if variant in config.PAPER_PLUS_VARIANTS
@@ -1819,6 +1853,7 @@ class PaperStrategy:
             "sc10_check_labels": SC10_CHECK_LABELS,
             "e5s_check_labels": E5S_CHECK_LABELS,
             "plus_check_labels": PLUS_CHECK_LABELS,
+            "c3_check_labels": C3_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
             "growth_flex": list(GROWTH_FLEX),
@@ -1827,6 +1862,7 @@ class PaperStrategy:
             "sc10_mandatory": list(SC10_MANDATORY),
             "e5s_mandatory": list(E5S_MANDATORY),
             "plus_mandatory": list(PLUS_MANDATORY),
+            "c3_mandatory": list(C3_MANDATORY),
             "analytics": self._analytics,
         }
 

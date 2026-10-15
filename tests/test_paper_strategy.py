@@ -10,6 +10,7 @@ from signal_engine.paper.detect import (
     evaluate,
     find_pump,
     paper_entry_blocks,
+    cursor3_view,
     round_level_near,
     strong_top,
 )
@@ -575,6 +576,68 @@ class EntryGateTest(unittest.TestCase):
             blocked = (pumps[0].get("eval") or {}).get("entry_blocked") or []
             self.assertIn("since_too_late", blocked)
             strategy.close()
+
+
+def _c3_metrics() -> dict:
+    return {
+        "pump": {"trigger": "24h"},
+        "since_peak_min": 55,
+        "drawdown_from_peak_pct": 4.0,
+        "price_20m_pct": 1.2,
+        "buys_fade_ratio": 0.4,
+        "long_liq_15m_usd": 0,
+        "ema_broken": [],
+    }
+
+
+class Cursor3EntryTest(unittest.TestCase):
+    def test_all_eight_pass(self) -> None:
+        view = cursor3_view(_c3_metrics(), 8.0)
+        self.assertTrue(view["passed"])
+        self.assertEqual(view["passed_count"], 8)
+        self.assertEqual(view["variants"], ["c3"])
+        self.assertEqual(config.paper_stop_style("c3"), "default")
+        self.assertEqual(config.paper_peak_gap_roe("c3"), 0.0)
+
+    def test_each_rule_blocks(self) -> None:
+        cases = {
+            "trigger_4h_24h": {"pump": {"trigger": "7d"}},
+            "since_peak": {"since_peak_min": 5},
+            "drawdown": {"drawdown_from_peak_pct": 10.1},
+            "price_20m": {"price_20m_pct": -0.1},
+            "buys_faded": {"buys_fade_ratio": 0.51},
+            "long_liq_quiet": {"long_liq_15m_usd": 201},
+            "ema_intact": {"ema_broken": ["15m_EMA50"]},
+        }
+        for key, patch in cases.items():
+            metrics = _c3_metrics()
+            metrics.update(patch)
+            if "pump" in patch:
+                metrics["pump"] = patch["pump"]
+            failed = cursor3_view(metrics, 8.0)["failed"]
+            self.assertEqual(failed, [key], key)
+        self.assertEqual(cursor3_view(_c3_metrics(), 12.1)["failed"], ["score_cap"])
+        self.assertEqual(cursor3_view(_c3_metrics(), 12.0)["failed"], [])
+
+    def test_missing_value_blocks(self) -> None:
+        metrics = _c3_metrics()
+        metrics["price_20m_pct"] = None
+        metrics["buys_fade_ratio"] = None
+        self.assertEqual(
+            cursor3_view(metrics, 8.0)["failed"],
+            ["price_20m", "buys_faded"],
+        )
+
+    def test_edges_inclusive(self) -> None:
+        metrics = _c3_metrics()
+        metrics["since_peak_min"] = 180
+        metrics["drawdown_from_peak_pct"] = 10
+        metrics["price_20m_pct"] = 0
+        metrics["buys_fade_ratio"] = 0.5
+        metrics["long_liq_15m_usd"] = 200
+        self.assertEqual(cursor3_view(metrics, 12)["failed"], [])
+        metrics["since_peak_min"] = 181
+        self.assertIn("since_peak", cursor3_view(metrics, 12)["failed"])
 
 
 if __name__ == "__main__":
