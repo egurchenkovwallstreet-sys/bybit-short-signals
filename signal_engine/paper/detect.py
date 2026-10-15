@@ -70,9 +70,7 @@ MINI_MANDATORY = (
     "trigger_4h_24h",
     "since_peak",
     "drawdown",
-    "price_20m",
     "buys_faded",
-    "long_liq_quiet",
     "ema_intact",
     "score_cap",
 )
@@ -82,9 +80,7 @@ MINI_CHECK_LABELS = {
     "trigger_4h_24h": "Памп только 4ч или сутки",
     "since_peak": f"С пика {config.PAPER_MINI_SINCE_PEAK_MIN:g}–{config.PAPER_MINI_SINCE_PEAK_MAX:g} мин, без позднего допуска",
     "drawdown": f"Откат от пика ≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
-    "price_20m": f"Цена за 20 мин ≥ {config.PAPER_MINI_MIN_PRICE_20M_PCT:g}%",
     "buys_faded": f"Покупки 15 мин ≤ {config.PAPER_BUYS_FADE_MAX_RATIO * 100:g}% от пика",
-    "long_liq_quiet": f"Ликвидации лонгов 15 мин ≤ ${config.PAPER_MINI_LONG_LIQ_MAX_USD:g}",
     "ema_intact": "Ни одна EMA не пробита",
     "score_cap": f"Оценка ≤ {config.PAPER_MINI_MAX_SCORE:g}",
 }
@@ -685,9 +681,7 @@ def mini_view(ev: Evaluation) -> dict:
     trigger = str(pump.get("trigger") or "")
     since = _c3_num(metrics.get("since_peak_min"))
     drawdown = _c3_num(metrics.get("drawdown_from_peak_pct"))
-    price_20m = _c3_num(metrics.get("price_20m_pct"))
     buys_fade = _c3_num(metrics.get("buys_fade_ratio"))
-    long_liq = _c3_num(metrics.get("long_liq_15m_usd"))
     broken = metrics.get("ema_broken")
     broken_n = len(broken) if isinstance(broken, list) else None
     score_n = _c3_num(ev.score)
@@ -709,20 +703,10 @@ def mini_view(ev: Evaluation) -> dict:
             drawdown,
             f"≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
         ),
-        "price_20m": _check(
-            price_20m is not None and price_20m >= config.PAPER_MINI_MIN_PRICE_20M_PCT,
-            price_20m,
-            f"≥ {config.PAPER_MINI_MIN_PRICE_20M_PCT:g}%",
-        ),
         "buys_faded": _check(
             buys_fade is not None and buys_fade <= config.PAPER_BUYS_FADE_MAX_RATIO,
             buys_fade,
             f"≤ {config.PAPER_BUYS_FADE_MAX_RATIO:g}",
-        ),
-        "long_liq_quiet": _check(
-            long_liq is not None and long_liq <= config.PAPER_MINI_LONG_LIQ_MAX_USD,
-            None if long_liq is None else round(long_liq),
-            f"≤ ${config.PAPER_MINI_LONG_LIQ_MAX_USD:g}",
         ),
         "ema_intact": _check(broken_n == 0, broken_n, "0"),
         "score_cap": _check(

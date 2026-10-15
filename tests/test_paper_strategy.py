@@ -715,11 +715,9 @@ class MiniTestEntryTest(unittest.TestCase):
         metrics["drawdown_from_peak_pct"] = 12
         self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["drawdown"])
         metrics = _mini_metrics()
-        metrics["price_20m_pct"] = -0.2
-        self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["price_20m"])
-        metrics = _mini_metrics()
+        metrics["price_20m_pct"] = -2.5
         metrics["long_liq_15m_usd"] = 9000
-        self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["long_liq_quiet"])
+        self.assertEqual(mini_view(_mini_ev(metrics))["failed"], [])
         metrics = _mini_metrics()
         metrics["ema_broken"] = ["15m_EMA50"]
         self.assertEqual(mini_view(_mini_ev(metrics))["failed"], ["ema_intact"])
