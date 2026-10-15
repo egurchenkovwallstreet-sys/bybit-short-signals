@@ -215,7 +215,8 @@ def _day_stats(
         ).fetchone()
         equity = float(last["equity"]) if last is not None else (float(balance) if balance is not None else sod_eq)
     day_pnl = equity - sod_eq
-    day_pct = (day_pnl / sod_eq * 100.0) if sod_eq else 0.0
+    start = float(config.PAPER_START_BALANCE_USD)
+    day_pct = (day_pnl / start * 100.0) if start else 0.0
     return {
         "day_pnl": round(day_pnl, 2),
         "day_pnl_pct": round(day_pct, 2),

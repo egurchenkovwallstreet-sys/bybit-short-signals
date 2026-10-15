@@ -186,7 +186,7 @@ class DayPnlTest(unittest.TestCase):
             t = stats["variants"]["t20"]["trades"]
             self.assertEqual(t["day_start_equity"], 980.0)
             self.assertAlmostEqual(t["day_pnl"], 50.0, places=2)
-            self.assertAlmostEqual(t["day_pnl_pct"], 50.0 / 980.0 * 100.0, places=2)
+            self.assertAlmostEqual(t["day_pnl_pct"], 5.0, places=2)
             self.assertAlmostEqual(t["total_pnl"], 50.0, places=2)
             self.assertAlmostEqual(t["total_pnl_pct"], 5.0, places=2)
             self.assertEqual(t["day_trades"], 1)
