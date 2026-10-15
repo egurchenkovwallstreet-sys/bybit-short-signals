@@ -70,6 +70,11 @@ from signal_engine.paper.e5s_detect import (
     E5S_MANDATORY,
     evaluate_e5s,
 )
+from signal_engine.paper.impulse_detect import (
+    IMPULSE_CHECK_LABELS,
+    IMPULSE_MANDATORY,
+    evaluate_impulse,
+)
 from signal_engine.paper.plus_detect import (
     PLUS_CHECK_LABELS,
     PLUS_MANDATORY,
@@ -222,6 +227,7 @@ class PaperStrategy:
         self.css2_blocked: dict[str, int] = {}
         self.plus_blocked: dict[str, set[int]] = {}
         self._sc10_used_bars: dict[str, int] = {}
+        self._impulse_used_bars: dict[tuple[str, str], int] = {}
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -306,6 +312,14 @@ class PaperStrategy:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("pump") or {}).get("bar_ts") or 0)
                 if bar_ts:
                     self._sc10_used_bars[row["symbol"]] = bar_ts
+            if variant in config.PAPER_IMPULSE_VARIANTS:
+                bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
+                if bar_ts:
+                    self._impulse_used_bars[(variant, row["symbol"])] = bar_ts
+            if variant in config.PAPER_IMPULSE_VARIANTS:
+                bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
+                if bar_ts:
+                    self._impulse_used_bars[(variant, row["symbol"])] = bar_ts
         if config.PAPER_CSS_VARIANT not in VARIANTS:
             dropped_css = self.store.expire_kind_watching("css", "Cursor SS снят с теста", now)
             if dropped_css:
@@ -512,6 +526,7 @@ class PaperStrategy:
             self._evaluate_css(states, now_ms)
         self._evaluate_css2(states, btc_state=states.get(config.PAPER_BTC_SYMBOL), now_ms=now_ms)
         self._evaluate_sc10(states, now_ms)
+        self._evaluate_impulse(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -1541,6 +1556,105 @@ class PaperStrategy:
             ev.score,
         )
 
+    def _evaluate_impulse(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        frames = (
+            (config.PAPER_IMP5_VARIANT, 5),
+            (config.PAPER_IMP15_VARIANT, 15),
+        )
+        for variant, minutes in frames:
+            if variant not in VARIANTS:
+                continue
+            for symbol, state in states.items():
+                if not state.last_price or not state.bars_1m:
+                    continue
+                if (variant, symbol) in self.trades:
+                    continue
+                tape = self.tape.symbols.get(symbol)
+                ev = evaluate_impulse(state, tape, now_ms, minutes)
+                if not ev.passed:
+                    continue
+                bar_ts = int(ev.metrics.get("bar_ts") or 0)
+                if bar_ts and self._impulse_used_bars.get((variant, symbol)) == bar_ts:
+                    continue
+                balance = self.balances[variant]
+                margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                if margin <= 0 or balance - self.used_margin(variant) < margin:
+                    continue
+                self._open_impulse_trade(variant, symbol, state, ev, margin, now_ms)
+
+    def _open_impulse_trade(
+        self, variant: str, symbol: str, state: SymbolState, ev, margin: float, now_ms: int
+    ) -> None:
+        side = ev.side or "short"
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            side=side,
+            stop_style="impulse",
+        )
+        entry = ev.to_data()
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": symbol,
+                "variant": variant,
+                "candidate_id": None,
+                "kind": f"impulse_{side}",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": ev.score,
+                "grade": grade_for(ev.score),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=symbol,
+            kind=f"impulse_{side}",
+            pos=pos,
+            score=ev.score,
+            grade=grade_for(ev.score),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=None,
+            last_check=now_ms,
+        )
+        bar_ts = int(ev.metrics.get("bar_ts") or 0)
+        if bar_ts:
+            self._impulse_used_bars[(variant, symbol)] = bar_ts
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт %s %s по %s, маржа %.2f USD, условий %s/%s",
+            variant,
+            side,
+            symbol,
+            price,
+            margin,
+            ev.passed_count,
+            len(IMPULSE_MANDATORY),
+        )
+
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
         price = float(state.last_price)
         tape = self.tape.symbols.get(cand.symbol)
@@ -1890,6 +2004,7 @@ class PaperStrategy:
             "plus_check_labels": PLUS_CHECK_LABELS,
             "c3_check_labels": C3_CHECK_LABELS,
             "mini_check_labels": MINI_CHECK_LABELS,
+            "impulse_check_labels": IMPULSE_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
             "growth_flex": list(GROWTH_FLEX),
@@ -1900,6 +2015,7 @@ class PaperStrategy:
             "plus_mandatory": list(PLUS_MANDATORY),
             "c3_mandatory": list(C3_MANDATORY),
             "mini_mandatory": list(MINI_MANDATORY),
+            "impulse_mandatory": list(IMPULSE_MANDATORY),
             "analytics": self._analytics,
         }
 

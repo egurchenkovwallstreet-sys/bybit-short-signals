@@ -251,6 +251,8 @@ def _kind_label(row: sqlite3.Row) -> str:
         return "Cursor SS"
     if str(kind).startswith("sc10"):
         return "Скальп 10"
+    if str(kind).startswith("impulse"):
+        return "Импульс"
     if kind == "growth":
         return "Лонг роста"
     return "Короткий памп" if kind == "short" else "Длинный памп"

@@ -33,9 +33,10 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", i5: "#9b5de5", i15: "#f15bb5" };
   const PLUS_VARIANTS = { t20p: true, p10p: true, mlnp: true };
   const MINI_VARIANTS = { mt1: true, mt2: true };
+  const IMPULSE_VARIANTS = { i5: true, i15: true };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 
   function esc(v) {
@@ -88,6 +89,10 @@
     if (p.kind === "css2") {
       return `Курсор СС 2: +${num(p.growth_pct, 1)}% от ${price(p.valley_price)} → ${price(p.peak_price)}`;
     }
+    if (p.kind === "impulse") {
+      const dir = p.side === "long" ? "лонг" : p.side === "short" ? "шорт" : "";
+      return `Импульс ${p.trigger || ""}: ${dir} ${num(p.growth_pct, 2)}%`;
+    }
     if (p.kind === "css" || p.trigger === "fast") {
       return `Cursor SS: +${num(p.growth_pct, 1)}% от ${price(p.valley_price)} → ${price(p.peak_price)}`;
     }
@@ -106,6 +111,7 @@
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_check_labels || {};
     if (paper.variant === "c3") return paper.data.c3_check_labels || {};
     if (MINI_VARIANTS[paper.variant]) return paper.data.mini_check_labels || {};
+    if (IMPULSE_VARIANTS[paper.variant]) return paper.data.impulse_check_labels || {};
     if (PLUS_VARIANTS[paper.variant]) return paper.data.plus_check_labels || {};
     return paper.data.check_labels || {};
   }
@@ -118,12 +124,13 @@
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_mandatory || [];
     if (paper.variant === "c3") return paper.data.c3_mandatory || [];
     if (MINI_VARIANTS[paper.variant]) return paper.data.mini_mandatory || [];
+    if (IMPULSE_VARIANTS[paper.variant]) return paper.data.impulse_mandatory || [];
     if (PLUS_VARIANTS[paper.variant]) return paper.data.plus_mandatory || [];
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2", "i5", "i15"];
   }
   function variantProfit(v) {
     const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
@@ -152,7 +159,7 @@
     if (paper.variant === "css") return rows.filter((r) => r.episode === "css");
     if (paper.variant === "css2") return rows.filter((r) => r.episode === "css2");
     if (paper.variant === "lt20") return rows.filter((r) => r.episode === "growth");
-    if (paper.variant === "sc10") return [];
+    if (paper.variant === "sc10" || IMPULSE_VARIANTS[paper.variant]) return [];
     return rows.filter((r) => r.episode !== "css" && r.episode !== "css2" && r.episode !== "sc10" && r.episode !== "growth");
   }
   function vlabel(v) {
@@ -525,7 +532,7 @@
 
   function renderCandidates() {
     const section = document.getElementById("paper-cand-section");
-    if (section) section.hidden = paper.variant === "sc10";
+    if (section) section.hidden = paper.variant === "sc10" || !!IMPULSE_VARIANTS[paper.variant];
     const table = document.getElementById("paper-cand-table");
     if (!table) return;
     const rows = candidateRows();
@@ -634,7 +641,7 @@
 
   function renderCandAnalytics() {
     const section = document.getElementById("paper-cand-analytics-section");
-    if (section) section.hidden = paper.variant === "sc10";
+    if (section) section.hidden = paper.variant === "sc10" || !!IMPULSE_VARIANTS[paper.variant];
     const root = document.getElementById("paper-cand-analytics");
     if (!root) return;
     const c = ((paper.data && paper.data.analytics) || {}).candidates || {};

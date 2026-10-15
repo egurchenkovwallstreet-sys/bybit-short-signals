@@ -368,6 +368,38 @@ def trail_stop(
     return stop
 
 
+def impulse_long_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """Лонг Импульса: те же ступени ROE, что trail_stop у шорта Трейл 20."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = long_roe_pct(entry, best_price, lev)
+    floors: list[float] = []
+    if peak >= config.PAPER_BE_ARM_ROE and margin > 0:
+        floors.append(
+            net_roe_stop_price_long(entry, margin, config.PAPER_BE_LOCK_NET_ROE, lev, entry_fee, funding_paid)
+        )
+    if peak >= config.PAPER_PLUS10_ARM_ROE and margin > 0:
+        floors.append(
+            net_roe_stop_price_long(entry, margin, config.PAPER_PLUS10_LOCK_NET_ROE, lev, entry_fee, funding_paid)
+        )
+    if peak < config.PAPER_BE_ARM_ROE:
+        return long_liquidation_price(entry, lev)
+    if peak < config.PAPER_LOCK_ARM_ROE:
+        return max(floors) if floors else price_for_long_roe(entry, config.PAPER_BE_LOCK_NET_ROE, lev)
+    lock_roe = max(config.PAPER_LOCK_MIN_ROE, peak - config.PAPER_TRAIL_GAP_ROE)
+    stop = price_for_long_roe(entry, lock_roe, lev)
+    for floor in floors:
+        stop = max(stop, floor)
+    return stop
+
+
 @dataclass
 class Position:
     """Общий счётчик для реальной виртуальной сделки и теневой (без баланса)."""
@@ -469,6 +501,53 @@ class Position:
                 funding_paid=self.funding_paid,
             )
             self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "impulse":
+            if self.side == "long":
+                trail = impulse_long_stop(
+                    self.entry_price,
+                    self.best_price,
+                    self.leverage,
+                    margin=self.margin,
+                    entry_fee=self.entry_fee,
+                    funding_paid=self.funding_paid,
+                )
+                stop = max(self.liq_price, trail)
+                if self.loss_cap_armed or self.gross_pnl(last) < 0:
+                    self.loss_cap_armed = True
+                    cap = net_roe_stop_price_long(
+                        self.entry_price,
+                        self.margin,
+                        config.PAPER_LOSS_CAP_ROE,
+                        self.leverage,
+                        self.entry_fee,
+                        self.funding_paid,
+                    )
+                    stop = max(stop, cap)
+                self.stop_price = stop
+                return
+            trail = trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                0.0,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+            )
+            stop = min(self.liq_price, trail)
+            if self.loss_cap_armed or self.gross_pnl(last) < 0:
+                self.loss_cap_armed = True
+                cap = net_roe_stop_price(
+                    self.entry_price,
+                    self.margin,
+                    config.PAPER_LOSS_CAP_ROE,
+                    self.leverage,
+                    self.entry_fee,
+                    self.funding_paid,
+                )
+                stop = min(stop, cap)
+            self.stop_price = stop
             return
         if self.stop_style == "mln":
             trail = mln_trail_stop(

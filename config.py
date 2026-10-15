@@ -267,6 +267,7 @@ PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
 PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
 PAPER_VARIANTS = (
     "t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2",
+    "i5", "i15",
 )
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
@@ -321,6 +322,13 @@ PAPER_MINI_MAX_DRAWDOWN_PCT = _env_float("PAPER_MINI_MAX_DRAWDOWN_PCT", 10.0)
 PAPER_MINI_MAX_SCORE = _env_float("PAPER_MINI_MAX_SCORE", 12.0)
 PAPER_MINI_TRIGGERS = ("4h", "24h")
 
+# Импульс 5 / Импульс 15: закрытая свеча своего таймфрейма, выход как у t20.
+PAPER_IMP5_VARIANT = "i5"
+PAPER_IMP15_VARIANT = "i15"
+PAPER_IMPULSE_VARIANTS = (PAPER_IMP5_VARIANT, PAPER_IMP15_VARIANT)
+PAPER_IMPULSE_VOLUME_MIN_RATIO = _env_float("PAPER_IMPULSE_VOLUME_MIN_RATIO", 3.0)
+PAPER_IMPULSE_FLOW_MIN_PCT = _env_float("PAPER_IMPULSE_FLOW_MIN_PCT", 60.0)
+
 
 def paper_is_long(variant: str) -> bool:
     return variant == PAPER_LT20_VARIANT
@@ -339,6 +347,8 @@ def paper_stop_style(variant: str) -> str:
         return "e5p"
     if variant in (PAPER_MLN_VARIANT, PAPER_MLNP_VARIANT):
         return "mln"
+    if variant in PAPER_IMPULSE_VARIANTS:
+        return "impulse"
     return "default"
 
 
