@@ -21,6 +21,29 @@ def msk_day_start_ms(now_ms: int) -> int:
     return int(start.timestamp() * 1000)
 
 
+def period_bounds(now_ms: int) -> dict[str, Any]:
+    """Границы закрытых периодов в МСК: месяц с 1-го, неделя с полуночи 7 суток назад, вчера целиком."""
+    dt = datetime.fromtimestamp(now_ms / 1000.0, tz=MSK)
+    today = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    month = today.replace(day=1)
+    week = today - timedelta(days=7)
+    yesterday = today - timedelta(days=1)
+    return {
+        "as_of": dt.strftime("%d.%m %H:%M"),
+        "month": int(month.timestamp() * 1000),
+        "week": int(week.timestamp() * 1000),
+        "yesterday_from": int(yesterday.timestamp() * 1000),
+        "yesterday_to": int(today.timestamp() * 1000),
+        "labels": {
+            "all": "Всё время",
+            "month": f"Месяц с {month.strftime('%d.%m')}",
+            "week": f"Неделя с {week.strftime('%d.%m')}",
+            "yesterday": f"Вчера {yesterday.strftime('%d.%m')}",
+            "now": "Сейчас открытые",
+        },
+    }
+
+
 def compute_analytics(
     conn: sqlite3.Connection,
     balances: dict[str, float] | None = None,
@@ -29,12 +52,19 @@ def compute_analytics(
 ) -> dict[str, Any]:
     conn.row_factory = sqlite3.Row
     now_ms = int(now_ms or time.time() * 1000)
+    bounds = period_bounds(now_ms)
     variants = {}
     for variant in config.PAPER_VARIANTS:
         balance = (balances or {}).get(variant)
         u = float((unrealized or {}).get(variant, 0.0)) if unrealized is not None else None
-        variants[variant] = _variant_stats(conn, variant, balance, now_ms, u)
-    return {"variants": variants, "candidates": _candidate_stats(conn), "day_start_ms": msk_day_start_ms(now_ms)}
+        variants[variant] = _variant_stats(conn, variant, balance, now_ms, u, bounds)
+    return {
+        "variants": variants,
+        "candidates": _candidate_stats(conn),
+        "day_start_ms": msk_day_start_ms(now_ms),
+        "period_labels": bounds["labels"],
+        "period_as_of": bounds["as_of"],
+    }
 
 
 def _variant_stats(
@@ -43,6 +73,7 @@ def _variant_stats(
     balance: float | None,
     now_ms: int,
     unrealized: float | None,
+    bounds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     closed = list(
         conn.execute(
@@ -69,6 +100,35 @@ def _variant_stats(
         "by_trigger": _group(closed, _trigger_label),
         "by_passed": _group(closed, _passed_label),
         "equity": _equity(conn, variant),
+        "periods": _closed_periods(closed, bounds or period_bounds(now_ms)),
+    }
+
+
+def _pnl_pack(pnls: list[float]) -> dict[str, Any]:
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    profit = sum(wins)
+    loss = sum(losses)
+    return {
+        "n": len(pnls),
+        "wins": len(wins),
+        "win_pct": round(len(wins) / len(pnls) * 100.0, 1) if pnls else None,
+        "profit": round(profit, 2),
+        "loss": round(loss, 2),
+        "net": round(profit + loss, 2),
+    }
+
+
+def _closed_periods(rows: list[sqlite3.Row], bounds: dict[str, Any]) -> dict[str, Any]:
+    def take(pred) -> dict[str, Any]:
+        pnls = [float(r["pnl_usd"] or 0) for r in rows if r["closed_at"] and pred(int(r["closed_at"]))]
+        return _pnl_pack(pnls)
+
+    return {
+        "all": take(lambda _ts: True),
+        "month": take(lambda ts: ts >= int(bounds["month"])),
+        "week": take(lambda ts: ts >= int(bounds["week"])),
+        "yesterday": take(lambda ts: int(bounds["yesterday_from"]) <= ts < int(bounds["yesterday_to"])),
     }
 
 

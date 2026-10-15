@@ -189,3 +189,61 @@ class DayPnlTest(unittest.TestCase):
             self.assertAlmostEqual(t["day_pnl_pct"], 50.0 / 980.0 * 100.0, places=2)
             self.assertEqual(t["day_trades"], 1)
             store.close()
+
+    def test_period_slices_skip_retired_variants(self) -> None:
+        from datetime import datetime
+
+        from signal_engine.paper.analytics import MSK, compute_analytics
+
+        now = datetime(2026, 10, 15, 16, 0, tzinfo=MSK)
+        now_ms = int(now.timestamp() * 1000)
+        yesterday = datetime(2026, 10, 14, 12, 0, tzinfo=MSK)
+        month_only = datetime(2026, 10, 1, 1, 0, tzinfo=MSK)
+        before_month = datetime(2026, 9, 30, 18, 0, tzinfo=MSK)
+
+        def closed(symbol: str, variant: str, when: datetime, pnl: float) -> dict:
+            ts = int(when.timestamp() * 1000)
+            return {
+                "symbol": symbol,
+                "variant": variant,
+                "kind": "short",
+                "status": "closed",
+                "opened_at": ts - 60_000,
+                "closed_at": ts,
+                "entry_price": 1.0,
+                "margin": 50.0,
+                "leverage": 10,
+                "notional": 500.0,
+                "qty": 500.0,
+                "liq_price": 1.1,
+                "stop_price": 1.0,
+                "best_price": 0.99,
+                "worst_price": 1.0,
+                "entry_fee": 0.0,
+                "funding_paid": 0.0,
+                "pnl_usd": pnl,
+                "roe_pct": 10.0,
+                "exit_reason": "trailing_stop",
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = PaperStore(Path(tmp) / "paper.db")
+            store.open()
+            store.insert_trade(closed("AUSDT", "t20", yesterday, 40.0))
+            store.insert_trade(closed("BUSDT", "t20", month_only, -10.0))
+            store.insert_trade(closed("CUSDT", "t20", before_month, 5.0))
+            store.insert_trade(closed("DUSDT", "v5", yesterday, -300.0))
+            stats = compute_analytics(store.db, {"t20": 1000.0}, now_ms=now_ms)
+            self.assertNotIn("v5", stats["variants"])
+            periods = stats["variants"]["t20"]["periods"]
+            self.assertEqual(periods["all"]["n"], 3)
+            self.assertEqual(periods["all"]["net"], 35.0)
+            self.assertEqual(periods["month"]["n"], 2)
+            self.assertEqual(periods["month"]["profit"], 40.0)
+            self.assertEqual(periods["month"]["loss"], -10.0)
+            self.assertEqual(periods["week"]["n"], 1)
+            self.assertEqual(periods["week"]["net"], 40.0)
+            self.assertEqual(periods["yesterday"]["n"], 1)
+            self.assertEqual(periods["yesterday"]["win_pct"], 100.0)
+            self.assertIn("Вчера", stats["period_labels"]["yesterday"])
+            store.close()

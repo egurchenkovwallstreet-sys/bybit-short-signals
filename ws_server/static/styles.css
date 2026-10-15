@@ -1406,6 +1406,7 @@ th { cursor: pointer; color: var(--muted); }
 .paper-table tbody tr.clickable { cursor: pointer; }
 .paper-table tbody tr.clickable:hover { background: rgba(93, 173, 226, 0.08); }
 .paper-table tbody tr.selected { background: rgba(93, 173, 226, 0.16); }
+.paper-table tr.paper-total td { font-weight: 700; border-top: 1px solid var(--line); }
 .paper-scroll { max-height: 420px; }
 .pos { color: var(--green); }
 .neg { color: var(--red); }

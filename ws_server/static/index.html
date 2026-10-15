@@ -147,6 +147,15 @@
       <p class="quiet">Строки сами встают по текущему результату: сверху самый большой плюс к стартовому капиталу (баланс и плавающий P&amp;L), снизу самый слабый плюс или убыток. Порядок обновляется с каждым снимком. Нажмите на строку, чтобы смотреть сделки и статистику этого варианта. Сутки P&amp;L — с полуночи Москвы (24:00 МСК), в деньгах и процентах к капиталу на начало суток.</p>
       <div class="table-wrap"><table id="paper-variants" class="paper-table"></table></div>
     </section>
+    <section class="paper-panel">
+      <h3>Статистика по периодам</h3>
+      <p class="quiet" id="paper-period-note">
+        Живые стратегии. Число сделок, доля в плюсе, сумма прибыли, сумма убытка и итог.
+        Вчера — полные сутки до полуночи Москвы. Сейчас — открытые позиции.
+      </p>
+      <div class="paper-tf-row" id="paper-period-row"></div>
+      <div class="table-wrap"><table id="paper-periods" class="paper-table"></table></div>
+    </section>
     <h3 id="paper-variant-title" class="paper-variant-title"></h3>
     <div id="paper-summary" class="paper-cards"></div>
     <section class="paper-panel">
@@ -222,7 +231,7 @@
 
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
-  <script src="/static/paper_test.js?v=20261015mini"></script>
+  <script src="/static/paper_test.js?v=20261015periods"></script>
   <script src="/static/board_chart.js?v=20251008v"></script>
   <script src="/static/app.js?v=20261012hub"></script>
   <script src="/static/pump_scan.js?v=20251008v"></script>

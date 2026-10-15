@@ -6,6 +6,7 @@
     history: [],
     selected: null, // {type: "open"|"closed"|"cand", id}
     variant: "t20",
+    period: "all",
     closedVariant: "",
     interval: "15",
     chart: null,
@@ -221,6 +222,7 @@
 
   function render() {
     renderVariants();
+    renderPeriods();
     renderSummary();
     renderEquity();
     renderOpen();
@@ -282,6 +284,104 @@
         });
       });
     });
+  }
+
+  function emptySlice() {
+    return { n: 0, wins: 0, win_pct: null, profit: 0, loss: 0, net: 0 };
+  }
+
+  function liveSlice(variant) {
+    const pnls = ((paper.data && paper.data.open_trades) || [])
+      .filter((r) => r.variant === variant)
+      .map((r) => Number(r.pnl_usd) || 0);
+    const wins = pnls.filter((p) => p > 0);
+    const losses = pnls.filter((p) => p < 0);
+    const profit = wins.reduce((acc, p) => acc + p, 0);
+    const loss = losses.reduce((acc, p) => acc + p, 0);
+    return {
+      n: pnls.length,
+      wins: wins.length,
+      win_pct: pnls.length ? Math.round((wins.length / pnls.length) * 1000) / 10 : null,
+      profit,
+      loss,
+      net: profit + loss,
+    };
+  }
+
+  function sumSlices(rows) {
+    const n = rows.reduce((acc, s) => acc + (s.n || 0), 0);
+    const wins = rows.reduce((acc, s) => acc + (s.wins || 0), 0);
+    const profit = rows.reduce((acc, s) => acc + (s.profit || 0), 0);
+    const loss = rows.reduce((acc, s) => acc + (s.loss || 0), 0);
+    return {
+      n,
+      wins,
+      win_pct: n ? Math.round((wins / n) * 1000) / 10 : null,
+      profit,
+      loss,
+      net: profit + loss,
+    };
+  }
+
+  function periodCells(slice) {
+    if (!slice || !slice.n) return ["0", "—", "—", "—", "—"];
+    const wr = slice.win_pct === null || slice.win_pct === undefined ? "—" : `${num(slice.win_pct, 1)}%`;
+    return [String(slice.n), wr, usd(slice.profit), usd(slice.loss), usd(slice.net)];
+  }
+
+  function renderPeriods() {
+    const row = document.getElementById("paper-period-row");
+    const table = document.getElementById("paper-periods");
+    const note = document.getElementById("paper-period-note");
+    if (!row || !table) return;
+    const analytics = (paper.data && paper.data.analytics) || {};
+    const labels = analytics.period_labels || {
+      all: "Всё время",
+      month: "Месяц",
+      week: "Неделя",
+      yesterday: "Вчера",
+      now: "Сейчас открытые",
+    };
+    const keys = ["all", "month", "week", "yesterday", "now"];
+    if (!keys.includes(paper.period)) paper.period = "all";
+    const notes = {
+      all: "Все закрытые сделки живых стратегий. Остановленные счета сюда не входят.",
+      month: "Закрытые с 1-го числа текущего месяца, 00:00 МСК.",
+      week: "Закрытые с полуночи МСК семь суток назад.",
+      yesterday: "Закрытые за полные предыдущие сутки, 00:00–24:00 МСК.",
+      now: "Открытые позиции, плавающий результат на текущий снимок.",
+    };
+    if (note) {
+      const stamp = analytics.period_as_of ? ` Снимок ${analytics.period_as_of} МСК.` : "";
+      note.textContent = `${notes[paper.period]}${stamp}`;
+    }
+    row.innerHTML = keys
+      .map(
+        (key) =>
+          `<button type="button" class="paper-btn${paper.period === key ? " active" : ""}" data-period="${key}">${esc(labels[key] || key)}</button>`,
+      )
+      .join("");
+    row.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        paper.period = btn.dataset.period;
+        renderPeriods();
+      });
+    });
+    const slices = variants().map((variant) => ({
+      variant,
+      slice: paper.period === "now" ? liveSlice(variant) : (vstats(variant).periods || {})[paper.period] || emptySlice(),
+    }));
+    const total = sumSlices(slices.map((item) => item.slice));
+    table.innerHTML = `<thead><tr>
+      <th>Стратегия</th><th>Сделок</th><th>В плюсе</th><th>Прибыль</th><th>Убыток</th><th>Итог</th>
+    </tr></thead><tbody>${slices
+      .map(
+        (item) => `<tr>
+        <td>${vbadge(item.variant)}</td>
+        ${periodCells(item.slice).map((cell) => `<td>${cell}</td>`).join("")}
+      </tr>`,
+      )
+      .join("")}<tr class="paper-total"><td>Все вместе</td>${periodCells(total).map((cell) => `<td>${cell}</td>`).join("")}</tr></tbody>`;
   }
 
   function renderSummary() {
