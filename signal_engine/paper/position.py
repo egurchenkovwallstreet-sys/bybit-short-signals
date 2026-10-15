@@ -1,8 +1,8 @@
 """Виртуальный изолированный шорт: ликвидация, трейлинг-стоп, комиссии, funding.
 
 ROE — прибыль в % от маржи без комиссий: (вход − цена) / вход × плечо × 100.
-t20: ≥3% → +0.5% net, ≥10% → +2% net, ≥7% — не хуже +5%, дальше трейл «пик − 20 п.п.».
-p10: те же net-локи; бумажный трейл 10%→2% цены плюс лок пик − 10 с пика ≥ 10% (не хуже +2% net).
+t20: ≥3% → +0.5% net, ≥7% — не хуже +5%, дальше трейл «пик − 20 п.п.».
+p10: +3% → +0.5% net, +10% → +2% net; бумажный трейл 10%→2% цены плюс лок пик − 10 с пика ≥ 10%.
 """
 
 from __future__ import annotations
@@ -321,13 +321,15 @@ def _profit_lock_prices(
     margin: float,
     entry_fee: float,
     funding_paid: float,
+    *,
+    include_plus10: bool,
 ) -> list[float]:
     prices: list[float] = []
     if peak >= config.PAPER_BE_ARM_ROE:
         prices.append(
             _net_lock_price(entry, margin, config.PAPER_BE_LOCK_NET_ROE, leverage, entry_fee, funding_paid)
         )
-    if peak >= config.PAPER_PLUS10_ARM_ROE:
+    if include_plus10 and peak >= config.PAPER_PLUS10_ARM_ROE:
         prices.append(
             _net_lock_price(
                 entry, margin, config.PAPER_PLUS10_LOCK_NET_ROE, leverage, entry_fee, funding_paid
@@ -348,7 +350,9 @@ def trail_stop(
 ) -> float:
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
-    floors = _profit_lock_prices(entry, peak, lev, margin, entry_fee, funding_paid)
+    floors = _profit_lock_prices(
+        entry, peak, lev, margin, entry_fee, funding_paid, include_plus10=peak_gap_roe > 0
+    )
     if peak_gap_roe > 0:
         paper = best_price * (1.0 + trail_distance_pct(peak) / 100.0)
         stop = paper
@@ -384,10 +388,6 @@ def impulse_long_stop(
     if peak >= config.PAPER_BE_ARM_ROE and margin > 0:
         floors.append(
             net_roe_stop_price_long(entry, margin, config.PAPER_BE_LOCK_NET_ROE, lev, entry_fee, funding_paid)
-        )
-    if peak >= config.PAPER_PLUS10_ARM_ROE and margin > 0:
-        floors.append(
-            net_roe_stop_price_long(entry, margin, config.PAPER_PLUS10_LOCK_NET_ROE, lev, entry_fee, funding_paid)
         )
     if peak < config.PAPER_BE_ARM_ROE:
         return long_liquidation_price(entry, lev)

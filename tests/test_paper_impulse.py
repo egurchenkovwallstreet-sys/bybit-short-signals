@@ -103,6 +103,9 @@ class ImpulseStopTest(unittest.TestCase):
         classic = Position(symbol="X", opened_at=0, entry_price=1.0, margin=50.0, side="long", stop_style="default")
         self.assertAlmostEqual(impulse.stop_price, long_liquidation_price(1.0, 10), places=6)
         self.assertGreater(classic.stop_price, impulse.stop_price)
+        impulse.best_price = 1.01
+        impulse._sync_stop(1.01)
+        self.assertAlmostEqual(impulse.stop_price, price_for_long_roe(1.0, 5.0, 10), places=6)
         impulse.best_price = 1.03
         impulse._sync_stop(1.03)
         self.assertAlmostEqual(impulse.stop_price, price_for_long_roe(1.0, 10.0, 10), places=6)
