@@ -287,7 +287,13 @@
   }
 
   function emptySlice() {
-    return { n: 0, wins: 0, win_pct: null, profit: 0, loss: 0, net: 0 };
+    return { n: 0, wins: 0, win_pct: null, profit: 0, loss: 0, net: 0, base: 0, profit_pct: 0, loss_pct: 0, net_pct: 0 };
+  }
+
+  function withPct(profit, loss, base) {
+    const net = profit + loss;
+    const pctOf = (amount) => (base ? Math.round((amount / base) * 10000) / 100 : 0);
+    return { profit, loss, net, base, profit_pct: pctOf(profit), loss_pct: pctOf(loss), net_pct: pctOf(net) };
   }
 
   function liveSlice(variant) {
@@ -298,13 +304,13 @@
     const losses = pnls.filter((p) => p < 0);
     const profit = wins.reduce((acc, p) => acc + p, 0);
     const loss = losses.reduce((acc, p) => acc + p, 0);
+    const stored = account(variant).balance;
+    const base = stored == null ? ((paper.data && paper.data.summary) || {}).start_balance || 1000 : Number(stored);
     return {
       n: pnls.length,
       wins: wins.length,
       win_pct: pnls.length ? Math.round((wins.length / pnls.length) * 1000) / 10 : null,
-      profit,
-      loss,
-      net: profit + loss,
+      ...withPct(profit, loss, base),
     };
   }
 
@@ -313,20 +319,24 @@
     const wins = rows.reduce((acc, s) => acc + (s.wins || 0), 0);
     const profit = rows.reduce((acc, s) => acc + (s.profit || 0), 0);
     const loss = rows.reduce((acc, s) => acc + (s.loss || 0), 0);
+    const base = rows.reduce((acc, s) => acc + (Number(s.base) || 0), 0);
     return {
       n,
       wins,
       win_pct: n ? Math.round((wins / n) * 1000) / 10 : null,
-      profit,
-      loss,
-      net: profit + loss,
+      ...withPct(profit, loss, base),
     };
   }
 
+  function moneyPct(amount, percent) {
+    return `${usd(amount || 0)} ${pct(percent || 0)}`;
+  }
+
   function periodCells(slice) {
-    if (!slice || !slice.n) return ["0", "—", "—", "—", "—"];
-    const wr = slice.win_pct === null || slice.win_pct === undefined ? "—" : `${num(slice.win_pct, 1)}%`;
-    return [String(slice.n), wr, usd(slice.profit), usd(slice.loss), usd(slice.net)];
+    const row = slice || emptySlice();
+    if (!row.n) return ["0", "—", moneyPct(0, 0), moneyPct(0, 0), moneyPct(0, 0)];
+    const wr = row.win_pct === null || row.win_pct === undefined ? "—" : `${num(row.win_pct, 1)}%`;
+    return [String(row.n), wr, moneyPct(row.profit, row.profit_pct), moneyPct(row.loss, row.loss_pct), moneyPct(row.net, row.net_pct)];
   }
 
   function renderPeriods() {
@@ -345,11 +355,11 @@
     const keys = ["all", "month", "week", "yesterday", "now"];
     if (!keys.includes(paper.period)) paper.period = "all";
     const notes = {
-      all: "Все закрытые сделки живых стратегий. Остановленные счета сюда не входят.",
-      month: "Закрытые с 1-го числа текущего месяца, 00:00 МСК.",
-      week: "Закрытые с полуночи МСК семь суток назад.",
-      yesterday: "Закрытые за полные предыдущие сутки, 00:00–24:00 МСК.",
-      now: "Открытые позиции, плавающий результат на текущий снимок.",
+      all: "Все закрытые сделки живых стратегий. Процент прибыли и убытка — к стартовым $1000.",
+      month: "Закрытые с 1-го числа текущего месяца, 00:00 МСК. Процент — к капиталу на начало месяца.",
+      week: "Закрытые с полуночи МСК семь суток назад. Процент — к капиталу на начало этой недели.",
+      yesterday: "Закрытые за полные предыдущие сутки, 00:00–24:00 МСК. Процент — к капиталу на начало тех суток.",
+      now: "Открытые позиции. Процент — плавающий результат к текущему балансу.",
     };
     if (note) {
       const stamp = analytics.period_as_of ? ` Снимок ${analytics.period_as_of} МСК.` : "";

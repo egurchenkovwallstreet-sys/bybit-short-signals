@@ -233,11 +233,20 @@ class DayPnlTest(unittest.TestCase):
             store.insert_trade(closed("BUSDT", "t20", month_only, -10.0))
             store.insert_trade(closed("CUSDT", "t20", before_month, 5.0))
             store.insert_trade(closed("DUSDT", "v5", yesterday, -300.0))
+            store.add_equity(
+                "t20",
+                int(datetime(2026, 10, 13, 23, 0, tzinfo=MSK).timestamp() * 1000),
+                800.0,
+                800.0,
+                0,
+            )
             stats = compute_analytics(store.db, {"t20": 1000.0}, now_ms=now_ms)
             self.assertNotIn("v5", stats["variants"])
             periods = stats["variants"]["t20"]["periods"]
             self.assertEqual(periods["all"]["n"], 3)
             self.assertEqual(periods["all"]["net"], 35.0)
+            self.assertEqual(periods["all"]["base"], 1000.0)
+            self.assertEqual(periods["all"]["net_pct"], 3.5)
             self.assertEqual(periods["month"]["n"], 2)
             self.assertEqual(periods["month"]["profit"], 40.0)
             self.assertEqual(periods["month"]["loss"], -10.0)
@@ -245,5 +254,8 @@ class DayPnlTest(unittest.TestCase):
             self.assertEqual(periods["week"]["net"], 40.0)
             self.assertEqual(periods["yesterday"]["n"], 1)
             self.assertEqual(periods["yesterday"]["win_pct"], 100.0)
+            self.assertEqual(periods["yesterday"]["base"], 800.0)
+            self.assertEqual(periods["yesterday"]["profit_pct"], 5.0)
+            self.assertEqual(periods["yesterday"]["net_pct"], 5.0)
             self.assertIn("Вчера", stats["period_labels"]["yesterday"])
             store.close()

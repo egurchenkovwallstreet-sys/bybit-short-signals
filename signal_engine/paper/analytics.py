@@ -100,35 +100,61 @@ def _variant_stats(
         "by_trigger": _group(closed, _trigger_label),
         "by_passed": _group(closed, _passed_label),
         "equity": _equity(conn, variant),
-        "periods": _closed_periods(closed, bounds or period_bounds(now_ms)),
+        "periods": _closed_periods(conn, variant, closed, bounds or period_bounds(now_ms)),
     }
 
 
-def _pnl_pack(pnls: list[float]) -> dict[str, Any]:
+def _pnl_pack(pnls: list[float], base: float) -> dict[str, Any]:
     wins = [p for p in pnls if p > 0]
     losses = [p for p in pnls if p < 0]
     profit = sum(wins)
     loss = sum(losses)
+    net = profit + loss
+    base = float(base)
+    def pct(amount: float) -> float | None:
+        return round(amount / base * 100.0, 2) if base else None
+
     return {
         "n": len(pnls),
         "wins": len(wins),
         "win_pct": round(len(wins) / len(pnls) * 100.0, 1) if pnls else None,
         "profit": round(profit, 2),
         "loss": round(loss, 2),
-        "net": round(profit + loss, 2),
+        "net": round(net, 2),
+        "base": round(base, 2),
+        "profit_pct": pct(profit),
+        "loss_pct": pct(loss),
+        "net_pct": pct(net),
     }
 
 
-def _closed_periods(rows: list[sqlite3.Row], bounds: dict[str, Any]) -> dict[str, Any]:
-    def take(pred) -> dict[str, Any]:
+def _equity_before(conn: sqlite3.Connection, variant: str, ts_ms: int) -> float:
+    row = conn.execute(
+        "SELECT equity FROM paper_equity_v WHERE variant = ? AND ts < ? ORDER BY ts DESC LIMIT 1",
+        (variant, ts_ms),
+    ).fetchone()
+    if row is not None:
+        return float(row["equity"])
+    return float(config.PAPER_START_BALANCE_USD)
+
+
+def _closed_periods(
+    conn: sqlite3.Connection, variant: str, rows: list[sqlite3.Row], bounds: dict[str, Any]
+) -> dict[str, Any]:
+    start = float(config.PAPER_START_BALANCE_USD)
+
+    def take(pred, base: float) -> dict[str, Any]:
         pnls = [float(r["pnl_usd"] or 0) for r in rows if r["closed_at"] and pred(int(r["closed_at"]))]
-        return _pnl_pack(pnls)
+        return _pnl_pack(pnls, base)
 
     return {
-        "all": take(lambda _ts: True),
-        "month": take(lambda ts: ts >= int(bounds["month"])),
-        "week": take(lambda ts: ts >= int(bounds["week"])),
-        "yesterday": take(lambda ts: int(bounds["yesterday_from"]) <= ts < int(bounds["yesterday_to"])),
+        "all": take(lambda _ts: True, start),
+        "month": take(lambda ts: ts >= int(bounds["month"]), _equity_before(conn, variant, int(bounds["month"]))),
+        "week": take(lambda ts: ts >= int(bounds["week"]), _equity_before(conn, variant, int(bounds["week"]))),
+        "yesterday": take(
+            lambda ts: int(bounds["yesterday_from"]) <= ts < int(bounds["yesterday_to"]),
+            _equity_before(conn, variant, int(bounds["yesterday_from"])),
+        ),
     }
 
 
