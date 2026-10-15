@@ -262,9 +262,9 @@
         const balance = a.balance ?? t.balance ?? start;
         return `<tr class="clickable${v === paper.variant ? " selected" : ""}" data-variant="${v}">
           <td>${vbadge(v)}</td>
-          <td>$${num(balance)} ${pct(((balance - start) / start) * 100)}</td>
+          <td>$${num(balance)}</td>
           <td>$${num(a.equity ?? balance)}</td>
-          <td>${usd(t.total_pnl ?? 0)}</td>
+          <td>${usd(t.total_pnl ?? 0)} ${pct(t.total_pnl_pct != null ? t.total_pnl_pct : (start ? ((t.total_pnl ?? 0) / start) * 100 : 0))}</td>
           <td>${usd(t.day_pnl ?? 0)} ${pct(t.day_pnl_pct ?? 0)}${t.day_trades ? `<div class="quiet">${t.day_trades} закр. сегодня</div>` : ""}</td>
           <td>${t.closed ?? 0} (${t.wins ?? 0} / ${t.losses ?? 0})</td>
           <td>${num(t.win_rate ?? 0, 1)}%</td>
@@ -411,12 +411,12 @@
     const start = s.start_balance || 1000;
     const balance = a.balance ?? t.balance ?? start;
     const cards = [
-      ["Баланс", `$${num(balance)}`, `старт $${num(start, 0)} · ${pct(((balance - start) / start) * 100)}`],
+      ["Баланс", `$${num(balance)}`, `старт $${num(start, 0)}`],
       ["Equity", `$${num(a.equity ?? balance)}`, `плавающий ${usd(a.unrealized ?? 0)}`],
       ["Открыто сделок", a.open_trades ?? 0, `маржа в работе $${num(a.used_margin ?? 0)}`],
       ["Закрыто сделок", t.closed ?? 0, `${t.wins ?? 0} в плюс · ${t.losses ?? 0} в минус`],
       ["Win rate", `${num(t.win_rate ?? 0, 1)}%`, `PF ${t.profit_factor ?? "—"}`],
-      ["Итог P&L", usd(t.total_pnl ?? 0), `ср. ROE ${num(t.avg_roe ?? 0, 1)}%`],
+      ["Итог P&L", `${usd(t.total_pnl ?? 0)} ${pct(t.total_pnl_pct != null ? t.total_pnl_pct : (start ? ((t.total_pnl ?? 0) / start) * 100 : 0))}`, `от старта $${num(start, 0)} · ср. ROE ${num(t.avg_roe ?? 0, 1)}%`],
       ["Сутки P&L (МСК)", usd(t.day_pnl ?? 0), `${pct(t.day_pnl_pct ?? 0)} · закрыто сегодня ${t.day_trades ?? 0}`],
       ["Средняя прибыль", usd(t.avg_win ?? 0), `средний убыток ${usd(t.avg_loss ?? 0)}`],
       ["Макс. просадка", `${num(t.max_drawdown_pct ?? 0)}%`, `лучшая ${usd(t.best ?? 0)} · худшая ${usd(t.worst ?? 0)}`],

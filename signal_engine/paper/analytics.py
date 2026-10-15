@@ -171,6 +171,7 @@ def _trade_stats(rows: list[sqlite3.Row]) -> dict[str, Any]:
         "losses": len(losses),
         "win_rate": round(len(wins) / len(rows) * 100.0, 1) if rows else 0.0,
         "total_pnl": round(sum(pnls), 2),
+        "total_pnl_pct": round(sum(pnls) / start * 100.0, 2) if start else 0.0,
         "avg_win": round(gross_win / len(wins), 2) if wins else 0.0,
         "avg_loss": round(-gross_loss / len(losses), 2) if losses else 0.0,
         "profit_factor": round(gross_win / gross_loss, 2) if gross_loss > 0 else (None if not wins else "∞"),
