@@ -125,6 +125,7 @@ class Sc10DetectTest(unittest.TestCase):
         self.assertFalse(ev.passed)
 
 
+@unittest.skipUnless(config.PAPER_SC10_VARIANT in config.PAPER_VARIANTS, "Скальп 10 снят с теста")
 class Sc10StrategyTest(unittest.TestCase):
     def test_opens_long(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

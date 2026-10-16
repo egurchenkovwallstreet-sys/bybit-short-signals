@@ -150,7 +150,7 @@
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2", "mt2c", "graf", "dps", "pyl", "vac", "i5", "i15"];
+    return (paper.data && paper.data.variants) || ["t20", "p10", "t20p", "mlnp", "mt2", "graf"];
   }
   function variantProfit(v) {
     const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;

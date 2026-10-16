@@ -55,14 +55,16 @@ class ImpulseEntryTest(unittest.TestCase):
         ev = evaluate_impulse(state, _tape(last_ts, 5, 80.0, 20.0), now, 5)
         self.assertTrue(ev.passed)
         self.assertEqual(ev.side, "long")
-        self.assertEqual(ev.to_data()["variants"], ["i5"])
+        expected = [config.PAPER_IMP5_VARIANT] if config.PAPER_IMP5_VARIANT in config.PAPER_VARIANTS else []
+        self.assertEqual(ev.to_data()["variants"], expected)
 
     def test_short_on_red_bar_with_sells(self) -> None:
         state, now, last_ts = _state(15, 10.0, 40.0, up=False)
         ev = evaluate_impulse(state, _tape(last_ts, 15, 20.0, 80.0), now, 15)
         self.assertTrue(ev.passed)
         self.assertEqual(ev.side, "short")
-        self.assertEqual(ev.to_data()["variants"], ["i15"])
+        expected = [config.PAPER_IMP15_VARIANT] if config.PAPER_IMP15_VARIANT in config.PAPER_VARIANTS else []
+        self.assertEqual(ev.to_data()["variants"], expected)
 
     def test_exact_triple_volume_does_not_enter(self) -> None:
         state, now, last_ts = _state(5, 10.0, 30.0, up=True)
@@ -118,6 +120,7 @@ class ImpulseStopTest(unittest.TestCase):
         self.assertAlmostEqual(impulse.stop_price, price_for_long_roe(1.0, 10.0, 10), places=6)
 
 
+@unittest.skipUnless(config.PAPER_IMP5_VARIANT in config.PAPER_VARIANTS, "Импульс 5 снят с теста")
 class ImpulseOpenTest(unittest.TestCase):
     def test_opens_impulse_5_long_once_per_bar(self) -> None:
         state, now, last_ts = _state(5, 10.0, 40.0, up=True)

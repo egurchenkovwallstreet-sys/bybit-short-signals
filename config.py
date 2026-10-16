@@ -263,12 +263,10 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 # шорты e5s / e5p — тот же поиск пампа, вход по EMA50 5м.
 # Курсор3 (c3) — тот же поиск пампа и выход Трейл 20, вход из восьми обязательных пунктов.
 # Cursor SS (css) с вкладки снят: новые сделки не открываются.
-PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
-PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
-PAPER_VARIANTS = (
-    "t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2",
-    "mt2c", "graf", "dps", "pyl", "vac", "i5", "i15",
-)
+PAPER_SHORT_VARIANTS = ("t20", "p10")
+PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
+# Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
+PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -287,7 +285,7 @@ PAPER_MT2_VARIANT = "mt2"
 PAPER_MT2C_VARIANT = "mt2c"
 PAPER_GRAF_VARIANT = "graf"
 PAPER_DPS_VARIANT = "dps"
-PAPER_MINI_VARIANTS = (PAPER_MT1_VARIANT, PAPER_MT2_VARIANT)
+PAPER_MINI_VARIANTS = (PAPER_MT2_VARIANT,)
 PAPER_GRAF_PIVOT_WING = _env_int("PAPER_GRAF_PIVOT_WING", 1)
 
 # Дип сик (DeepSeek paper): пороги входа; нет данных — пункт не блокирует.

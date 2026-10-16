@@ -150,6 +150,10 @@ class E5sDetectTest(unittest.TestCase):
         self.assertFalse(ev.passed)
 
 
+@unittest.skipUnless(
+    config.PAPER_E5S_VARIANT in config.PAPER_VARIANTS and config.PAPER_E5P_VARIANT in config.PAPER_VARIANTS,
+    "EMA-варианты сняты с теста",
+)
 class E5sStrategyTest(unittest.TestCase):
     def test_opens_on_5m_close_below_ema(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -332,7 +332,7 @@ class StrategyCycleTest(unittest.TestCase):
             self.assertEqual(stats["variants"]["t20"]["trades"]["closed"], 1)
             self.assertEqual(stats["variants"]["t20"]["trades"]["wins"], 1)
             self.assertEqual(stats["variants"]["p10"]["trades"]["closed"], 1)
-            self.assertEqual(strategy.candidates[state.symbol].entered, ["t20", "p10", "mln"])
+            self.assertEqual(strategy.candidates[state.symbol].entered, list(config.PAPER_SHORT_VARIANTS))
             strategy.close()
 
     def test_balance_restored_after_restart(self) -> None:
@@ -396,8 +396,8 @@ class StrategyCycleTest(unittest.TestCase):
             restarted = PaperStrategy(PaperStore(path))
             restarted.open()
             self.assertIn(state.symbol, restarted.candidates)
-            self.assertEqual(restarted.candidates[state.symbol].entered, ["t20", "p10", "mln"])
-            self.assertEqual(len(restarted.trades), 3)
+            self.assertEqual(restarted.candidates[state.symbol].entered, list(config.PAPER_SHORT_VARIANTS))
+            self.assertEqual(len(restarted.trades), len(config.PAPER_SHORT_VARIANTS))
             tape = restarted.tape.symbols[state.symbol]
             self.assertTrue(tape.minutes)
             self.assertTrue(tape.liq_short)
@@ -463,7 +463,7 @@ class StrongTopTest(unittest.TestCase):
         ev.strong_top = {"interval": "60"}
         self.assertEqual(ev.variants, [])
         ev.checks["stall"]["ok"] = True
-        self.assertEqual(ev.variants, ["t20", "p10", "mln"])
+        self.assertEqual(ev.variants, list(config.PAPER_SHORT_VARIANTS))
 
 
 class EntryGateTest(unittest.TestCase):
@@ -780,10 +780,8 @@ class MiniTestEntryTest(unittest.TestCase):
     def test_passes_with_sample_gate_and_loss_cuts(self) -> None:
         view = mini_view(_mini_ev(_mini_metrics()))
         self.assertTrue(view["passed"])
-        self.assertEqual(view["variants"], ["mt1", "mt2"])
-        self.assertEqual(config.paper_peak_gap_roe("mt1"), 0.0)
+        self.assertEqual(view["variants"], list(config.PAPER_MINI_VARIANTS))
         self.assertEqual(config.paper_peak_gap_roe("mt2"), config.PAPER_TRAIL_PEAK_GAP_ROE)
-        self.assertEqual(config.paper_stop_style("mt1"), "default")
         self.assertEqual(config.paper_stop_style("mt2"), "default")
 
     def test_late_extension_does_not_open_mini(self) -> None:

@@ -281,6 +281,7 @@ class PaperStrategy:
             self.store.set_kv("revived_restart_expiry", str(now))
             if revived:
                 log.info("Тест: возвращено кандидатов после ошибочного снятия: %s", revived)
+        self._retire_removed_variants(now)
         for row in self.store.open_trades():
             variant = str(row["variant"] or config.PAPER_T20_VARIANT)
             self._ensure_balance(variant)
@@ -525,27 +526,35 @@ class PaperStrategy:
     def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
         self._refresh_peaks(states, now_ms)
-        self._refresh_growth_peaks(states, now_ms)
+        if config.PAPER_LT20_VARIANT in VARIANTS:
+            self._refresh_growth_peaks(states, now_ms)
         if config.PAPER_CSS_VARIANT in VARIANTS:
             self._refresh_css_peaks(states, now_ms)
         self._update_trades(states, now_ms)
         self._update_shadows(states, now_ms)
         if now_ms >= self._next_detect:
             self._detect(states, now_ms)
-            self._detect_growth(states, now_ms)
+            if config.PAPER_LT20_VARIANT in VARIANTS:
+                self._detect_growth(states, now_ms)
             if config.PAPER_CSS_VARIANT in VARIANTS:
                 self._detect_css(states, now_ms)
-            self._detect_css2(states, now_ms)
+            if config.PAPER_CSS2_VARIANT in VARIANTS:
+                self._detect_css2(states, now_ms)
             self._next_detect = now_ms + config.PAPER_DETECT_INTERVAL_SEC * 1000
         self._evaluate(states, btc_4h, now_ms)
-        self._evaluate_growth(states, now_ms)
+        if config.PAPER_LT20_VARIANT in VARIANTS:
+            self._evaluate_growth(states, now_ms)
         if config.PAPER_CSS_VARIANT in VARIANTS:
             self._evaluate_css(states, now_ms)
-        self._evaluate_css2(states, btc_state=states.get(config.PAPER_BTC_SYMBOL), now_ms=now_ms)
-        self._evaluate_sc10(states, now_ms)
+        if config.PAPER_CSS2_VARIANT in VARIANTS:
+            self._evaluate_css2(states, btc_state=states.get(config.PAPER_BTC_SYMBOL), now_ms=now_ms)
+        if config.PAPER_SC10_VARIANT in VARIANTS:
+            self._evaluate_sc10(states, now_ms)
         self._evaluate_impulse(states, now_ms)
-        self._evaluate_pyl(states, now_ms)
-        self._evaluate_vac(states, now_ms)
+        if config.PAPER_PYL_VARIANT in VARIANTS:
+            self._evaluate_pyl(states, now_ms)
+        if config.PAPER_VAC_VARIANT in VARIANTS:
+            self._evaluate_vac(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -574,6 +583,89 @@ class PaperStrategy:
         self.balances[variant] = float(saved) if saved is not None else config.PAPER_START_BALANCE_USD
         if saved is None:
             self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
+
+    def _retire_removed_variants(self, now_ms: int) -> None:
+        retired: set[str] = set()
+        for row in list(self.store.open_trades()):
+            variant = str(row["variant"] or config.PAPER_T20_VARIANT)
+            if variant in VARIANTS:
+                continue
+            retired.add(variant)
+            self._force_close_retired_trade(row, now_ms)
+        for kind, var in (
+            ("css", config.PAPER_CSS_VARIANT),
+            ("css2", config.PAPER_CSS2_VARIANT),
+            ("growth", config.PAPER_LT20_VARIANT),
+            ("sc10", config.PAPER_SC10_VARIANT),
+        ):
+            if var not in VARIANTS:
+                dropped = self.store.expire_kind_watching(kind, f"вариант {var} снят", now_ms)
+                if dropped:
+                    log.info("Тест: снято кандидатов %s: %s", kind, dropped)
+        if retired:
+            self.store.db.commit()
+            log.info("Тест: закрыты открытые сделки снятых вариантов: %s", sorted(retired))
+
+    def _force_close_retired_trade(self, row, now_ms: int) -> None:
+        variant = str(row["variant"] or config.PAPER_T20_VARIANT)
+        self._ensure_balance(variant)
+        gap = config.paper_peak_gap_roe(variant)
+        kind = str(row["kind"] or "")
+        side = "long" if config.paper_is_long(variant) or kind.endswith("_long") else "short"
+        pos = Position(
+            symbol=row["symbol"],
+            opened_at=int(row["opened_at"]),
+            entry_price=float(row["entry_price"]),
+            margin=float(row["margin"]),
+            leverage=int(row["leverage"]),
+            best_price=float(row["best_price"]),
+            worst_price=float(row["worst_price"]),
+            stop_price=float(row["stop_price"]),
+            liq_price=float(row["liq_price"]),
+            entry_fee=float(row["entry_fee"]),
+            funding_paid=float(row["funding_paid"] or 0),
+            next_funding_ts=row["next_funding_ts"],
+            last_price=float(row["last_price"] or row["entry_price"]),
+            peak_gap_roe=gap,
+            side=side,
+            stop_style=config.paper_stop_style(variant),
+            scaled_half=bool((_loads(row["entry_json"]) or {}).get("css2_half")),
+        )
+        last = float(row["last_price"] or row["entry_price"])
+        pos.update(last, last, last)
+        reason = "вариант снят (баланс ≤ $1000)"
+        result = pos.close_result(reason)
+        self.balances[variant] += result["pnl_usd"]
+        exit_json = {
+            "duration_min": round((now_ms - pos.opened_at) / 60_000),
+            "last_price": pos.last_price,
+            "best_price": pos.best_price,
+            "worst_price": pos.worst_price,
+            "funding_paid": pos.funding_paid,
+        }
+        self.store.update_trade(
+            int(row["id"]),
+            {
+                "status": "closed",
+                "closed_at": now_ms,
+                "exit_price": result["exit_price"],
+                "exit_reason": reason,
+                "exit_fee": result["exit_fee"],
+                "pnl_usd": result["pnl_usd"],
+                "roe_pct": result["roe_pct"],
+                "max_roe": pos.max_roe(),
+                "min_roe": pos.min_roe(),
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "stop_price": pos.stop_price,
+                "last_price": pos.last_price,
+                "funding_paid": pos.funding_paid,
+                "balance_after": self.balances[variant],
+                "exit_json": exit_json,
+            },
+            commit=False,
+        )
+        self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
 
     def used_margin(self, variant: str) -> float:
         return sum(t.pos.margin for t in self._variant_trades(variant))
@@ -877,6 +969,8 @@ class PaperStrategy:
             if cand.soft:
                 notes.append("мягкий памп: только Мини тест")
             for variant in () if cand.soft else ev.variants:
+                if variant not in VARIANTS:
+                    continue
                 if (variant, symbol) in self.trades:
                     continue
                 if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
@@ -889,6 +983,8 @@ class PaperStrategy:
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
             if e5s_ev.passed and not cand.soft:
                 for variant in e5s_ev.to_data()["variants"]:
+                    if variant not in VARIANTS:
+                        continue
                     label = VARIANT_LABELS.get(variant, variant)
                     if (variant, symbol) in self.trades:
                         continue
@@ -907,6 +1003,8 @@ class PaperStrategy:
                     notes.append("копии: этот пик уже закрыт первым стопом")
                 else:
                     for variant in config.PAPER_PLUS_VARIANTS:
+                        if variant not in VARIANTS:
+                            continue
                         label = VARIANT_LABELS.get(variant, variant)
                         if (variant, symbol) in self.trades:
                             continue
@@ -919,7 +1017,7 @@ class PaperStrategy:
                             notes.append(f"{label}: нет свободной маржи")
                             continue
                         self._open_trade(variant, cand, state, plus_ev, margin, now_ms)
-            if c3["passed"] and not cand.soft:
+            if c3["passed"] and not cand.soft and config.PAPER_C3_VARIANT in VARIANTS:
                 variant = config.PAPER_C3_VARIANT
                 label = VARIANT_LABELS.get(variant, variant)
                 if (variant, symbol) in self.trades:
@@ -947,7 +1045,7 @@ class PaperStrategy:
                         notes.append(f"{label}: нет свободной маржи")
                         continue
                     self._open_trade(variant, cand, state, _EvalView(data["mini"]), margin, now_ms)
-            if data["mini_chart"]["passed"]:
+            if data["mini_chart"]["passed"] and config.PAPER_MT2C_VARIANT in VARIANTS:
                 variant = config.PAPER_MT2C_VARIANT
                 label = VARIANT_LABELS.get(variant, variant)
                 if (variant, symbol) in self.trades:
@@ -963,7 +1061,7 @@ class PaperStrategy:
                         self._open_trade(
                             variant, cand, state, _EvalView(data["mini_chart"]), margin, now_ms
                         )
-            if data["graf"]["passed"]:
+            if data["graf"]["passed"] and config.PAPER_GRAF_VARIANT in VARIANTS:
                 variant = config.PAPER_GRAF_VARIANT
                 label = VARIANT_LABELS.get(variant, variant)
                 if (variant, symbol) in self.trades:
@@ -979,7 +1077,7 @@ class PaperStrategy:
                         self._open_trade(
                             variant, cand, state, _EvalView(data["graf"]), margin, now_ms
                         )
-            if data["dps"]["passed"]:
+            if data["dps"]["passed"] and config.PAPER_DPS_VARIANT in VARIANTS:
                 variant = config.PAPER_DPS_VARIANT
                 label = VARIANT_LABELS.get(variant, variant)
                 open_dps = sum(1 for t in self.trades.values() if t.variant == variant)

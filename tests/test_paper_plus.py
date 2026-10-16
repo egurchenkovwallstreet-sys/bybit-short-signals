@@ -38,7 +38,7 @@ class PlusEntryTest(unittest.TestCase):
         boost_sells(tape, NOW)
         _, plus = plus_eval(state, tape, NOW)
         self.assertEqual(plus.failed, [], plus.checks)
-        self.assertEqual(plus.to_data()["variants"], ["t20p", "p10p", "mlnp"])
+        self.assertEqual(plus.to_data()["variants"], list(config.PAPER_PLUS_VARIANTS))
 
     def test_new_high_in_last_seven_blocks(self) -> None:
         state, tape = pumped_state(), pumped_tape()
@@ -118,10 +118,10 @@ class PlusStrategyTest(unittest.TestCase):
             strategy.tape.symbols[state.symbol] = tape
             view = strategy.scan({state.symbol: state}, NOW)["data"]
             opened = {t["variant"] for t in view["open_trades"]}
-            self.assertTrue({"t20p", "p10p", "mlnp"} <= opened)
-            self.assertEqual(strategy.trades[("p10p", state.symbol)].pos.peak_gap_roe, config.PAPER_TRAIL_PEAK_GAP_ROE)
+            self.assertTrue(set(config.PAPER_PLUS_VARIANTS) <= opened)
             self.assertEqual(strategy.trades[("t20p", state.symbol)].pos.peak_gap_roe, 0.0)
-            self.assertEqual(strategy.trades[("mlnp", state.symbol)].pos.stop_style, "mln")
+            if config.PAPER_MLNP_VARIANT in config.PAPER_PLUS_VARIANTS:
+                self.assertEqual(strategy.trades[("mlnp", state.symbol)].pos.stop_style, "mln")
             self.assertEqual(strategy.trades[("t20p", state.symbol)].pos.stop_style, "default")
 
             state.last_price = 1.370

@@ -116,6 +116,7 @@ class Css2DetectTest(unittest.TestCase):
         self.assertFalse(ev.passed)
 
 
+@unittest.skipUnless("css2" in config.PAPER_VARIANTS, "Курсор СС 2 снят с теста")
 class Css2StrategyTest(unittest.TestCase):
     def test_opens_once_then_half_then_blocks_valley(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
