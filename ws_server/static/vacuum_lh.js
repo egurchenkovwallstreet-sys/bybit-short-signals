@@ -91,32 +91,56 @@ function setVacuumDetailOpen(open) {
   document.getElementById("view-vacuum-lh")?.classList.toggle("vacuum-lh-detail-open", open);
 }
 
+function vacuumClickTarget(event) {
+  const t = event.target;
+  if (t instanceof Element) return t;
+  return t?.parentElement instanceof Element ? t.parentElement : null;
+}
+
+function bindVacuumLhCloseControls() {
+  const runClose = (event) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    closeVacuumLhChart();
+  };
+  for (const btn of document.querySelectorAll(
+    "#view-vacuum-lh .psc-close-chart, #vacuum-lh-back-btn",
+  )) {
+    btn.onclick = runClose;
+  }
+}
+
+function bindVacuumLhInfoPane() {
+  if (window.__vacuumLhInfoBound) return;
+  window.__vacuumLhInfoBound = true;
+  window.boardChart?.bindInfoPane?.(VAC_CHART.info, closeVacuumLhChart, () => {});
+}
+
 function initVacuumLhTab() {
   if (!window.__vacuumLhDomReady) {
     normalizeVacuumChartDom();
     window.__vacuumLhDomReady = true;
   }
+  bindVacuumLhInfoPane();
   if (!window.__vacuumLhBound) {
     window.__vacuumLhBound = true;
     if (window.boardChart?.createRuntime) {
       vacuumLhState.chart = window.boardChart.createRuntime();
     }
-    document.addEventListener(
-      "click",
-      (event) => {
-        const target = event.target instanceof Element ? event.target : null;
-        if (!target?.closest(".vacuum-lh-close") || !vacuumLhState.selected) return;
-        event.preventDefault();
-        event.stopPropagation();
-        closeVacuumLhChart();
-      },
-      true,
-    );
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !vacuumLhState.selected) return;
+      const view = document.getElementById("view-vacuum-lh");
+      if (!view || view.hidden) return;
+      event.preventDefault();
+      closeVacuumLhChart();
+    });
     const root = document.getElementById("view-vacuum-lh");
     root?.addEventListener("click", (event) => {
-      const target = event.target instanceof Element ? event.target : null;
+      const target = vacuumClickTarget(event);
       if (!target) return;
-      if (target.closest(".vacuum-lh-close")) {
+      if (target.closest(".psc-close-chart") || target.closest("#vacuum-lh-back-btn")) {
         event.preventDefault();
         event.stopPropagation();
         closeVacuumLhChart();
@@ -178,9 +202,10 @@ function renderVacuumTfControls() {
       return;
     }
     chartRow.hidden = false;
-    chartRow.innerHTML = `<span class="vacuum-tf-label">TF</span>${chartTfButtonsHtml(
+    chartRow.innerHTML = `<button type="button" id="vacuum-lh-back-btn" class="psc-close-chart vacuum-lh-back">← Список</button><span class="vacuum-tf-label">TF</span>${chartTfButtonsHtml(
       vacuumLhState.chartInterval,
     )}`;
+    bindVacuumLhCloseControls();
   }
 }
 
@@ -559,11 +584,12 @@ function renderVacuumLhInfo() {
   pane.innerHTML = `
     <div class="psc-info-head">
       <h3>${sym}</h3>
-      <button type="button" class="paper-btn vacuum-lh-close" data-action="vacuum-close">Закрыть</button>
+      <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
     <p>График <strong>${chartTf}</strong>. LH в списке: <strong>${lhTf}</strong>.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <ul class="vacuum-lh-peaks">${list || "<li>—</li>"}</ul>`;
+  bindVacuumLhCloseControls();
 }
 
 function clearVacuumPeakOverlays(runtime) {
@@ -638,4 +664,5 @@ window.vacuumLh = {
   onVacuumLhSnapshot,
   onVacuumLhDetail,
   resizeChart: resizeVacuumLhChart,
+  closeChart: closeVacuumLhChart,
 };
