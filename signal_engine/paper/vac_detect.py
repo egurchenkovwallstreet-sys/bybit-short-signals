@@ -20,8 +20,8 @@ VAC_MANDATORY = (
 VAC_CHECK_LABELS = {
     "anti_flat": "Анти-флэт: ATR, диапазон 20, амплитуды A→C и C→B",
     "structure_acb": "A > B (lower high), есть минимум C между A и B",
-    "b_confirmed": "B — swing high с подтверждением 3×3",
-    "entry_window": "1–2×5m после подтверждения B",
+    "b_confirmed": "B — вершина (swing), вход на 2–3-й 5m после high B",
+    "entry_window": "Текущая свеча — 2-я или 3-я после B",
     "entry_trigger": "Pin+медвежья или две медвежьи подряд",
     "not_invalidated": "После B high не пробивали A и B",
 }
@@ -92,26 +92,25 @@ def _anti_flat_ok(bars: list[Bar]) -> tuple[bool, dict]:
 def _find_acb(
     closed: list[Bar],
     confirm_i: int,
-    highs: list[dict],
+    highs_a: list[dict],
+    highs_b: list[dict],
     lows: list[dict],
 ) -> dict | None:
-    wing = config.PAPER_VAC_SWING_CONFIRM
     min_swing = config.PAPER_VAC_MIN_SWING_PCT / 100.0
     min_ab = config.PAPER_VAC_MIN_AB_DIFF_PCT / 100.0
-    max_after_b = config.PAPER_VAC_ENTRY_MAX_BARS_AFTER_B_CONFIRM
-    min_after_b = config.PAPER_VAC_ENTRY_MIN_BARS_AFTER_B_CONFIRM
-    promote_a = config.PAPER_VAC_PROMOTE_A_AFTER_BARS
+    entry_offsets = config.PAPER_VAC_ENTRY_OFFSET_FROM_B
+    b_wing = config.PAPER_VAC_B_SWING_WING
 
-    for b in reversed(highs):
+    for b in reversed(highs_b):
         bi = int(b["bar_index"])
         bp = float(b["price"])
-        if confirm_i < bi + wing:
+        offset_from_b = confirm_i - bi
+        if offset_from_b not in entry_offsets:
             continue
-        since_confirm = confirm_i - (bi + wing)
-        if since_confirm < min_after_b or since_confirm > max_after_b:
+        if confirm_i < bi + b_wing:
             continue
 
-        for a in reversed(highs):
+        for a in reversed(highs_a):
             ai = int(a["bar_index"])
             ap = float(a["price"])
             if ai >= bi:
@@ -120,8 +119,6 @@ def _find_acb(
                 continue
             if (ap - bp) / ap < min_ab:
                 continue
-            if confirm_i - ai > promote_a and bi - ai > promote_a:
-                pass
             lows_between = [l for l in lows if ai < int(l["bar_index"]) < bi]
             if not lows_between:
                 continue
@@ -148,7 +145,7 @@ def _find_acb(
                 "a_i": ai,
                 "c_i": int(c["bar_index"]),
                 "b_i": bi,
-                "since_b_confirm": since_confirm,
+                "offset_from_b": offset_from_b,
             }
     return None
 
@@ -164,23 +161,21 @@ def evaluate_vac(state: SymbolState, now_ms: int) -> dict:
     prev = closed[confirm_i - 1] if confirm_i >= 1 else None
 
     wing = config.PAPER_VAC_SWING_CONFIRM
+    b_wing = config.PAPER_VAC_B_SWING_WING
     need = wing * 2 + 1 + config.PAPER_VAC_ATR_PERIOD + 5
     flat_ok, flat_m = _anti_flat_ok(closed) if len(closed) >= need else (False, {})
-    highs = pivot_highs_indexed(closed, wing) if len(closed) >= wing * 2 + 1 else []
+    highs_a = pivot_highs_indexed(closed, wing) if len(closed) >= wing * 2 + 1 else []
+    highs_b = pivot_highs_indexed(closed, b_wing) if len(closed) >= b_wing * 2 + 1 else []
     lows = pivot_lows_indexed(closed, wing) if len(closed) >= wing * 2 + 1 else []
 
-    struct = _find_acb(closed, confirm_i, highs, lows) if flat_ok and confirm and prev else None
+    struct = (
+        _find_acb(closed, confirm_i, highs_a, highs_b, lows) if flat_ok and confirm and prev else None
+    )
     trigger = _entry_trigger(prev, confirm) if struct and prev and confirm else None
 
     swing_ok = struct is not None
-    b_ok = swing_ok
-    window_ok = (
-        struct is not None
-        and config.PAPER_VAC_ENTRY_MIN_BARS_AFTER_B_CONFIRM
-        <= struct["since_b_confirm"]
-        <= config.PAPER_VAC_ENTRY_MAX_BARS_AFTER_B_CONFIRM
-    )
-    inv_ok = swing_ok
+    offsets = config.PAPER_VAC_ENTRY_OFFSET_FROM_B
+    window_ok = struct is not None and struct["offset_from_b"] in offsets
 
     checks = {
         "anti_flat": _check(
@@ -200,21 +195,21 @@ def evaluate_vac(state: SymbolState, now_ms: int) -> dict:
             "A > B, C между",
         ),
         "b_confirmed": _check(
-            b_ok,
-            None if not struct else struct["since_b_confirm"],
-            f"swing {wing}×{wing}",
+            swing_ok,
+            None if not struct else struct["offset_from_b"],
+            f"2–3×5m после B (swing B wing={b_wing})",
         ),
         "entry_window": _check(
             window_ok,
-            None if not struct else struct["since_b_confirm"],
-            f"{config.PAPER_VAC_ENTRY_MIN_BARS_AFTER_B_CONFIRM}–{config.PAPER_VAC_ENTRY_MAX_BARS_AFTER_B_CONFIRM} баров",
+            None if not struct else struct["offset_from_b"],
+            f"смещение {list(offsets)} от B",
         ),
         "entry_trigger": _check(
             trigger is not None,
             trigger,
             "pin+медвежья или 2×медвежья",
         ),
-        "not_invalidated": _check(inv_ok, True if inv_ok else None, "нет пробоя A/B после B"),
+        "not_invalidated": _check(swing_ok, True if swing_ok else None, "нет пробоя A/B после B"),
     }
 
     failed = [k for k in VAC_MANDATORY if not checks[k]["ok"]]
@@ -230,7 +225,7 @@ def evaluate_vac(state: SymbolState, now_ms: int) -> dict:
                 "a_ts": int(struct["a"]["time"]),
                 "b_ts": int(struct["b"]["time"]),
                 "c_ts": int(struct["c"]["time"]),
-                "since_b_confirm": struct["since_b_confirm"],
+                "offset_from_b": struct["offset_from_b"],
                 "entry_trigger": trigger,
             }
         )

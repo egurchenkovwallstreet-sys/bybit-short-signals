@@ -707,7 +707,7 @@
           <td>${checkDots(ev)} ${r.passed_count}/${total}</td>
           <td>${esc(failed.join(", ") || "—")}</td>
           <td>${time(m.b_ts)}</td>
-          <td>${m.since_b_confirm != null ? m.since_b_confirm + "×5m" : "—"}</td>
+          <td>${m.offset_from_b != null ? m.offset_from_b + "×5m от B" : "—"}</td>
           <td>${r.ready ? "да" : "нет"}</td>
           <td class="grade-${r.grade || "C"}">${r.grade || "—"} · ${num(r.score, 1)}</td>
         </tr>`;
@@ -972,7 +972,7 @@
       if (m.b_ts) {
         html += kv([
           ["A / C / B", `${time(m.a_ts)} → ${time(m.c_ts)} → ${time(m.b_ts)}`],
-          ["После подтверждения B", m.since_b_confirm != null ? `${m.since_b_confirm}×5m` : "—"],
+          ["Свеча после B", m.offset_from_b != null ? `${m.offset_from_b}×5m` : "—"],
           ["Триггер", m.entry_trigger || "—"],
         ]);
       }
