@@ -94,7 +94,7 @@ OI_INTERVALS = ("5min", "15min", "30min", "1h", "4h", "1d")
 
 # Коды интервалов свечей Bybit v5: 1, 5, 15, 60, 240, D.
 # REST-круг коллектора: без 5m/30m — движку достаточно 1/15/60/240/D.
-KLINE_INTERVALS = ("1", "15", "60", "240", "D")
+KLINE_INTERVALS = ("1", "15", "30", "60", "240", "D")
 
 # Ссылка на график. Открывается только Bybit, решение о входе — вручную.
 BYBIT_TRADE_URL = "https://www.bybit.com/trade/usdt/{symbol}"
@@ -707,6 +707,15 @@ VACUUM_LH_PRICE_BELOW_LAST = _env_int("VACUUM_LH_PRICE_BELOW_LAST", 3)
 VACUUM_LH_PIVOT_WING = _env_int("VACUUM_LH_PIVOT_WING", 2)
 VACUUM_LH_LOOKBACK_DAYS = _env_int("VACUUM_LH_LOOKBACK_DAYS", 14)
 VACUUM_LH_MIN_1H_BARS = _env_int("VACUUM_LH_MIN_1H_BARS", 24)
+VACUUM_LH_INTERVALS = ("30", "60", "240")
+VACUUM_LH_DEFAULT_INTERVAL = "60"
+VACUUM_LH_SCAN_INTERVAL_SEC = _env_int("VACUUM_LH_SCAN_INTERVAL_SEC", 45)
+# Минимум закрытых свечей на TF для расчёта LH.
+VACUUM_LH_MIN_BARS: dict[str, int] = {
+    "30": _env_int("VACUUM_LH_MIN_BARS_30", 48),
+    "60": _env_int("VACUUM_LH_MIN_BARS_60", 24),
+    "240": _env_int("VACUUM_LH_MIN_BARS_240", 12),
+}
 
 # --- Вкладка «2× откат» (рост от min 5d, LH 1H/4H, OI↓, EMA) ----------------
 

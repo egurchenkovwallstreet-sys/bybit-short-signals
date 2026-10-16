@@ -1,10 +1,22 @@
-/* Пылесос LH: 1H lower highs → список монет, график 15m с отметками вершин. */
+/* Пылесос LH: lower highs на 30m / 1H / 4H, график того же TF. */
+
+const VACUUM_TF = [
+  ["30", "30m"],
+  ["60", "1H"],
+  ["240", "4H"],
+];
 
 const vacuumLhState = {
+  lhInterval: "60",
+  byInterval: {},
+  updatedAt: 0,
+  loading: false,
+  loaded: false,
   signals: [],
   selected: null,
   detail: null,
   chart: null,
+  tfBound: false,
 };
 
 const VAC_CHART = {
@@ -12,23 +24,134 @@ const VAC_CHART = {
   workspace: "vacuum-lh-workspace",
   chart: "vacuum-lh-candle-chart",
   info: "vacuum-lh-info-pane",
+  tfRow: "vacuum-lh-tf-row",
+  status: "vacuum-lh-status",
 };
 
 const PEAK_COLORS = ["#e9c46a", "#f4a261", "#e76f51", "#d62828", "#9d0208"];
 
 function initVacuumLhTab() {
-  if (window.__vacuumLhBound) return;
-  window.__vacuumLhBound = true;
-  vacuumLhState.chart = window.boardChart.createRuntime();
-  document.getElementById("vacuum-lh-grid")?.addEventListener("click", (event) => {
-    const card = event.target instanceof Element ? event.target.closest(".vacuum-lh-card") : null;
-    if (card?.dataset.symbol) toggleVacuumLhSymbol(card.dataset.symbol);
+  if (!window.__vacuumLhBound) {
+    window.__vacuumLhBound = true;
+    vacuumLhState.chart = window.boardChart.createRuntime();
+    document.getElementById("vacuum-lh-grid")?.addEventListener("click", (event) => {
+      const card = event.target instanceof Element ? event.target.closest(".vacuum-lh-card") : null;
+      if (card?.dataset.symbol) toggleVacuumLhSymbol(card.dataset.symbol);
+    });
+    document.getElementById(VAC_CHART.info)?.addEventListener("click", (event) => {
+      if (event.target instanceof Element && event.target.closest(".vacuum-lh-close")) {
+        closeVacuumLhChart();
+      }
+    });
+  }
+  bindVacuumTfRow();
+  if (!vacuumLhState.loaded && !vacuumLhState.loading) {
+    void fetchVacuumLhBoard();
+  }
+  applyVacuumInterval(vacuumLhState.lhInterval);
+  renderVacuumLhBoard();
+}
+
+function bindVacuumTfRow() {
+  if (vacuumLhState.tfBound) return;
+  const row = document.getElementById(VAC_CHART.tfRow);
+  if (!row) return;
+  vacuumLhState.tfBound = true;
+  row.innerHTML = VACUUM_TF.map(
+    ([code, label]) =>
+      `<button type="button" class="tf psc-tf${code === vacuumLhState.lhInterval ? " active" : ""}" data-vac-interval="${code}">${label}</button>`,
+  ).join("");
+  row.addEventListener("click", (event) => {
+    const btn = event.target instanceof Element ? event.target.closest("[data-vac-interval]") : null;
+    if (!btn?.dataset.vacInterval) return;
+    setVacuumLhInterval(btn.dataset.vacInterval);
   });
-  document.getElementById(VAC_CHART.info)?.addEventListener("click", (event) => {
-    if (event.target instanceof Element && event.target.closest(".vacuum-lh-close")) {
-      closeVacuumLhChart();
+}
+
+function setVacuumLhInterval(interval) {
+  if (vacuumLhState.lhInterval === interval) return;
+  vacuumLhState.lhInterval = interval;
+  document.querySelectorAll("#vacuum-lh-tf-row .psc-tf").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.vacInterval === interval);
+  });
+  applyVacuumInterval(interval);
+  if (window.signalSocket?.readyState === WebSocket.OPEN) {
+    window.signalSocket.send(JSON.stringify({ type: "vacuum_lh_interval", interval }));
+  }
+  if (!vacuumLhState.byInterval[interval]) {
+    void fetchVacuumLhBoard(interval);
+  }
+  renderVacuumLhBoard();
+  if (vacuumLhState.selected) {
+    vacuumLhState.detail = null;
+    void refreshVacuumLhChart(true);
+  }
+}
+
+function applyVacuumInterval(interval) {
+  vacuumLhState.signals = vacuumLhState.byInterval[interval] || [];
+}
+
+function setVacuumStatus(text) {
+  const el = document.getElementById(VAC_CHART.status);
+  if (el) el.textContent = text;
+}
+
+async function fetchVacuumLhBoard(interval) {
+  const iv = interval || vacuumLhState.lhInterval;
+  vacuumLhState.loading = true;
+  setVacuumStatus("Загрузка списка…");
+  renderVacuumLhBoard();
+  try {
+    const res = await fetch(`/api/vacuum-lh/board?interval=${encodeURIComponent(iv)}`);
+    if (res.ok) {
+      const data = await res.json();
+      vacuumLhState.byInterval[iv] = data.signals || [];
+      vacuumLhState.updatedAt = data.updated_at || vacuumLhState.updatedAt;
+      vacuumLhState.loaded = true;
+      applyVacuumInterval(vacuumLhState.lhInterval);
     }
-  });
+  } catch (_e) {
+    setVacuumStatus("Не удалось загрузить список");
+  } finally {
+    vacuumLhState.loading = false;
+    setVacuumStatus(
+      vacuumLhState.updatedAt
+        ? `Обновлено: ${new Date(vacuumLhState.updatedAt).toLocaleTimeString("ru-RU")} · TF ${labelTf(vacuumLhState.lhInterval)}`
+        : "",
+    );
+    renderVacuumLhBoard();
+  }
+}
+
+function labelTf(code) {
+  return VACUUM_TF.find(([c]) => c === code)?.[1] || code;
+}
+
+function ingestVacuumPayload(data) {
+  if (!data) return;
+  if (data.intervals && typeof data.intervals === "object") {
+    for (const [iv, rows] of Object.entries(data.intervals)) {
+      vacuumLhState.byInterval[iv] = rows || [];
+    }
+    vacuumLhState.updatedAt = data.updated_at || vacuumLhState.updatedAt;
+    vacuumLhState.loaded = true;
+    applyVacuumInterval(vacuumLhState.lhInterval);
+  } else if (Array.isArray(data)) {
+    vacuumLhState.byInterval[vacuumLhState.lhInterval] = data;
+    applyVacuumInterval(vacuumLhState.lhInterval);
+  } else if (data.signals) {
+    const iv = data.interval || vacuumLhState.lhInterval;
+    vacuumLhState.byInterval[iv] = data.signals;
+    vacuumLhState.updatedAt = data.updated_at || vacuumLhState.updatedAt;
+    applyVacuumInterval(vacuumLhState.lhInterval);
+  }
+  setVacuumStatus(
+    vacuumLhState.updatedAt
+      ? `Обновлено: ${new Date(vacuumLhState.updatedAt).toLocaleTimeString("ru-RU")} · TF ${labelTf(vacuumLhState.lhInterval)}`
+      : "",
+  );
+  renderVacuumLhBoard();
 }
 
 function findVacuumRow(symbol) {
@@ -47,7 +170,8 @@ function toggleVacuumLhSymbol(symbol) {
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "select_vacuum_lh", symbol }));
   }
-  window.boardChart.scheduleAssetsPrefetch([symbol], { intervals: ["15", "60"], book: true, liq: false, priority: "high" });
+  const iv = vacuumLhState.lhInterval;
+  window.boardChart.scheduleAssetsPrefetch([symbol], { intervals: [iv], book: true, liq: false, priority: "high" });
   void refreshVacuumLhChart(true);
 }
 
@@ -68,15 +192,12 @@ function closeVacuumLhChart() {
 }
 
 function onVacuumLhBoard(data) {
-  vacuumLhState.signals = Array.isArray(data) ? data : [];
-  renderVacuumLhBoard();
-  if (vacuumLhState.selected) {
-    void refreshVacuumLhChart(false);
-  }
+  ingestVacuumPayload(data);
+  if (vacuumLhState.selected) void refreshVacuumLhChart(false);
 }
 
 function onVacuumLhSnapshot(board, detail) {
-  onVacuumLhBoard(board);
+  ingestVacuumPayload(board);
   if (detail?.signal && vacuumLhState.selected === detail.signal.symbol) {
     vacuumLhState.detail = detail;
     renderVacuumLhInfo();
@@ -96,8 +217,12 @@ function onVacuumLhDetail(symbol, data) {
 function renderVacuumLhBoard() {
   const grid = document.getElementById("vacuum-lh-grid");
   if (!grid) return;
+  if (vacuumLhState.loading) {
+    grid.innerHTML = '<p class="quiet pump-strategy-empty">Загрузка монет…</p>';
+    return;
+  }
   if (!vacuumLhState.signals.length) {
-    grid.innerHTML = '<p class="quiet">Нет монет: нужны ≥3 LH на 1H, цена ниже 3 последних вершин, оборот &gt; $300k.</p>';
+    grid.innerHTML = `<p class="quiet pump-strategy-empty">На ${labelTf(vacuumLhState.lhInterval)}: нет монет с ≥3 LH и ценой ниже 3 последних вершин (оборот &gt; $300k). Список обновляется каждые ~45 с.</p>`;
     return;
   }
   grid.innerHTML = vacuumLhState.signals
@@ -124,10 +249,11 @@ function renderVacuumLhInfo() {
   }
   const row = vacuumLhState.detail?.signal || findVacuumRow(sym) || {};
   const peaks = row.peaks || [];
+  const tf = labelTf(vacuumLhState.lhInterval);
   const list = peaks
     .map(
       (p) =>
-        `<li>LH${p.index}: <strong>${p.price}</strong> (1H ${new Date(p.time_ms).toLocaleString("ru-RU")})</li>`,
+        `<li>LH${p.index}: <strong>${p.price}</strong> (${tf} ${new Date(p.time_ms).toLocaleString("ru-RU")})</li>`,
     )
     .join("");
   pane.innerHTML = `
@@ -135,18 +261,20 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="paper-btn vacuum-lh-close">Закрыть</button>
     </div>
-    <p>График <strong>15m</strong>. Линии — до пяти вершин 1H (LH). В списке: цена ниже трёх последних.</p>
+    <p>График <strong>${tf}</strong>. До пяти LH; в списке — цена ниже трёх последних.</p>
     <p>Цена: <strong>${row.last_price ?? "—"}</strong></p>
     <ul class="vacuum-lh-peaks">${list || "<li>—</li>"}</ul>`;
 }
 
 function clearVacuumPeakOverlays(runtime) {
-  if (!runtime?.series || !runtime._vacuumPeakLines?.length) return;
-  for (const line of runtime._vacuumPeakLines) {
-    try {
-      runtime.series.removePriceLine(line);
-    } catch (_e) {
-      /* ignore */
+  if (!runtime?.series) return;
+  if (runtime._vacuumPeakLines?.length) {
+    for (const line of runtime._vacuumPeakLines) {
+      try {
+        runtime.series.removePriceLine(line);
+      } catch (_e) {
+        /* ignore */
+      }
     }
   }
   runtime._vacuumPeakLines = [];
@@ -177,9 +305,10 @@ function drawVacuumPeakOverlays(runtime, peaks) {
         title: `LH${p.index || i + 1}`,
       }),
     );
-    if (p.time_15m_ms) {
+    const tMs = p.time_chart_ms ?? p.time_15m_ms ?? p.time_ms;
+    if (tMs) {
       markers.push({
-        time: Math.floor(p.time_15m_ms / 1000) - tzOffset,
+        time: Math.floor(tMs / 1000) - tzOffset,
         position: "aboveBar",
         color,
         shape: "circle",
@@ -202,7 +331,7 @@ async function refreshVacuumLhChart(resetScale) {
   const BC = window.boardChart;
   if (!vacuumLhState.chart.series) BC.mount(vacuumLhState.chart, VAC_CHART.chart);
   if (!vacuumLhState.chart.series) return;
-  const interval = "15";
+  const interval = vacuumLhState.lhInterval;
   BC.scheduleAssetsPrefetch([symbol], { intervals: [interval], book: true, priority: "high" });
   BC.paintCandlesFromCache(vacuumLhState.chart, symbol, interval, resetScale, VAC_CHART.chart);
   const candles = await BC.ensureCandles(null, symbol, interval, vacuumLhState.detail, { refreshFallback: resetScale });

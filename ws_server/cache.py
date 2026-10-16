@@ -95,7 +95,9 @@ class MarketCache:
         self.x2_retrace_signals: dict[str, dict[str, Any]] = {}
         self.pump_strategy_signals: list[dict[str, Any]] = []
         self.pump_strategy_by_symbol: dict[str, dict[str, Any]] = {}
-        self.vacuum_lh_signals: list[dict[str, Any]] = []
+        self.vacuum_lh_intervals: dict[str, list[dict[str, Any]]] = {}
+        self.vacuum_lh_default_interval = config.VACUUM_LH_DEFAULT_INTERVAL
+        self.vacuum_lh_updated_at: int = 0
         self.vacuum_lh_by_symbol: dict[str, dict[str, Any]] = {}
         self.pump_lab_board: dict[str, Any] = {}
 
@@ -118,8 +120,19 @@ class MarketCache:
             self._reindex_pump_strategy()
             return "pump_strategy"
         if kind == "vacuum_lh_board":
-            self.vacuum_lh_signals = list((message.get("data") or {}).get("signals") or [])
-            self._reindex_vacuum_lh()
+            data = message.get("data") or {}
+            if isinstance(data.get("intervals"), dict):
+                self.vacuum_lh_intervals = {
+                    str(k): list(v or []) for k, v in data["intervals"].items()
+                }
+                self.vacuum_lh_default_interval = str(
+                    data.get("default_interval") or config.VACUUM_LH_DEFAULT_INTERVAL
+                )
+            else:
+                iv = str(data.get("interval") or config.VACUUM_LH_DEFAULT_INTERVAL)
+                self.vacuum_lh_intervals = {iv: list(data.get("signals") or [])}
+            self.vacuum_lh_updated_at = int(message.get("timestamp") or 0)
+            self._reindex_vacuum_lh(self.vacuum_lh_default_interval)
             return "vacuum_lh"
         if kind == "pump_lab_board":
             self.pump_lab_board = dict(message.get("data") or {})
@@ -182,9 +195,11 @@ class MarketCache:
             out.append(item)
         return out
 
-    def view_vacuum_lh_board(self) -> list[dict[str, Any]]:
+    def view_vacuum_lh_board(self, lh_interval: str | None = None) -> dict[str, Any]:
+        iv = lh_interval or self.vacuum_lh_default_interval
+        signals = list(self.vacuum_lh_intervals.get(iv) or [])
         out: list[dict[str, Any]] = []
-        for signal in self.vacuum_lh_signals:
+        for signal in signals:
             symbol = str(signal.get("symbol") or "")
             if not symbol:
                 continue
@@ -196,20 +211,25 @@ class MarketCache:
             if live is not None:
                 item["last_price"] = float(live)
             out.append(item)
-        return out
+        return {
+            "interval": iv,
+            "intervals": list(self.vacuum_lh_intervals.keys()),
+            "updated_at": self.vacuum_lh_updated_at,
+            "signals": out,
+        }
 
-    def vacuum_lh_detail(self, symbol: str, interval: str = "15") -> dict[str, Any] | None:
+    def vacuum_lh_detail(self, symbol: str, chart_interval: str = "60") -> dict[str, Any] | None:
         signal = self.vacuum_lh_by_symbol.get(symbol)
         if not signal:
             return None
-        candles = self.klines.get((symbol, interval), [])
+        candles = self.klines.get((symbol, chart_interval), [])
         sig = dict(signal)
         live = self.mark_price.get(symbol)
         if live is not None:
             sig["last_price"] = float(live)
         return {
             "signal": sig,
-            "interval": interval,
+            "interval": chart_interval,
             "candles": candles,
             "book": self.book_view(symbol),
             "funding_rate": self.funding.get(symbol),
@@ -493,9 +513,9 @@ class MarketCache:
             if symbol:
                 self.pump_strategy_by_symbol[str(symbol)] = signal
 
-    def _reindex_vacuum_lh(self) -> None:
+    def _reindex_vacuum_lh(self, lh_interval: str) -> None:
         self.vacuum_lh_by_symbol = {}
-        for signal in self.vacuum_lh_signals:
+        for signal in self.vacuum_lh_intervals.get(lh_interval) or []:
             symbol = signal.get("symbol")
             if symbol:
                 self.vacuum_lh_by_symbol[str(symbol)] = signal

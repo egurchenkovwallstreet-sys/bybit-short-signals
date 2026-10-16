@@ -8,7 +8,7 @@ from signal_engine.state import Bar, SymbolState
 from signal_engine.vacuum_lh import (
     last_lower_high_peaks,
     price_below_recent_peaks,
-    project_peaks_to_15m,
+    project_peaks_to_chart,
     scan_symbol,
 )
 
@@ -37,7 +37,7 @@ class VacuumLhPeaksTest(unittest.TestCase):
             t += H
             bars.append(_valley_bar(t, peak - 4))
             t += H
-        peaks = last_lower_high_peaks(bars, NOW + H, count=5, wing=1)
+        peaks = last_lower_high_peaks(bars, "60", NOW + H, count=5, wing=1)
         self.assertGreaterEqual(len(peaks), 2)
         prices = [p["price"] for p in peaks]
         for i in range(1, len(prices)):
@@ -50,10 +50,10 @@ class VacuumLhPeaksTest(unittest.TestCase):
         self.assertFalse(price_below_recent_peaks(11.0, peaks, last_n=3))
         self.assertTrue(price_below_recent_peaks(7.5, peaks, last_n=1))
 
-    def test_project_to_15m(self) -> None:
+    def test_project_to_chart(self) -> None:
         t = 1_700_000_000_000
-        proj = project_peaks_to_15m([{"time": t, "price": 1.23}])
-        self.assertEqual(proj[0]["time_15m_ms"], (t // 900_000) * 900_000)
+        proj = project_peaks_to_chart([{"time": t, "price": 1.23}], "60")
+        self.assertEqual(proj[0]["time_chart_ms"], (t // 3_600_000) * 3_600_000)
 
     def test_scan_filters_turnover_and_price(self) -> None:
         peak_prices = [100.0, 90.0, 80.0, 70.0]

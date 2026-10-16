@@ -18,7 +18,7 @@ from signal_engine.state import SymbolState
 from signal_engine.pump_scan import build_pump_scan_board
 from signal_engine.x2_retrace import build_x2_retrace_board
 from signal_engine.pump_strategy import build_pump_strategy_board
-from signal_engine.vacuum_lh import build_vacuum_lh_board
+from signal_engine.vacuum_lh import build_vacuum_lh_boards
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.pump_lab.lab import PumpLab
 from signal_engine.store import SignalStore
@@ -43,6 +43,8 @@ class Engine:
         self.symbols: dict[str, SymbolState] = {}
         self.open_signals: dict[str, Signal] = {}
         self._signal_column_pending: dict[str, tuple[int, int]] = {}
+        self._vacuum_board_at_ms: int = 0
+        self._vacuum_board_msg: dict | None = None
 
     def restore(self) -> None:
         self.watches.open()
@@ -97,8 +99,10 @@ class Engine:
             build_pump_scan_board(self.symbols, now_ms, self.watches),
             build_x2_retrace_board(self.symbols, now_ms, self.watches),
             build_pump_strategy_board(self.symbols, now_ms, self.watches),
-            build_vacuum_lh_board(self.symbols, now_ms),
         ]
+        vacuum = self._maybe_vacuum_board(now_ms)
+        if vacuum is not None:
+            out.append(vacuum)
         if self.paper is not None:
             try:
                 out.append(self.paper.scan(self.symbols, now_ms))
@@ -112,6 +116,14 @@ class Engine:
             except Exception:
                 log.exception("PumpLab: ошибка скана")
         return out
+
+    def _maybe_vacuum_board(self, now_ms: int) -> dict | None:
+        gap_ms = config.VACUUM_LH_SCAN_INTERVAL_SEC * 1000
+        if self._vacuum_board_msg is not None and now_ms - self._vacuum_board_at_ms < gap_ms:
+            return None
+        self._vacuum_board_msg = build_vacuum_lh_boards(self.symbols, now_ms)
+        self._vacuum_board_at_ms = now_ms
+        return self._vacuum_board_msg
 
     def _try_open(self, state: SymbolState, now_ms: int, wins: int, total: int) -> Signal | None:
         if state.last_price is None or state.last_price <= 0:

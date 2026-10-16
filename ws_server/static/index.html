@@ -80,15 +80,17 @@
 
   <section id="view-vacuum-lh" class="pump-strategy-view" hidden>
     <p class="quiet">
-      Оборот 24h &gt; $300k. На 1H — до пяти LH; в списке только если цена ниже <strong>трёх последних</strong> вершин.
-      Клик — график 15m с линиями и маркерами этих вершин.
+      Оборот 24h &gt; $300k. LH на выбранном TF (30m / 1H / 4H); в списке — цена ниже <strong>трёх последних</strong> вершин.
     </p>
-    <div id="vacuum-lh-list-wrap">
+    <div class="vacuum-lh-toolbar">
+      <div class="psc-tf-row" id="vacuum-lh-tf-row"></div>
+      <span id="vacuum-lh-status" class="quiet"></span>
+    </div>
+    <div id="vacuum-lh-list-wrap" class="vacuum-lh-list-wrap">
       <div id="vacuum-lh-grid" class="pump-strategy-grid"></div>
     </div>
     <div id="vacuum-lh-workspace" class="psc-workspace" hidden>
       <div class="psc-chart-pane">
-        <p class="quiet">Таймфрейм: 15m (вершины с 1H)</p>
         <div class="psc-chart-wrap">
           <div id="vacuum-lh-candle-chart" class="psc-candle-chart"></div>
         </div>
@@ -262,6 +264,6 @@
   <script src="/static/x2_retrace.js?v=20251008v"></script>
   <script src="/static/pump_strategy.js?v=20251008h"></script>
   <script src="/static/pump_lab.js?v=20261012study"></script>
-  <script src="/static/vacuum_lh.js?v=20261016lh"></script>
+  <script src="/static/vacuum_lh.js?v=20261016lh2"></script>
 </body>
 </html>

@@ -103,6 +103,19 @@ body {
   align-content: start;
 }
 
+.vacuum-lh-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.vacuum-lh-list-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .psc-section-title {
   margin: 0 0 8px;
   font-size: 1.1rem;

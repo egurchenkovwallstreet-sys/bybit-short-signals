@@ -86,6 +86,15 @@ async def paper_candidates(limit: int = 300) -> dict[str, Any]:
     return {"rows": rows}
 
 
+@app.get("/api/vacuum-lh/board")
+async def vacuum_lh_board(interval: str = config.VACUUM_LH_DEFAULT_INTERVAL) -> dict[str, Any]:
+    if interval not in config.VACUUM_LH_INTERVALS:
+        raise HTTPException(status_code=400, detail="interval: 30, 60 или 240")
+    hub = app.state.hub
+    hub.cache._reindex_vacuum_lh(interval)
+    return hub.cache.view_vacuum_lh_board(interval)
+
+
 @app.get("/api/pump-lab/board")
 async def pump_lab_board() -> dict[str, Any]:
     data = app.state.hub.cache.view_pump_lab_board()

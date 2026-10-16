@@ -37,6 +37,7 @@ class Client:
         self.pump_strategy_interval = "15"
         self.force_pump_strategy_detail = False
         self.vacuum_lh_symbol: str | None = None
+        self.vacuum_lh_interval = config.VACUUM_LH_DEFAULT_INTERVAL
         self.force_vacuum_lh_detail = False
 
 
@@ -120,9 +121,9 @@ class Hub:
             ),
             "paper_test": self.paper.view(),
             "pump_lab_board": self.cache.view_pump_lab_board(),
-            "vacuum_lh_board": self.cache.view_vacuum_lh_board(),
+            "vacuum_lh_board": self.cache.view_vacuum_lh_board(client.vacuum_lh_interval),
             "vacuum_lh_detail": (
-                self.cache.vacuum_lh_detail(client.vacuum_lh_symbol, "15")
+                self.cache.vacuum_lh_detail(client.vacuum_lh_symbol, client.vacuum_lh_interval)
                 if client.vacuum_lh_symbol
                 else None
             ),
@@ -176,6 +177,12 @@ class Hub:
             symbol = str(message.get("symbol") or "")
             if symbol in self.cache.vacuum_lh_by_symbol:
                 client.vacuum_lh_symbol = symbol
+                client.force_vacuum_lh_detail = True
+        elif kind == "vacuum_lh_interval":
+            interval = str(message.get("interval") or config.VACUUM_LH_DEFAULT_INTERVAL)
+            if interval in config.VACUUM_LH_INTERVALS:
+                client.vacuum_lh_interval = interval
+                self.cache._reindex_vacuum_lh(interval)
                 client.force_vacuum_lh_detail = True
 
     async def run(self) -> None:
@@ -282,7 +289,17 @@ class Hub:
             pump_strategy = (
                 self.cache.view_pump_strategy_board() if self.pump_strategy_dirty else None
             )
-            vacuum_lh = self.cache.view_vacuum_lh_board() if self.vacuum_lh_dirty else None
+            vacuum_lh_payload = None
+            if self.vacuum_lh_dirty and self.cache.vacuum_lh_intervals:
+                vacuum_lh_payload = {
+                    "intervals": {
+                        iv: self.cache.view_vacuum_lh_board(iv)["signals"]
+                        for iv in config.VACUUM_LH_INTERVALS
+                        if iv in self.cache.vacuum_lh_intervals
+                    },
+                    "updated_at": self.cache.vacuum_lh_updated_at,
+                    "default_interval": config.VACUUM_LH_DEFAULT_INTERVAL,
+                }
             pump_lab = self.cache.view_pump_lab_board() if self.pump_lab_dirty else None
             send_detail = self.market_dirty
             paper = self.paper.view() if self.paper_dirty else None
@@ -327,11 +344,11 @@ class Hub:
                                 "demo": self.demo,
                             }
                         )
-                    if vacuum_lh is not None:
+                    if vacuum_lh_payload is not None:
                         await client.websocket.send_json(
                             {
                                 "type": "vacuum_lh_board",
-                                "data": vacuum_lh,
+                                "data": vacuum_lh_payload,
                                 "demo": self.demo,
                             }
                         )
@@ -340,7 +357,9 @@ class Hub:
                             {
                                 "type": "vacuum_lh_detail",
                                 "symbol": client.vacuum_lh_symbol,
-                                "data": self.cache.vacuum_lh_detail(client.vacuum_lh_symbol, "15"),
+                                "data": self.cache.vacuum_lh_detail(
+                                    client.vacuum_lh_symbol, client.vacuum_lh_interval
+                                ),
                             }
                         )
                         client.force_vacuum_lh_detail = False
