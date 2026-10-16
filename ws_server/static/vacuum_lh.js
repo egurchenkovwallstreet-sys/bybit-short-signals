@@ -49,6 +49,18 @@ function labelChartTf(code) {
   return VACUUM_CHART_TF.find(([c]) => c === code)?.[1] || labelScanTf(code);
 }
 
+function destroyVacuumChartRuntime() {
+  const rt = vacuumLhState.chart;
+  if (rt?.chart) {
+    try {
+      rt.chart.remove();
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+  vacuumLhState.chart = window.boardChart?.createRuntime?.() || null;
+}
+
 function normalizeVacuumChartDom() {
   const pane = document.querySelector(`#${VAC_CHART.workspace} .psc-chart-pane`);
   if (!pane) return;
@@ -57,15 +69,13 @@ function normalizeVacuumChartDom() {
     pane.querySelector(".vacuum-lh-chart-stack") ||
     !document.getElementById(VAC_CHART.chart);
   if (needRebuild) {
+    destroyVacuumChartRuntime();
     pane.innerHTML = `
       <div class="psc-tf-row" id="${VAC_CHART.chartTfRow}"></div>
       <div class="psc-chart-wrap">
         <div id="${VAC_CHART.chart}" class="psc-candle-chart"></div>
       </div>`;
     vacuumLhState.chartTfBound = false;
-    if (vacuumLhState.chart?.series) {
-      vacuumLhState.chart = window.boardChart?.createRuntime?.() || null;
-    }
   } else if (!document.getElementById(VAC_CHART.chartTfRow)) {
     const row = document.createElement("div");
     row.className = "psc-tf-row";
@@ -268,8 +278,14 @@ function toggleVacuumLhSymbol(symbol) {
 function mountVacuumChart() {
   const BC = window.boardChart;
   if (!BC?.mount) return;
+  const container = document.getElementById(VAC_CHART.chart);
+  if (!container) return;
   if (!vacuumLhState.chart) vacuumLhState.chart = BC.createRuntime();
-  if (!vacuumLhState.chart.series) BC.mount(vacuumLhState.chart, VAC_CHART.chart);
+  if (vacuumLhState.chart._chartContainer !== container) {
+    destroyVacuumChartRuntime();
+    vacuumLhState.chart = BC.createRuntime();
+  }
+  BC.mount(vacuumLhState.chart, VAC_CHART.chart);
 }
 
 function openVacuumLhChart() {
@@ -303,7 +319,7 @@ function onVacuumLhSnapshot(board, detail) {
   if (detail?.signal && vacuumLhState.selected === detail.signal.symbol) {
     vacuumLhState.detail = detail;
     renderVacuumLhInfo();
-    redrawVacuumLhPeakOverlays(detail.signal.peaks || []);
+    void refreshVacuumLhChart(false);
   }
 }
 
@@ -311,7 +327,7 @@ function onVacuumLhDetail(symbol, data) {
   if (!vacuumLhState.selected || vacuumLhState.selected !== symbol) return;
   vacuumLhState.detail = data;
   renderVacuumLhInfo();
-  redrawVacuumLhPeakOverlays(data?.signal?.peaks || []);
+  void refreshVacuumLhChart(false);
 }
 
 function redrawVacuumLhPeakOverlays(peaks) {
@@ -440,8 +456,13 @@ async function refreshVacuumLhChart(resetScale) {
   const BC = window.boardChart;
   if (!BC?.mount) return;
   mountVacuumChart();
+  if (!vacuumLhState.chart?.series) {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    mountVacuumChart();
+  }
   if (!vacuumLhState.chart?.series) return;
   const interval = vacuumLhState.chartInterval;
+  const gen = ++vacuumLhState.chart.chartGen;
   BC.scheduleAssetsPrefetch([symbol], { intervals: chartPrefetchIntervals(), book: true, priority: "high" });
   BC.paintCandlesFromCache(vacuumLhState.chart, symbol, interval, resetScale, VAC_CHART.chart);
   const detailForFetch =
@@ -449,6 +470,7 @@ async function refreshVacuumLhChart(resetScale) {
   const candles = await BC.ensureCandles(null, symbol, interval, detailForFetch, {
     refreshFallback: resetScale,
   });
+  if (gen !== vacuumLhState.chart.chartGen) return;
   if (vacuumLhState.detail) {
     vacuumLhState.detail.candles = candles;
     vacuumLhState.detail.interval = interval;

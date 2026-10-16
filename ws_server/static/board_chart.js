@@ -1431,9 +1431,23 @@ window.boardChart = {
     const BC = window.boardChart;
     const container = document.getElementById(chartElId);
     if (!container || !window.LightweightCharts) return;
+    if (runtime.chart && runtime._chartContainer !== container) {
+      try {
+        runtime.chart.remove();
+      } catch (_e) {
+        /* ignore */
+      }
+      runtime.chart = null;
+      runtime.series = null;
+      runtime.volumeSeries = null;
+    }
     runtime._chartContainer = container;
     if (runtime.chart) {
       BC.ensureBookOverlay(runtime, container);
+      requestAnimationFrame(() => {
+        if (!runtime.chart || container.clientWidth <= 0) return;
+        runtime.chart.resize(container.clientWidth, container.clientHeight || 420);
+      });
       return;
     }
     runtime.chart = LightweightCharts.createChart(container, {
