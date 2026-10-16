@@ -309,11 +309,11 @@ PAPER_DPS_MIN_TURNOVER = _env_float("PAPER_DPS_MIN_TURNOVER", 10_000_000.0)
 PAPER_DPS_COOLDOWN_SEC = _env_int("PAPER_DPS_COOLDOWN_SEC", 90 * 60)
 PAPER_DPS_MAX_OPEN = _env_int("PAPER_DPS_MAX_OPEN", 3)
 
-# БАБЛОСОС $$$ (pyl): lower high 15m, без пампа; вход 1–3-й 15m после V₂.
+# БАБЛОСОС $$$ (pyl): lower high 15m; 2 медвежьих 15m после V₂, вход на close 2-й.
 PAPER_PYL_VARIANT = "pyl"
 PAPER_PYL_PIVOT_WING = _env_int("PAPER_PYL_PIVOT_WING", 1)
 PAPER_PYL_LOOKBACK_BARS = _env_int("PAPER_PYL_LOOKBACK_BARS", 96)
-PAPER_PYL_CONFIRM_OFFSETS = (1, 2, 3)
+PAPER_PYL_ENTRY_OFFSET = _env_int("PAPER_PYL_ENTRY_OFFSET", 2)
 PAPER_PYL_INITIAL_STOP_ROE = _env_float("PAPER_PYL_INITIAL_STOP_ROE", -10.0)
 PAPER_PYL_LOSS_CAP_ROE = _env_float("PAPER_PYL_LOSS_CAP_ROE", -10.0)
 PAPER_PYL_TRAIL_ARM_ROE = _env_float("PAPER_PYL_TRAIL_ARM_ROE", 10.0)
