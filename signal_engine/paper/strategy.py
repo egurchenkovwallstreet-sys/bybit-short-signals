@@ -39,6 +39,9 @@ from signal_engine.paper.detect import (
     cursor3_view,
     mini_pump_floors,
     mini_view,
+    mini_chart_view,
+    MINI_CHART_MANDATORY,
+    MINI_CHART_CHECK_LABELS,
 )
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
@@ -843,6 +846,7 @@ class PaperStrategy:
             c3 = cursor3_view(ev.metrics, ev.score, ev.strict_btc)
             data["c3"] = c3
             data["mini"] = mini_view(ev)
+            data["mini_chart"] = mini_chart_view(ev)
             if cand.soft:
                 data["variants"] = []
             cand.last_eval = data
@@ -925,6 +929,22 @@ class PaperStrategy:
                         notes.append(f"{label}: нет свободной маржи")
                         continue
                     self._open_trade(variant, cand, state, _EvalView(data["mini"]), margin, now_ms)
+            if data["mini_chart"]["passed"]:
+                variant = config.PAPER_MT2C_VARIANT
+                label = VARIANT_LABELS.get(variant, variant)
+                if (variant, symbol) in self.trades:
+                    pass
+                elif now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                    notes.append(f"{label}: пауза после сделки")
+                else:
+                    balance = self.balances[variant]
+                    margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                    if margin <= 0 or balance - self.used_margin(variant) < margin:
+                        notes.append(f"{label}: нет свободной маржи")
+                    else:
+                        self._open_trade(
+                            variant, cand, state, _EvalView(data["mini_chart"]), margin, now_ms
+                        )
             cand.note = "; ".join(notes) or None
             if not cand.soft and not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
@@ -1725,6 +1745,8 @@ class PaperStrategy:
             (
                 len(MINI_MANDATORY)
                 if variant in config.PAPER_MINI_VARIANTS
+                else len(MINI_CHART_MANDATORY)
+                if variant == config.PAPER_MT2C_VARIANT
                 else len(C3_MANDATORY)
                 if variant == config.PAPER_C3_VARIANT
                 else len(E5S_MANDATORY)
@@ -2004,6 +2026,7 @@ class PaperStrategy:
             "plus_check_labels": PLUS_CHECK_LABELS,
             "c3_check_labels": C3_CHECK_LABELS,
             "mini_check_labels": MINI_CHECK_LABELS,
+            "mini_chart_check_labels": MINI_CHART_CHECK_LABELS,
             "impulse_check_labels": IMPULSE_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
@@ -2015,6 +2038,7 @@ class PaperStrategy:
             "plus_mandatory": list(PLUS_MANDATORY),
             "c3_mandatory": list(C3_MANDATORY),
             "mini_mandatory": list(MINI_MANDATORY),
+            "mini_chart_mandatory": list(MINI_CHART_MANDATORY),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "analytics": self._analytics,
         }

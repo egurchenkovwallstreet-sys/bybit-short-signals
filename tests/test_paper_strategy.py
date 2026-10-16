@@ -13,6 +13,8 @@ from signal_engine.paper.detect import (
     cursor3_view,
     mini_pump_floors,
     mini_view,
+    mini_chart_view,
+    MINI_CHART_MANDATORY,
     Evaluation,
     round_level_near,
     strong_top,
@@ -679,6 +681,29 @@ def _mini_ev(metrics: dict, score: float = 8.0, passed: int = 9) -> Evaluation:
     )
     checks = {key: {"ok": i < passed, "value": 1, "need": "x"} for i, key in enumerate(keys)}
     return Evaluation(checks, metrics, score, {}, False)
+
+
+class MiniChartEntryTest(unittest.TestCase):
+    def test_passes_without_five_of_nine(self) -> None:
+        state, tape = pumped_state(), pumped_tape()
+        pump = find_pump(state, tape, NOW, mini_pump_floors())
+        assert pump is not None
+        pump.trigger = "4h"
+        ev = evaluate(state, tape, pump, {}, None, NOW)
+        for key in list(ev.checks):
+            ev.checks[key]["ok"] = False
+        view = mini_chart_view(ev)
+        self.assertEqual(len(MINI_CHART_MANDATORY), view["passed_count"])
+        self.assertIn(config.PAPER_MT2C_VARIANT, view["variants"])
+
+    def test_blocks_deep_drawdown(self) -> None:
+        state, tape = pumped_state(), pumped_tape()
+        pump = find_pump(state, tape, NOW, mini_pump_floors())
+        assert pump is not None
+        pump.trigger = "24h"
+        ev = evaluate(state, tape, pump, {}, None, NOW)
+        ev.metrics["drawdown_from_peak_pct"] = 11.0
+        self.assertNotIn(config.PAPER_MT2C_VARIANT, mini_chart_view(ev)["variants"])
 
 
 class MiniTestEntryTest(unittest.TestCase):

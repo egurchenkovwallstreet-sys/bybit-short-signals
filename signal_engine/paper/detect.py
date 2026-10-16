@@ -63,6 +63,7 @@ VARIANT_LABELS = {
     "c3": "Курсор3",
     "mt1": "Мини тест 1",
     "mt2": "Мини тест 2",
+    "mt2c": "Мини 2 · график",
     "i5": "Импульс 5",
     "i15": "Импульс 15",
 }
@@ -85,6 +86,24 @@ MINI_CHECK_LABELS = {
     "buys_faded": f"Покупки 15 мин ≤ {config.PAPER_BUYS_FADE_MAX_RATIO * 100:g}% от пика",
     "ema_intact": "Ни одна EMA не пробита",
     "score_cap": f"Оценка ≤ {config.PAPER_MINI_MAX_SCORE:g}",
+}
+
+MINI_CHART_MANDATORY = (
+    "trigger_4h_24h",
+    "since_peak",
+    "drawdown",
+    "ema_intact",
+    "not_late_megavol",
+)
+
+MINI_CHART_CHECK_LABELS = {
+    "trigger_4h_24h": "Памп только 4ч или сутки",
+    "since_peak": f"С пика {config.PAPER_MINI_SINCE_PEAK_MIN:g}–{config.PAPER_MINI_SINCE_PEAK_MAX:g} мин",
+    "drawdown": f"Откат от пика ≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
+    "ema_intact": "Ни одна EMA не пробита",
+    "not_late_megavol": (
+        f"не объём ×{config.PAPER_ENTRY_MEGAVOL_RATIO:g}+ при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика"
+    ),
 }
 
 C3_MANDATORY = (
@@ -747,6 +766,65 @@ def mini_view(ev: Evaluation) -> dict:
         "failed": failed,
         "variants": list(config.PAPER_MINI_VARIANTS) if passed else [],
         "entry_blocked": gate,
+    }
+
+
+def mini_chart_view(ev: Evaluation) -> dict:
+    """Мини 2 по графику: памп 4ч/24ч, окно с пика, откат, EMA, без мегаобъёма на опоздании."""
+    metrics = ev.metrics
+    pump = metrics.get("pump") or {}
+    trigger = str(pump.get("trigger") or "")
+    since = _c3_num(metrics.get("since_peak_min"))
+    drawdown = _c3_num(metrics.get("drawdown_from_peak_pct"))
+    broken = metrics.get("ema_broken")
+    broken_n = len(broken) if isinstance(broken, list) else None
+    vol = pump.get("volume_ratio")
+    try:
+        vol_f = float(vol) if vol is not None else None
+    except (TypeError, ValueError):
+        vol_f = None
+    late_mega = (
+        since is not None
+        and since > config.PAPER_ENTRY_LATE_MIN
+        and vol_f is not None
+        and vol_f >= config.PAPER_ENTRY_MEGAVOL_RATIO
+    )
+    checks = {
+        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "4h или 24h"),
+        "since_peak": _check(
+            since is not None
+            and config.PAPER_MINI_SINCE_PEAK_MIN <= since <= config.PAPER_MINI_SINCE_PEAK_MAX,
+            None if since is None else round(since),
+            f"{config.PAPER_MINI_SINCE_PEAK_MIN:g}–{config.PAPER_MINI_SINCE_PEAK_MAX:g} мин",
+        ),
+        "drawdown": _check(
+            drawdown is not None and drawdown <= config.PAPER_MINI_MAX_DRAWDOWN_PCT,
+            drawdown,
+            f"≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
+        ),
+        "ema_intact": _check(broken_n == 0, broken_n, "0"),
+        "not_late_megavol": _check(
+            not late_mega,
+            {
+                "since_peak_min": None if since is None else round(since),
+                "volume_ratio": _r(vol_f, 2),
+            },
+            MINI_CHART_CHECK_LABELS["not_late_megavol"],
+        ),
+    }
+    failed = [key for key in MINI_CHART_MANDATORY if not checks[key]["ok"]]
+    passed = not failed
+    return {
+        "checks": checks,
+        "metrics": metrics,
+        "score": round(ev.score, 1),
+        "grade": grade_for(ev.score),
+        "strict_btc": ev.strict_btc,
+        "passed": passed,
+        "passed_count": len(MINI_CHART_MANDATORY) - len(failed),
+        "failed": failed,
+        "variants": [config.PAPER_MT2C_VARIANT] if passed else [],
+        "entry_blocked": [],
     }
 
 

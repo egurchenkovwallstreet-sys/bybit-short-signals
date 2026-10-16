@@ -267,7 +267,7 @@ PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
 PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
 PAPER_VARIANTS = (
     "t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2",
-    "i5", "i15",
+    "mt2c", "i5", "i15",
 )
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
@@ -284,6 +284,7 @@ PAPER_E5P_VARIANT = "e5p"
 PAPER_C3_VARIANT = "c3"
 PAPER_MT1_VARIANT = "mt1"
 PAPER_MT2_VARIANT = "mt2"
+PAPER_MT2C_VARIANT = "mt2c"
 PAPER_MINI_VARIANTS = (PAPER_MT1_VARIANT, PAPER_MT2_VARIANT)
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
@@ -356,7 +357,7 @@ def paper_stop_style(variant: str) -> str:
 
 def paper_peak_gap_roe(variant: str) -> float:
     """Лок «пик − gap» у p10 и копии 10 п.п.+; t20/lt20 — свои правила ROE."""
-    if variant in (PAPER_P10_VARIANT, PAPER_P10P_VARIANT, PAPER_MT2_VARIANT):
+    if variant in (PAPER_P10_VARIANT, PAPER_P10P_VARIANT, PAPER_MT2_VARIANT, PAPER_MT2C_VARIANT):
         return PAPER_TRAIL_PEAK_GAP_ROE
     return 0.0
 
