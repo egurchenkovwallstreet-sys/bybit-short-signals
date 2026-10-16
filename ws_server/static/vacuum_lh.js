@@ -97,7 +97,7 @@ function renderVacuumLhBoard() {
   const grid = document.getElementById("vacuum-lh-grid");
   if (!grid) return;
   if (!vacuumLhState.signals.length) {
-    grid.innerHTML = '<p class="quiet">Нет монет: нужны 5 LH на 1H и цена ниже всех вершин, оборот &gt; $300k.</p>';
+    grid.innerHTML = '<p class="quiet">Нет монет: нужны ≥3 LH на 1H, цена ниже 3 последних вершин, оборот &gt; $300k.</p>';
     return;
   }
   grid.innerHTML = vacuumLhState.signals
@@ -135,7 +135,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="paper-btn vacuum-lh-close">Закрыть</button>
     </div>
-    <p>График <strong>15m</strong>. Линии — пять последних вершин 1H (понижающиеся). Цена ниже всех.</p>
+    <p>График <strong>15m</strong>. Линии — до пяти вершин 1H (LH). В списке: цена ниже трёх последних.</p>
     <p>Цена: <strong>${row.last_price ?? "—"}</strong></p>
     <ul class="vacuum-lh-peaks">${list || "<li>—</li>"}</ul>`;
 }

@@ -7,7 +7,7 @@ import unittest
 from signal_engine.state import Bar, SymbolState
 from signal_engine.vacuum_lh import (
     last_lower_high_peaks,
-    price_below_all_peaks,
+    price_below_recent_peaks,
     project_peaks_to_15m,
     scan_symbol,
 )
@@ -43,10 +43,12 @@ class VacuumLhPeaksTest(unittest.TestCase):
         for i in range(1, len(prices)):
             self.assertLess(prices[i], prices[i - 1])
 
-    def test_price_must_be_below_all(self) -> None:
-        peaks = [{"price": 10.0}, {"price": 9.0}]
-        self.assertTrue(price_below_all_peaks(8.5, peaks))
-        self.assertFalse(price_below_all_peaks(9.5, peaks))
+    def test_price_must_be_below_last_three(self) -> None:
+        peaks = [{"price": 12.0}, {"price": 10.0}, {"price": 9.0}, {"price": 8.0}]
+        self.assertTrue(price_below_recent_peaks(7.5, peaks, last_n=3))
+        self.assertFalse(price_below_recent_peaks(8.5, peaks, last_n=3))
+        self.assertFalse(price_below_recent_peaks(11.0, peaks, last_n=3))
+        self.assertTrue(price_below_recent_peaks(7.5, peaks, last_n=1))
 
     def test_project_to_15m(self) -> None:
         t = 1_700_000_000_000

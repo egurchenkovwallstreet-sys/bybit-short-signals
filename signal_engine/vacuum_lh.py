@@ -1,4 +1,4 @@
-"""Пылесос (LH-скан): пять последних понижающихся вершин на 1H, цена под ними."""
+"""Пылесос (LH-скан): до пяти LH на 1H; в список — цена ниже трёх последних вершин."""
 
 from __future__ import annotations
 
@@ -63,10 +63,20 @@ def project_peaks_to_15m(peaks: list[dict]) -> list[dict]:
     return out
 
 
-def price_below_all_peaks(last_price: float, peaks: list[dict]) -> bool:
-    if not peaks or last_price is None or last_price <= 0:
+def price_below_recent_peaks(
+    last_price: float,
+    peaks: list[dict],
+    *,
+    last_n: int | None = None,
+) -> bool:
+    """Цена строго ниже каждой из `last_n` самых новых вершин цепочки."""
+    n = last_n if last_n is not None else config.VACUUM_LH_PRICE_BELOW_LAST
+    if not peaks or last_price is None or last_price <= 0 or n < 1:
         return False
-    return float(last_price) < min(float(p["price"]) for p in peaks)
+    if len(peaks) < n:
+        return False
+    recent = peaks[-n:]
+    return float(last_price) < min(float(p["price"]) for p in recent)
 
 
 def scan_symbol(state: SymbolState, now_ms: int) -> dict | None:
@@ -78,10 +88,11 @@ def scan_symbol(state: SymbolState, now_ms: int) -> dict | None:
     bars = state.bars_htf.get(INTERVAL_1H) or []
     if len(bars) < config.VACUUM_LH_MIN_1H_BARS:
         return None
+    need = config.VACUUM_LH_PRICE_BELOW_LAST
     peaks = last_lower_high_peaks(bars, now_ms)
-    if len(peaks) < 2:
+    if len(peaks) < need:
         return None
-    if not price_below_all_peaks(float(last), peaks):
+    if not price_below_recent_peaks(float(last), peaks):
         return None
     projected = project_peaks_to_15m(peaks)
     nearest = projected[-1]["price"]
