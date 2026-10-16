@@ -38,6 +38,7 @@ class Client:
         self.force_pump_strategy_detail = False
         self.vacuum_lh_symbol: str | None = None
         self.vacuum_lh_interval = config.VACUUM_LH_DEFAULT_INTERVAL
+        self.vacuum_lh_chart_interval = config.VACUUM_LH_DEFAULT_INTERVAL
         self.force_vacuum_lh_detail = False
 
 
@@ -123,7 +124,9 @@ class Hub:
             "pump_lab_board": self.cache.view_pump_lab_board(),
             "vacuum_lh_board": self.cache.view_vacuum_lh_board(client.vacuum_lh_interval),
             "vacuum_lh_detail": (
-                self.cache.vacuum_lh_detail(client.vacuum_lh_symbol, client.vacuum_lh_interval)
+                self.cache.vacuum_lh_detail(
+                    client.vacuum_lh_symbol, client.vacuum_lh_chart_interval
+                )
                 if client.vacuum_lh_symbol
                 else None
             ),
@@ -183,6 +186,11 @@ class Hub:
             if interval in config.VACUUM_LH_INTERVALS:
                 client.vacuum_lh_interval = interval
                 self.cache._reindex_vacuum_lh(interval)
+                client.force_vacuum_lh_detail = True
+        elif kind == "vacuum_lh_chart_interval":
+            interval = str(message.get("interval") or config.VACUUM_LH_DEFAULT_INTERVAL)
+            if interval in config.VACUUM_LH_CONFLUENCE_INTERVALS:
+                client.vacuum_lh_chart_interval = interval
                 client.force_vacuum_lh_detail = True
 
     async def run(self) -> None:
@@ -358,7 +366,7 @@ class Hub:
                                 "type": "vacuum_lh_detail",
                                 "symbol": client.vacuum_lh_symbol,
                                 "data": self.cache.vacuum_lh_detail(
-                                    client.vacuum_lh_symbol, client.vacuum_lh_interval
+                                    client.vacuum_lh_symbol, client.vacuum_lh_chart_interval
                                 ),
                             }
                         )

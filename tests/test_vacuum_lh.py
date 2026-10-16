@@ -10,6 +10,7 @@ from signal_engine.swing_highs import (
     pivot_highs_floating_left_indexed,
 )
 from signal_engine.vacuum_lh import (
+    all_anchor_peaks,
     apply_peak_confluence,
     classify_lh_hl_structure,
     structure_trend_on_interval,
@@ -40,6 +41,33 @@ def _trough_bar(ts: int, trough: float) -> Bar:
 
 
 class VacuumLhPeaksTest(unittest.TestCase):
+    def test_all_anchors_within_chain_count(self) -> None:
+        peak_prices = [100.0, 90.0, 80.0, 70.0]
+        bars: list[Bar] = []
+        t = NOW - 50 * H
+        for _ in range(20):
+            bars.append(_valley_bar(t, 50.0))
+            t += H
+        for peak in peak_prices:
+            floor = min(40.0, peak - 20.0)
+            for _ in range(8):
+                bars.append(_valley_bar(t, floor))
+                t += H
+            bars.append(_peak_bar(t, peak))
+            t += H
+            for _ in range(3):
+                bars.append(_valley_bar(t, floor))
+                t += H
+        scan_now = t + 5 * H
+        for _ in range(6):
+            bars.append(_valley_bar(t, 35.0))
+            t += H
+        anchors = all_anchor_peaks(bars, "60", scan_now)
+        chain = last_lower_high_peaks(
+            bars, "60", scan_now, count=5, pivot_left=1, pivot_right=1
+        )
+        self.assertGreaterEqual(len(anchors), len(chain))
+
     def test_floating_left_strength_up_to_twenty(self) -> None:
         lows = [10.0] * 7 + [20.0, 9.0, 8.0]
         bars = [

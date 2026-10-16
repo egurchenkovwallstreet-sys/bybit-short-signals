@@ -36,6 +36,57 @@ def _min_bars(interval: str) -> int:
     return int(config.VACUUM_LH_MIN_BARS.get(interval, config.VACUUM_LH_MIN_1H_BARS))
 
 
+def bars_from_candle_rows(rows: list[dict]) -> list[Bar]:
+    bars: list[Bar] = []
+    for c in rows or []:
+        ts = int(c.get("timestamp") or 0)
+        if ts <= 0:
+            continue
+        bars.append(
+            Bar(
+                ts,
+                float(c.get("open") or 0),
+                float(c.get("high") or 0),
+                float(c.get("low") or 0),
+                float(c.get("close") or 0),
+                float(c.get("volume") or 0),
+                from_kline=True,
+            )
+        )
+    return bars
+
+
+def _lookback_segment(bars: list[Bar], interval: str, now_ms: int) -> list[Bar]:
+    lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
+    closed = closed_bars(bars, interval, now_ms)
+    return [b for b in closed if b.timestamp >= now_ms - lookback_ms]
+
+
+def all_anchor_peaks(bars: list[Bar], interval: str, now_ms: int) -> list[dict]:
+    """Все pivot-high за VACUUM_LH_LOOKBACK_DAYS, привязка к time_ms свечи."""
+    segment = _lookback_segment(bars, interval, now_ms)
+    if not segment:
+        return []
+    pl = config.VACUUM_LH_PIVOT_LEFT
+    pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    pr = config.VACUUM_LH_PIVOT_RIGHT
+    raw = pivot_highs_floating_left(segment, pl, pl_max, pr)
+    raw.sort(key=lambda p: int(p["time"]))
+    return project_peaks_to_chart(raw, interval)
+
+
+def all_anchor_troughs(bars: list[Bar], interval: str, now_ms: int) -> list[dict]:
+    segment = _lookback_segment(bars, interval, now_ms)
+    if not segment:
+        return []
+    pl = config.VACUUM_LH_PIVOT_LEFT
+    pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    pr = config.VACUUM_LH_PIVOT_RIGHT
+    raw = pivot_lows_floating_left(segment, pl, pl_max, pr)
+    raw.sort(key=lambda p: int(p["time"]))
+    return project_troughs_to_chart(raw, interval)
+
+
 def last_lower_high_peaks(
     bars: list[Bar],
     interval: str,
@@ -50,9 +101,7 @@ def last_lower_high_peaks(
     pl = pivot_left if pivot_left is not None else config.VACUUM_LH_PIVOT_LEFT
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
-    lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
-    closed = closed_bars(bars, interval, now_ms)
-    segment = [b for b in closed if b.timestamp >= now_ms - lookback_ms]
+    segment = _lookback_segment(bars, interval, now_ms)
     peaks = pivot_highs_floating_left(segment, pl, pl_max, pr)
     if len(peaks) < 2:
         return []
@@ -83,9 +132,7 @@ def last_higher_low_troughs(
     pl = pivot_left if pivot_left is not None else config.VACUUM_LH_PIVOT_LEFT
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
-    lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
-    closed = closed_bars(bars, interval, now_ms)
-    segment = [b for b in closed if b.timestamp >= now_ms - lookback_ms]
+    segment = _lookback_segment(bars, interval, now_ms)
     troughs = pivot_lows_floating_left(segment, pl, pl_max, pr)
     if len(troughs) < 2:
         return []
@@ -293,6 +340,8 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
         return None
     if not price_below_recent_peaks(float(last), peaks):
         return None
+    all_peaks = all_anchor_peaks(bars, lh_interval, now_ms)
+    all_troughs = all_anchor_troughs(bars, lh_interval, now_ms)
     projected = enrich_peaks_confluence(state, now_ms, project_peaks_to_chart(peaks, lh_interval))
     troughs_raw = last_higher_low_troughs(bars, lh_interval, now_ms)
     projected_troughs = (
@@ -309,8 +358,10 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
         "lh_interval": lh_interval,
         "peak_count": len(projected),
         "peaks": projected,
+        "all_peaks": all_peaks,
         "trough_count": len(projected_troughs),
         "troughs": projected_troughs,
+        "all_troughs": all_troughs,
         "structure_trend": structure_trend_on_interval(
             state, now_ms, VACUUM_LH_STRUCTURE_INTERVAL
         ),

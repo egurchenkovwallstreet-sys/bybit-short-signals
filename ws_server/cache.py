@@ -219,6 +219,12 @@ class MarketCache:
         }
 
     def vacuum_lh_detail(self, symbol: str, chart_interval: str = "60") -> dict[str, Any] | None:
+        from signal_engine.vacuum_lh import (
+            all_anchor_peaks,
+            all_anchor_troughs,
+            bars_from_candle_rows,
+        )
+
         signal = self.vacuum_lh_by_symbol.get(symbol)
         if not signal:
             return None
@@ -227,10 +233,21 @@ class MarketCache:
         live = self.mark_price.get(symbol)
         if live is not None:
             sig["last_price"] = float(live)
+        now_ms = int(self.vacuum_lh_updated_at or 0) or int(time.time() * 1000)
+        bars = bars_from_candle_rows(candles)
+        anchor_peaks = all_anchor_peaks(bars, chart_interval, now_ms) if bars else []
+        anchor_troughs = all_anchor_troughs(bars, chart_interval, now_ms) if bars else []
+        if not anchor_peaks and str(sig.get("lh_interval")) == str(chart_interval):
+            anchor_peaks = list(sig.get("all_peaks") or sig.get("peaks") or [])
+        if not anchor_troughs and str(sig.get("lh_interval")) == str(chart_interval):
+            anchor_troughs = list(sig.get("all_troughs") or sig.get("troughs") or [])
         return {
             "signal": sig,
             "interval": chart_interval,
             "candles": candles,
+            "anchor_peaks": anchor_peaks,
+            "anchor_troughs": anchor_troughs,
+            "anchor_days": config.VACUUM_LH_LOOKBACK_DAYS,
             "book": self.book_view(symbol),
             "funding_rate": self.funding.get(symbol),
         }

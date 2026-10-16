@@ -289,16 +289,46 @@ function renderVacuumTfControls() {
   }
 }
 
-function getVacuumPeaks() {
+function vacuumPivotKey(p) {
+  return `${p.time_ms}:${p.price}`;
+}
+
+function getVacuumChainPeaks() {
   const sym = vacuumLhState.selected;
   if (!sym) return [];
   return vacuumLhState.detail?.signal?.peaks || findVacuumRow(sym)?.peaks || [];
 }
 
-function getVacuumTroughs() {
+function getVacuumChainTroughs() {
   const sym = vacuumLhState.selected;
   if (!sym) return [];
   return vacuumLhState.detail?.signal?.troughs || findVacuumRow(sym)?.troughs || [];
+}
+
+function getVacuumPeaks() {
+  const sym = vacuumLhState.selected;
+  if (!sym) return [];
+  const anchors = vacuumLhState.detail?.anchor_peaks;
+  if (anchors?.length) return anchors;
+  const row = findVacuumRow(sym) || vacuumLhState.detail?.signal || {};
+  return row.all_peaks || row.peaks || [];
+}
+
+function getVacuumTroughs() {
+  const sym = vacuumLhState.selected;
+  if (!sym) return [];
+  const anchors = vacuumLhState.detail?.anchor_troughs;
+  if (anchors?.length) return anchors;
+  const row = findVacuumRow(sym) || vacuumLhState.detail?.signal || {};
+  return row.all_troughs || row.troughs || [];
+}
+
+function requestVacuumChartAnchors(interval) {
+  if (window.signalSocket?.readyState === WebSocket.OPEN) {
+    window.signalSocket.send(
+      JSON.stringify({ type: "vacuum_lh_chart_interval", interval }),
+    );
+  }
 }
 
 function mountVacuumChart() {
@@ -421,6 +451,7 @@ async function ensureVacuumBuffers(symbol, force) {
 async function switchVacuumChartTf(interval) {
   if (!vacuumLhState.selected || vacuumLhState.chartInterval === interval) return;
   vacuumLhState.chartInterval = interval;
+  requestVacuumChartAnchors(interval);
   if (VACUUM_LIST_TF.some(([c]) => c === interval) && vacuumLhState.lhInterval !== interval) {
     vacuumLhState.lhInterval = interval;
     applyVacuumInterval(interval);
@@ -544,6 +575,7 @@ async function toggleVacuumLhSymbol(symbol) {
   renderVacuumLhBoard();
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "select_vacuum_lh", symbol }));
+    requestVacuumChartAnchors(vacuumLhState.chartInterval);
   }
   await loadVacuumChartDisplay(true);
 }
@@ -602,8 +634,15 @@ function patchVacuumLivePrice() {
 
 function mergeVacuumDetail(data) {
   if (!data) return;
-  const prevSignal = vacuumLhState.detail?.signal;
-  vacuumLhState.detail = { ...data, signal: data.signal || prevSignal };
+  const prev = vacuumLhState.detail || {};
+  const prevSignal = prev.signal;
+  vacuumLhState.detail = {
+    ...prev,
+    ...data,
+    signal: data.signal || prevSignal,
+    anchor_peaks: data.anchor_peaks ?? prev.anchor_peaks,
+    anchor_troughs: data.anchor_troughs ?? prev.anchor_troughs,
+  };
 }
 
 function onVacuumLhBoard(data) {
@@ -737,7 +776,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>. Список LH/HL: <strong>${lhTf}</strong>. Яркие точки — совпадение на 2+ TF (5m–4H).</p>
+    <p>График <strong>${chartTf}</strong>: все H/L за <strong>14 д</strong> на свече. Цепочка LH/HL списка: <strong>${lhTf}</strong>.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
@@ -767,7 +806,7 @@ function clearVacuumLhOverlays(runtime) {
   }
 }
 
-function vacuumLhPivotMarkers(runtime, points, chartInterval, kind) {
+function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
   const markers = [];
   const BC = window.boardChart;
   const iv = chartInterval || vacuumLhState.chartInterval || "60";
@@ -777,10 +816,22 @@ function vacuumLhPivotMarkers(runtime, points, chartInterval, kind) {
   points.forEach((p, i) => {
     const price = Number(p.price);
     if (!price) return;
+    const inChain = chainKeys?.has(vacuumPivotKey(p));
     const baseColor = colors[i % colors.length];
     const n = vacuumPivotMatchCount(p);
-    const style = vacuumPivotLineStyle(p, baseColor, kind);
-    const label = n >= 2 ? `${prefix}${p.index || i + 1}·${n}TF` : `${prefix}${p.index || i + 1}`;
+    let style = inChain
+      ? vacuumPivotLineStyle(p, baseColor, kind)
+      : { color: baseColor, lineWidth: 1, lineStyle: 2 };
+    if (!inChain) {
+      style = { ...style, color: kind === "trough" ? "rgba(76,201,240,0.55)" : "rgba(233,196,106,0.55)" };
+    }
+    const label = inChain
+      ? n >= 2
+        ? `${prefix}${p.index || i + 1}·${n}TF`
+        : `${prefix}${p.index || i + 1}`
+      : kind === "trough"
+        ? "L"
+        : "H";
     const lines = kind === "trough" ? runtime._vacuumTroughLines : runtime._vacuumPeakLines;
     lines.push(
       runtime.series.createPriceLine({
@@ -812,9 +863,11 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   clearVacuumLhOverlays(runtime);
   runtime._vacuumPeakLines = [];
   runtime._vacuumTroughLines = [];
+  const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
+  const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
   const markers = [
-    ...vacuumLhPivotMarkers(runtime, peaks || [], chartInterval, "peak"),
-    ...vacuumLhPivotMarkers(runtime, troughs || [], chartInterval, "trough"),
+    ...vacuumLhPivotMarkers(runtime, peaks || [], chartInterval, "peak", chainPeakKeys),
+    ...vacuumLhPivotMarkers(runtime, troughs || [], chartInterval, "trough", chainTroughKeys),
   ];
   if (markers.length) {
     try {
