@@ -15,6 +15,7 @@ const VACUUM_CHART_TF = [
 ];
 
 const VACUUM_BUFFER_TF = VACUUM_CHART_TF.map(([c]) => c);
+const VACUUM_MIN_BARS = 8;
 
 const vacuumLhState = {
   lhInterval: "60",
@@ -187,23 +188,83 @@ function mountVacuumChart() {
   return !!vacuumLhState.chart?.series;
 }
 
-function paintVacuumChartFromBuffer(resetScale) {
+function resizeVacuumChartNow() {
+  const container = document.getElementById(VAC_CHART.chart);
+  const rt = vacuumLhState.chart;
+  if (!container || !rt?.chart) return;
+  const h = container.clientHeight || container.parentElement?.clientHeight || 420;
+  const w = container.clientWidth || 640;
+  if (w > 0) rt.chart.resize(w, Math.max(h, 280));
+}
+
+function setVacuumChartPlaceholder(text) {
+  const wrap = document.querySelector(".vacuum-lh-chart-wrap");
+  if (!wrap) return;
+  let el = document.getElementById("vacuum-lh-chart-ph");
+  if (!text) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("p");
+    el.id = "vacuum-lh-chart-ph";
+    el.className = "quiet vacuum-lh-chart-ph";
+    wrap.appendChild(el);
+  }
+  el.textContent = text;
+}
+
+function drawVacuumCandles(candles, resetScale) {
   const symbol = vacuumLhState.selected;
-  if (!symbol || !mountVacuumChart()) return false;
+  if (!symbol || !candles?.length || !mountVacuumChart()) return false;
   const BC = window.boardChart;
   const interval = vacuumLhState.chartInterval;
-  const candles = BC.getCachedCandles(symbol, interval);
-  if (candles.length < 24) return false;
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
   BC.drawCandles(vacuumLhState.chart, candles, interval, resetScale, VAC_CHART.chart, live);
   drawVacuumPeakOverlays(vacuumLhState.chart, getVacuumPeaks(), interval);
-  requestAnimationFrame(() => vacuumLhState.chart?.chart?.resize?.());
+  requestAnimationFrame(resizeVacuumChartNow);
+  setVacuumChartPlaceholder("");
   return true;
+}
+
+function paintVacuumChartFromBuffer(resetScale) {
+  const symbol = vacuumLhState.selected;
+  if (!symbol) return false;
+  const BC = window.boardChart;
+  const interval = vacuumLhState.chartInterval;
+  const candles = BC.getCachedCandles(symbol, interval);
+  if (candles.length < VACUUM_MIN_BARS) return false;
+  return drawVacuumCandles(candles, resetScale);
+}
+
+async function loadVacuumChartDisplay(resetScale) {
+  const symbol = vacuumLhState.selected;
+  if (!symbol) return;
+  setVacuumChartPlaceholder("Загрузка свечей…");
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  if (!mountVacuumChart()) {
+    setVacuumChartPlaceholder("График недоступен (нет lightweight-charts)");
+    return;
+  }
+  const BC = window.boardChart;
+  const interval = vacuumLhState.chartInterval;
+  await ensureVacuumBuffers(symbol, vacuumLhState.bufferSymbol !== symbol);
+  let candles = BC.getCachedCandles(symbol, interval);
+  if (candles.length < VACUUM_MIN_BARS) {
+    candles = await BC.ensureCandles(null, symbol, interval, null, { refreshFallback: true });
+  }
+  if (candles.length < 1) {
+    setVacuumChartPlaceholder("Нет данных свечей для этого TF — попробуйте 15m или 1H");
+    return;
+  }
+  drawVacuumCandles(candles, resetScale);
 }
 
 async function ensureVacuumBuffers(symbol, force) {
   if (!force && vacuumLhState.bufferSymbol === symbol && !vacuumLhState.bufferLoading) {
-    return VACUUM_BUFFER_TF.every((iv) => window.boardChart.getCachedCandles(symbol, iv).length >= 24);
+    return VACUUM_BUFFER_TF.every(
+      (iv) => window.boardChart.getCachedCandles(symbol, iv).length >= VACUUM_MIN_BARS,
+    );
   }
   vacuumLhState.bufferLoading = true;
   vacuumLhState.bufferSymbol = symbol;
@@ -244,8 +305,7 @@ async function switchVacuumChartTf(interval) {
   renderVacuumTfControls();
   renderVacuumLhInfo();
   if (paintVacuumChartFromBuffer(true)) return;
-  await ensureVacuumBuffers(vacuumLhState.selected, false);
-  paintVacuumChartFromBuffer(true);
+  await loadVacuumChartDisplay(true);
 }
 
 function setVacuumListTf(interval) {
@@ -341,8 +401,7 @@ async function toggleVacuumLhSymbol(symbol) {
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "select_vacuum_lh", symbol }));
   }
-  await ensureVacuumBuffers(symbol, true);
-  paintVacuumChartFromBuffer(true);
+  await loadVacuumChartDisplay(true);
 }
 
 function openVacuumLhChart() {
@@ -359,6 +418,7 @@ function closeVacuumLhChart() {
   vacuumLhState.selected = null;
   vacuumLhState.detail = null;
   vacuumLhState.bufferSymbol = null;
+  setVacuumChartPlaceholder("");
   clearVacuumPeakOverlays(vacuumLhState.chart);
   document.getElementById(VAC_CHART.workspace)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.listWrap)?.removeAttribute("hidden");
@@ -523,7 +583,7 @@ function drawVacuumPeakOverlays(runtime, peaks, chartInterval) {
 }
 
 function resizeVacuumLhChart() {
-  vacuumLhState.chart?.chart?.resize?.();
+  resizeVacuumChartNow();
 }
 
 window.vacuumLh = {
