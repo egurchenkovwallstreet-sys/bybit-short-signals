@@ -6,12 +6,10 @@ const VACUUM_TF = [
   ["240", "4H"],
 ];
 
-const VACUUM_CHART_TF = [
+/** Только младшие TF графика; 30m / 1H / 4H — кнопки «Список LH» (тот же TF на графике). */
+const VACUUM_CHART_EXTRA_TF = [
   ["5", "5m"],
   ["15", "15m"],
-  ["30", "30m"],
-  ["60", "1H"],
-  ["240", "4H"],
 ];
 
 const vacuumLhState = {
@@ -25,8 +23,6 @@ const vacuumLhState = {
   selected: null,
   detail: null,
   chart: null,
-  scanTfBound: false,
-  chartTfBound: false,
   _chartPullAt: 0,
   _hadDetail: false,
   _refreshGen: 0,
@@ -52,7 +48,9 @@ function labelScanTf(code) {
 }
 
 function labelChartTf(code) {
-  return VACUUM_CHART_TF.find(([c]) => c === code)?.[1] || labelScanTf(code);
+  return (
+    VACUUM_CHART_EXTRA_TF.find(([c]) => c === code)?.[1] || labelScanTf(code)
+  );
 }
 
 function destroyVacuumChartRuntime() {
@@ -77,17 +75,15 @@ function normalizeVacuumChartDom() {
   if (needRebuild) {
     destroyVacuumChartRuntime();
     pane.innerHTML = `
-      <div class="psc-tf-row" id="${VAC_CHART.chartTfRow}"></div>
+      <div class="psc-tf-row vacuum-lh-chart-tf-row" id="${VAC_CHART.chartTfRow}"></div>
       <div class="psc-chart-wrap">
         <div id="${VAC_CHART.chart}" class="psc-candle-chart"></div>
       </div>`;
-    vacuumLhState.chartTfBound = false;
   } else if (!document.getElementById(VAC_CHART.chartTfRow)) {
     const row = document.createElement("div");
-    row.className = "psc-tf-row";
+    row.className = "psc-tf-row vacuum-lh-chart-tf-row";
     row.id = VAC_CHART.chartTfRow;
     pane.insertBefore(row, pane.firstChild);
-    vacuumLhState.chartTfBound = false;
   }
 }
 
@@ -115,8 +111,8 @@ function initVacuumLhTab() {
       }
     });
   }
-  bindVacuumScanTfRow();
-  bindVacuumChartTfRow();
+  bindVacuumTfDelegation();
+  renderVacuumTfControls();
   if (!vacuumLhState.loaded && !vacuumLhState.loading) {
     void fetchVacuumLhBoard();
   }
@@ -124,42 +120,65 @@ function initVacuumLhTab() {
   renderVacuumLhBoard();
 }
 
-function bindVacuumScanTfRow() {
-  if (vacuumLhState.scanTfBound) return;
-  const row = document.getElementById(VAC_CHART.scanTfRow);
-  if (!row) return;
-  vacuumLhState.scanTfBound = true;
-  row.innerHTML = VACUUM_TF.map(
+function scanTfButtonsHtml() {
+  return VACUUM_TF.map(
     ([code, label]) =>
       `<button type="button" class="tf psc-tf${code === vacuumLhState.lhInterval ? " active" : ""}" data-vac-scan-interval="${code}">${label}</button>`,
   ).join("");
-  row.addEventListener("click", (event) => {
-    const btn = event.target instanceof Element ? event.target.closest("[data-vac-scan-interval]") : null;
-    if (!btn?.dataset.vacScanInterval) return;
-    setVacuumLhInterval(btn.dataset.vacScanInterval);
-  });
 }
 
-function bindVacuumChartTfRow() {
-  if (vacuumLhState.chartTfBound) return;
-  const row = document.getElementById(VAC_CHART.chartTfRow);
-  if (!row) return;
-  vacuumLhState.chartTfBound = true;
-  row.innerHTML = VACUUM_CHART_TF.map(
+function chartExtraTfButtonsHtml() {
+  return VACUUM_CHART_EXTRA_TF.map(
     ([code, label]) =>
       `<button type="button" class="tf psc-tf${code === vacuumLhState.chartInterval ? " active" : ""}" data-vac-chart-interval="${code}">${label}</button>`,
   ).join("");
-  row.addEventListener("click", (event) => {
-    const btn = event.target instanceof Element ? event.target.closest("[data-vac-chart-interval]") : null;
-    if (!btn?.dataset.vacChartInterval) return;
-    setVacuumChartInterval(btn.dataset.vacChartInterval);
+}
+
+function bindVacuumTfDelegation() {
+  if (window.__vacuumTfDelegated) return;
+  window.__vacuumTfDelegated = true;
+  document.getElementById("view-vacuum-lh")?.addEventListener("click", (event) => {
+    const scanBtn =
+      event.target instanceof Element ? event.target.closest("[data-vac-scan-interval]") : null;
+    if (scanBtn?.dataset.vacScanInterval) {
+      setVacuumLhInterval(scanBtn.dataset.vacScanInterval);
+      return;
+    }
+    const chartBtn =
+      event.target instanceof Element ? event.target.closest("[data-vac-chart-interval]") : null;
+    if (chartBtn?.dataset.vacChartInterval) {
+      setVacuumChartInterval(chartBtn.dataset.vacChartInterval);
+    }
   });
 }
 
+function renderVacuumTfControls() {
+  const toolbar = document.querySelector(".vacuum-lh-toolbar");
+  const scanRow = document.getElementById(VAC_CHART.scanTfRow);
+  const chartRow = document.getElementById(VAC_CHART.chartTfRow);
+  const detailOpen = !!vacuumLhState.selected;
+  toolbar?.classList.toggle("vacuum-lh-toolbar-list-only", detailOpen);
+  if (scanRow && !detailOpen) {
+    scanRow.innerHTML = `<span class="vacuum-tf-label">Список LH</span>${scanTfButtonsHtml()}`;
+  } else if (scanRow) {
+    scanRow.innerHTML = "";
+  }
+  if (chartRow) {
+    if (!detailOpen) {
+      chartRow.innerHTML = "";
+      chartRow.hidden = true;
+      return;
+    }
+    chartRow.hidden = false;
+    chartRow.innerHTML = `
+      <span class="vacuum-tf-label">Список LH</span>${scanTfButtonsHtml()}
+      <span class="vacuum-tf-sep" aria-hidden="true"></span>
+      <span class="vacuum-tf-label">График</span>${chartExtraTfButtonsHtml()}`;
+  }
+}
+
 function syncVacuumChartTfButtons() {
-  document.querySelectorAll(`#${VAC_CHART.chartTfRow} .psc-tf`).forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.vacChartInterval === vacuumLhState.chartInterval);
-  });
+  renderVacuumTfControls();
 }
 
 function setVacuumChartInterval(interval) {
@@ -172,10 +191,8 @@ function setVacuumChartInterval(interval) {
 function setVacuumLhInterval(interval) {
   if (vacuumLhState.lhInterval === interval) return;
   vacuumLhState.lhInterval = interval;
-  document.querySelectorAll(`#${VAC_CHART.scanTfRow} .psc-tf`).forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.vacScanInterval === interval);
-  });
   applyVacuumInterval(interval);
+  renderVacuumTfControls();
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(JSON.stringify({ type: "vacuum_lh_interval", interval }));
   }
@@ -295,8 +312,7 @@ function mountVacuumChart() {
 
 function openVacuumLhChart() {
   normalizeVacuumChartDom();
-  bindVacuumChartTfRow();
-  syncVacuumChartTfButtons();
+  renderVacuumTfControls();
   document.getElementById(VAC_CHART.listWrap)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.workspace)?.removeAttribute("hidden");
   setVacuumDetailOpen(true);
@@ -313,6 +329,7 @@ function closeVacuumLhChart() {
   document.getElementById(VAC_CHART.workspace)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.listWrap)?.removeAttribute("hidden");
   setVacuumDetailOpen(false);
+  renderVacuumTfControls();
   renderVacuumLhBoard();
 }
 
@@ -428,7 +445,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="paper-btn vacuum-lh-close">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>. LH посчитаны на <strong>${scanTf}</strong> (кнопки над списком).</p>
+    <p>График <strong>${chartTf}</strong>. LH — на TF «Список LH».</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <ul class="vacuum-lh-peaks">${list || "<li>—</li>"}</ul>`;
 }

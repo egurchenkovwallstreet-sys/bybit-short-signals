@@ -110,6 +110,32 @@ body {
   gap: 12px;
 }
 
+.vacuum-lh-toolbar-list-only #vacuum-lh-tf-row {
+  display: none;
+}
+
+.vacuum-lh-chart-tf-row,
+#vacuum-lh-chart-tf-row {
+  align-items: center;
+  gap: 8px;
+}
+
+.vacuum-tf-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 2px;
+}
+
+.vacuum-tf-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--line);
+  margin: 0 4px;
+}
+
 .vacuum-lh-list-wrap {
   flex: 1;
   min-height: 0;
