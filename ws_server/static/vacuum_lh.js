@@ -12,19 +12,19 @@ const VACUUM_STRUCTURE_COLUMNS = [
     id: "down",
     color: "vacuum-col-down",
     title: "Снижаются",
-    hint: "3 вершины ↓ и 3 минимума ↓",
+    hint: "3 вершины ↓ и 3 минимума ↓ · колонка по 4H",
   },
   {
     id: "mixed",
     color: "vacuum-col-mixed",
     title: "Вразрез",
-    hint: "вершины и минимумы не в одну сторону",
+    hint: "вершины и минимумы не в одну сторону · колонка по 4H",
   },
   {
     id: "up",
     color: "vacuum-col-up",
     title: "Растут",
-    hint: "3 вершины ↑ и 3 минимума ↑",
+    hint: "3 вершины ↑ и 3 минимума ↑ · колонка по 4H",
   },
 ];
 
@@ -626,8 +626,10 @@ function onVacuumLhSnapshot(board, detail) {
 function vacuumStructureTrend(row) {
   const key = row?.structure_trend;
   if (key === "down" || key === "up" || key === "mixed") return key;
-  const peaks = row?.peaks || [];
-  const troughs = row?.troughs || [];
+  const row4h = (vacuumLhState.byInterval["240"] || []).find((s) => s.symbol === row?.symbol);
+  const source = row4h || row;
+  const peaks = source?.peaks || [];
+  const troughs = source?.troughs || [];
   if (peaks.length < 3 || troughs.length < 3) return "mixed";
   const pp = peaks.slice(-3).map((p) => Number(p.price));
   const tt = troughs.slice(-3).map((p) => Number(p.price));
@@ -693,7 +695,7 @@ function renderVacuumLhBoard() {
     const cards = (buckets[col.id] || []).map((row) => vacuumLhCardHtml(row)).join("");
     return `<section class="column ${col.color}">
       <h2>${col.title}</h2>
-      <p class="quiet vacuum-lh-col-hint">${col.hint} · ${tfLabel}</p>
+      <p class="quiet vacuum-lh-col-hint">${col.hint} · карточки ${tfLabel}</p>
       ${cards || '<p class="quiet">нет монет</p>'}
     </section>`;
   }).join("");

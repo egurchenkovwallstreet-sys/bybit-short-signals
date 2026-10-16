@@ -9,6 +9,8 @@ from signal_engine.swing_highs import pivot_highs_asymmetric_indexed
 from signal_engine.vacuum_lh import (
     apply_peak_confluence,
     classify_lh_hl_structure,
+    structure_trend_on_interval,
+    VACUUM_LH_STRUCTURE_INTERVAL,
     confluence_index,
     last_higher_low_troughs,
     last_lower_high_peaks,
@@ -97,6 +99,9 @@ class VacuumLhPeaksTest(unittest.TestCase):
         prices = [p["price"] for p in troughs]
         for i in range(1, len(prices)):
             self.assertGreater(prices[i], prices[i - 1])
+
+    def test_structure_uses_4h_interval_constant(self) -> None:
+        self.assertEqual(VACUUM_LH_STRUCTURE_INTERVAL, "240")
 
     def test_structure_trend_columns(self) -> None:
         peaks = [{"price": 10}, {"price": 9}, {"price": 8}]

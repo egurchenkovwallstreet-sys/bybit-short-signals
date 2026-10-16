@@ -213,6 +213,25 @@ def project_troughs_to_chart(troughs: list[dict], chart_interval: str) -> list[d
     return out
 
 
+VACUUM_LH_STRUCTURE_INTERVAL = "240"
+
+
+def structure_trend_on_interval(state: SymbolState, now_ms: int, interval: str) -> str:
+    """Колонки списка: последние 3 LH + 3 HL на заданном TF (по умолчанию 4H)."""
+    if interval not in config.VACUUM_LH_CONFLUENCE_INTERVALS:
+        return "mixed"
+    bars = _bars_for_interval(state, interval)
+    if len(bars) < _min_bars(interval):
+        return "mixed"
+    peaks = last_lower_high_peaks(bars, interval, now_ms)
+    troughs_raw = last_higher_low_troughs(bars, interval, now_ms)
+    if len(peaks) < 3 or len(troughs_raw) < 3:
+        return "mixed"
+    projected = project_peaks_to_chart(peaks, interval)
+    projected_troughs = project_troughs_to_chart(troughs_raw, interval)
+    return classify_lh_hl_structure(projected, projected_troughs)
+
+
 def classify_lh_hl_structure(peaks: list[dict], troughs: list[dict]) -> str:
     """down | up | mixed — по последним 3 вершинам и 3 минимумам цепочки."""
     if len(peaks) < 3 or len(troughs) < 3:
@@ -284,7 +303,9 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
         "peaks": projected,
         "trough_count": len(projected_troughs),
         "troughs": projected_troughs,
-        "structure_trend": classify_lh_hl_structure(projected, projected_troughs),
+        "structure_trend": structure_trend_on_interval(
+            state, now_ms, VACUUM_LH_STRUCTURE_INTERVAL
+        ),
         "nearest_peak_price": nearest,
         "gap_to_nearest_pct": round(gap_pct, 2),
         "updated_at": now_ms,
