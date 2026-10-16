@@ -7,7 +7,15 @@ from dataclasses import dataclass
 import config
 from signal_engine.state import Bar
 
-_INTERVAL_MS = {"15": 900_000, "30": 1_800_000, "60": 3_600_000, "240": 14_400_000, "D": 86_400_000}
+_INTERVAL_MS = {
+    "1": 60_000,
+    "5": 300_000,
+    "15": 900_000,
+    "30": 1_800_000,
+    "60": 3_600_000,
+    "240": 14_400_000,
+    "D": 86_400_000,
+}
 
 
 def closed_bars(bars: list[Bar], interval: str, now_ms: int) -> list[Bar]:
