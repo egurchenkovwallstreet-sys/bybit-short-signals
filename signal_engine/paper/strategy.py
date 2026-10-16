@@ -44,6 +44,7 @@ from signal_engine.paper.detect import (
     MINI_CHART_CHECK_LABELS,
 )
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
+from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
     CSS_MANDATORY,
@@ -849,6 +850,7 @@ class PaperStrategy:
             data["mini"] = mini_view(ev)
             data["mini_chart"] = mini_chart_view(ev)
             data["graf"] = evaluate_grafik(state, cand.pump, now_ms, ev.score, ev.strict_btc)
+            data["dps"] = evaluate_dps(state, tape, cand.pump, now_ms, ev.score, ev.strict_btc)
             if cand.soft:
                 data["variants"] = []
             cand.last_eval = data
@@ -962,6 +964,26 @@ class PaperStrategy:
                     else:
                         self._open_trade(
                             variant, cand, state, _EvalView(data["graf"]), margin, now_ms
+                        )
+            if data["dps"]["passed"]:
+                variant = config.PAPER_DPS_VARIANT
+                label = VARIANT_LABELS.get(variant, variant)
+                open_dps = sum(1 for t in self.trades.values() if t.variant == variant)
+                dps_cd = config.PAPER_DPS_COOLDOWN_SEC * 1000
+                if (variant, symbol) in self.trades:
+                    pass
+                elif open_dps >= config.PAPER_DPS_MAX_OPEN:
+                    notes.append(f"{label}: лимит {config.PAPER_DPS_MAX_OPEN} открытых")
+                elif now_ms - self.last_close.get((variant, symbol), 0) < dps_cd:
+                    notes.append(f"{label}: пауза {config.PAPER_DPS_COOLDOWN_SEC // 60} мин")
+                else:
+                    balance = self.balances[variant]
+                    margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                    if margin <= 0 or balance - self.used_margin(variant) < margin:
+                        notes.append(f"{label}: нет свободной маржи")
+                    else:
+                        self._open_trade(
+                            variant, cand, state, _EvalView(data["dps"]), margin, now_ms
                         )
             cand.note = "; ".join(notes) or None
             if not cand.soft and not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
@@ -1767,6 +1789,8 @@ class PaperStrategy:
                 if variant == config.PAPER_MT2C_VARIANT
                 else len(GRAF_MANDATORY)
                 if variant == config.PAPER_GRAF_VARIANT
+                else len(DPS_MANDATORY)
+                if variant == config.PAPER_DPS_VARIANT
                 else len(C3_MANDATORY)
                 if variant == config.PAPER_C3_VARIANT
                 else len(E5S_MANDATORY)
@@ -2048,6 +2072,7 @@ class PaperStrategy:
             "mini_check_labels": MINI_CHECK_LABELS,
             "mini_chart_check_labels": MINI_CHART_CHECK_LABELS,
             "graf_check_labels": GRAF_CHECK_LABELS,
+            "dps_check_labels": DPS_CHECK_LABELS,
             "impulse_check_labels": IMPULSE_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
@@ -2061,6 +2086,7 @@ class PaperStrategy:
             "mini_mandatory": list(MINI_MANDATORY),
             "mini_chart_mandatory": list(MINI_CHART_MANDATORY),
             "graf_mandatory": list(GRAF_MANDATORY),
+            "dps_mandatory": list(DPS_MANDATORY),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "analytics": self._analytics,
         }

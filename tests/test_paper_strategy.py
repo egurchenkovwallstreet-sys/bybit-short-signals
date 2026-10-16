@@ -5,6 +5,7 @@ from pathlib import Path
 import config
 from signal_engine.paper.analytics import compute_analytics
 from signal_engine.paper.graf_detect import GRAF_MANDATORY, evaluate_grafik
+from signal_engine.paper.dps_detect import DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.detect import (
     late_entry_extension_ok,
     double_top,
@@ -683,6 +684,24 @@ def _mini_ev(metrics: dict, score: float = 8.0, passed: int = 9) -> Evaluation:
     )
     checks = {key: {"ok": i < passed, "value": 1, "need": "x"} for i, key in enumerate(keys)}
     return Evaluation(checks, metrics, score, {}, False)
+
+
+class DpsEntryTest(unittest.TestCase):
+    def test_skips_missing_metrics_without_block(self) -> None:
+        state, tape = pumped_state(), pumped_tape()
+        pump = PumpInfo(
+            kind="short",
+            trigger="4h",
+            growth_pct=35.0,
+            valley_price=1.0,
+            valley_ts=NOW - 120 * MIN,
+            peak_price=1.4,
+            peak_ts=NOW - 60 * MIN,
+        )
+        view = evaluate_dps(state, tape, pump, NOW, 5.0, False)
+        skipped = [k for k in DPS_MANDATORY if view["checks"][k].get("skipped")]
+        self.assertGreaterEqual(len(skipped), 3)
+        self.assertTrue(view["checks"]["trigger_4h_24h"]["ok"])
 
 
 class GrafikEntryTest(unittest.TestCase):
