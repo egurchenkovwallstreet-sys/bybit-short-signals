@@ -347,24 +347,37 @@ def pyl_trail_stop(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
-    """Пылесос: до +3% ROE стоп −10% ROE, дальше как t20 (без пик−10)."""
+    """БАБЛОСОС: −10% → +3% net +0.5% → +7% +5% ROE → +10% трейл пик−5 п.п."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
-    floors = _profit_lock_prices(
-        entry, peak, lev, margin, entry_fee, funding_paid, include_plus10=False
-    )
+    liq = liquidation_price(entry, lev)
     if peak < config.PAPER_BE_ARM_ROE:
         initial = net_roe_stop_price(
             entry, margin, config.PAPER_PYL_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
         )
-        return min(initial, liquidation_price(entry, lev))
-    if peak < config.PAPER_LOCK_ARM_ROE:
-        return min(floors) if floors else price_for_roe(entry, config.PAPER_BE_LOCK_NET_ROE, lev)
-    lock_roe = max(config.PAPER_LOCK_MIN_ROE, peak - config.PAPER_TRAIL_GAP_ROE)
-    stop = price_for_roe(entry, lock_roe, lev)
-    for floor in floors:
-        stop = min(stop, floor)
-    return stop
+        return min(initial, liq)
+    stops: list[float] = []
+    if peak >= config.PAPER_BE_ARM_ROE:
+        stops.append(
+            net_roe_stop_price(
+                entry, margin, config.PAPER_BE_LOCK_NET_ROE, lev, entry_fee, funding_paid
+            )
+        )
+    if peak >= config.PAPER_LOCK_ARM_ROE:
+        stops.append(price_for_roe(entry, config.PAPER_LOCK_MIN_ROE, lev))
+    if peak >= config.PAPER_PYL_TRAIL_ARM_ROE:
+        trail_roe = peak - config.PAPER_PYL_TRAIL_GAP_ROE
+        if peak >= config.PAPER_LOCK_ARM_ROE:
+            trail_roe = max(config.PAPER_LOCK_MIN_ROE, trail_roe)
+        stops.append(price_for_roe(entry, trail_roe, lev))
+    if not stops:
+        return min(
+            net_roe_stop_price(
+                entry, margin, config.PAPER_PYL_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+            ),
+            liq,
+        )
+    return min(min(stops), liq)
 
 
 def trail_stop(

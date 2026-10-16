@@ -2,7 +2,14 @@
 import unittest
 
 import config
-from signal_engine.paper.position import Position, liquidation_price, net_roe_stop_price, pyl_trail_stop
+from signal_engine.paper.position import (
+    Position,
+    liquidation_price,
+    net_roe_stop_price,
+    price_for_roe,
+    pyl_trail_stop,
+    roe_pct,
+)
 from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
 from signal_engine.state import Bar, SymbolState
 
@@ -65,6 +72,20 @@ class PylStopTest(unittest.TestCase):
             ),
             places=6,
         )
+
+    def test_trail_5pp_from_peak_at_10_roe(self) -> None:
+        entry = 1.0
+        lev = 10
+        margin = 50.0
+        pos = Position(symbol="X", opened_at=0, entry_price=entry, margin=margin, side="short", stop_style="pyl")
+        pos.best_price = price_for_roe(entry, 12.0, lev)
+        pos._sync_stop(pos.best_price)
+        want = min(
+            pos.liq_price,
+            pyl_trail_stop(entry, pos.best_price, lev, margin=margin, entry_fee=pos.entry_fee),
+        )
+        self.assertAlmostEqual(pos.stop_price, want, places=6)
+        self.assertGreaterEqual(roe_pct(entry, pos.stop_price, lev), 7.0)
 
 
 if __name__ == "__main__":
