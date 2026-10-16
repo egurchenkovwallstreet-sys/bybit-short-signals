@@ -681,6 +681,35 @@
     if (section) section.hidden = paper.variant === "sc10" || !!IMPULSE_VARIANTS[paper.variant];
     const table = document.getElementById("paper-cand-table");
     if (!table) return;
+    if (PYL_VARIANTS[paper.variant]) {
+      if (section) section.hidden = false;
+      const rows = (paper.data && paper.data.pyl_watch) || [];
+      const total = mandatory().length;
+      if (!rows.length) {
+        table.innerHTML =
+          '<tbody><tr><td class="quiet">Нет претендентов: на 15m пока нет пары pivot-вершин с lower high.</td></tr></tbody>';
+        return;
+      }
+      table.innerHTML = `<thead><tr>
+      <th>Монета</th><th>Условия</th><th>Не хватает</th><th>V₂ high</th><th>Смещение</th><th>Готово</th><th>Сила</th>
+    </tr></thead><tbody>${rows
+        .map((r) => {
+          const ev = (r.eval && r.eval.pyl) || {};
+          const m = ev.metrics || {};
+          const failed = (r.failed || []).map((k) => labels()[k] || k);
+          return `<tr class="clickable" data-pyl-symbol="${esc(r.symbol)}">
+          <td><b>${esc(r.symbol)}</b></td>
+          <td>${checkDots(ev)} ${r.passed_count}/${total}</td>
+          <td>${esc(failed.join(", ") || "—")}</td>
+          <td>${price(m.vertex_high)}</td>
+          <td>${m.offset_bars != null ? m.offset_bars + "×15m" : "—"}</td>
+          <td>${r.ready ? "да" : "нет"}</td>
+          <td class="grade-${r.grade || "C"}">${r.grade || "—"} · ${num(r.score, 1)}</td>
+        </tr>`;
+        })
+        .join("")}</tbody>`;
+      return;
+    }
     const rows = candidateRows();
     if (!rows.length) {
       table.innerHTML = '<tbody><tr><td class="quiet">Сейчас нет монет после пампа по условиям стратегии.</td></tr></tbody>';
@@ -910,7 +939,6 @@
           ["V₁ / V₂", `${time(m.v1_ts)} → ${time(m.v2_ts)}`],
           ["High V₂", price(m.vertex_high)],
           ["Смещение подтверждения", m.offset_bars != null ? `${m.offset_bars}×15m` : "—"],
-          ["Откат от high V₂", m.pullback_from_vertex_pct != null ? `${num(m.pullback_from_vertex_pct, 2)}%` : "—"],
         ]);
       }
       return html;

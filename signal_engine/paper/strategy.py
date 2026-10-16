@@ -237,6 +237,7 @@ class PaperStrategy:
         self._sc10_used_bars: dict[str, int] = {}
         self._impulse_used_bars: dict[tuple[str, str], int] = {}
         self._pyl_used_bars: dict[tuple[str, str], int] = {}
+        self._pyl_watch: list[dict] = []
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -1725,14 +1726,28 @@ class PaperStrategy:
         if variant not in VARIANTS:
             return
         cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
+        watch: list[dict] = []
         for symbol, state in states.items():
             if not state.last_price or len(state.bars_htf.get("15") or []) < 10:
                 continue
+            ev_data = evaluate_pyl(state, now_ms)
+            pc = int(ev_data.get("passed_count") or 0)
+            if pc > 0:
+                watch.append(
+                    {
+                        "symbol": symbol,
+                        "passed_count": pc,
+                        "failed": list(ev_data.get("failed") or []),
+                        "eval": {"pyl": ev_data},
+                        "grade": ev_data.get("grade"),
+                        "score": ev_data.get("score"),
+                        "ready": bool(ev_data.get("passed")),
+                    }
+                )
             if (variant, symbol) in self.trades:
                 continue
             if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
                 continue
-            ev_data = evaluate_pyl(state, now_ms)
             if not ev_data.get("passed"):
                 continue
             bar_ts = int(ev_data.get("metrics", {}).get("bar_ts") or 0)
@@ -1743,6 +1758,8 @@ class PaperStrategy:
             if margin <= 0 or balance - self.used_margin(variant) < margin:
                 continue
             self._open_pyl_trade(variant, symbol, state, ev_data, margin, now_ms)
+        watch.sort(key=lambda r: (-int(r["passed_count"]), r["symbol"]))
+        self._pyl_watch = watch[:100]
 
     def _open_pyl_trade(
         self, variant: str, symbol: str, state: SymbolState, entry: dict, margin: float, now_ms: int
@@ -2188,6 +2205,7 @@ class PaperStrategy:
             "dps_mandatory": list(DPS_MANDATORY),
             "pyl_check_labels": PYL_CHECK_LABELS,
             "pyl_mandatory": list(PYL_MANDATORY),
+            "pyl_watch": list(self._pyl_watch),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
             "analytics": self._analytics,
