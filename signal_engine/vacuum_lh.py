@@ -7,6 +7,7 @@ from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_asymmetric
 
 _INTERVAL_MS = {
+    "5": 300_000,
     "15": 900_000,
     "30": 1_800_000,
     "60": 3_600_000,
@@ -63,6 +64,58 @@ def last_lower_high_peaks(
     return chain
 
 
+def _peak_match_key(p: dict) -> tuple[int, float]:
+    t = int(p.get("time_ms") or p.get("time") or 0)
+    return (t, round(float(p["price"]), 8))
+
+
+def lh_peaks_for_interval(state: SymbolState, now_ms: int, interval: str) -> list[dict]:
+    """Цепочка LH на TF (без фильтра «цена ниже N вершин»)."""
+    if interval not in config.VACUUM_LH_CONFLUENCE_INTERVALS:
+        return []
+    bars = _bars_for_interval(state, interval)
+    if len(bars) < _min_bars(interval):
+        return []
+    chain = last_lower_high_peaks(bars, interval, now_ms)
+    if not chain:
+        return []
+    return project_peaks_to_chart(chain, interval)
+
+
+def confluence_index(peaks_by_interval: dict[str, list[dict]]) -> dict[tuple[int, float], list[str]]:
+    """Ключ (time_ms, price) → список TF, где есть такая же вершина."""
+    idx: dict[tuple[int, float], list[str]] = {}
+    for interval, peaks in peaks_by_interval.items():
+        for p in peaks:
+            key = _peak_match_key(p)
+            bucket = idx.setdefault(key, [])
+            if interval not in bucket:
+                bucket.append(interval)
+    return idx
+
+
+def apply_peak_confluence(peaks: list[dict], index: dict[tuple[int, float], list[str]]) -> list[dict]:
+    out: list[dict] = []
+    for p in peaks:
+        key = _peak_match_key(p)
+        matches = list(index.get(key) or [])
+        matches.sort(key=lambda x: (0 if x.isdigit() else 1, int(x) if x.isdigit() else x))
+        item = dict(p)
+        item["tf_match_count"] = len(matches)
+        item["tf_matches"] = matches
+        item["confluence"] = len(matches) >= 2
+        out.append(item)
+    return out
+
+
+def enrich_peaks_confluence(state: SymbolState, now_ms: int, peaks: list[dict]) -> list[dict]:
+    by_iv = {
+        iv: lh_peaks_for_interval(state, now_ms, iv) for iv in config.VACUUM_LH_CONFLUENCE_INTERVALS
+    }
+    index = confluence_index(by_iv)
+    return apply_peak_confluence(peaks, index)
+
+
 def project_peaks_to_chart(peaks: list[dict], chart_interval: str) -> list[dict]:
     """Привязка времени вершины к началу свечи графика."""
     step = _INTERVAL_MS.get(chart_interval, _INTERVAL_MS["60"])
@@ -115,7 +168,7 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
         return None
     if not price_below_recent_peaks(float(last), peaks):
         return None
-    projected = project_peaks_to_chart(peaks, lh_interval)
+    projected = enrich_peaks_confluence(state, now_ms, project_peaks_to_chart(peaks, lh_interval))
     nearest = projected[-1]["price"]
     gap_pct = (nearest - float(last)) / nearest * 100.0 if nearest > 0 else 0.0
     return {

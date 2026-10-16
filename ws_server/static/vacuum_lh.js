@@ -44,6 +44,33 @@ const VAC_CHART = {
 };
 
 const PEAK_COLORS = ["#e9c46a", "#f4a261", "#e76f51", "#d62828", "#9d0208"];
+const PEAK_CONFLUENCE_COLOR = "#ffe566";
+const PEAK_CONFLUENCE_STRONG = "#ffffff";
+
+function vacuumPeakMatchCount(p) {
+  const n = Number(p?.tf_match_count);
+  if (n >= 1) return n;
+  return p?.confluence ? 2 : 1;
+}
+
+function vacuumPeakLineStyle(p, fallbackColor) {
+  const n = vacuumPeakMatchCount(p);
+  if (n >= 3) {
+    return { color: PEAK_CONFLUENCE_STRONG, lineWidth: 3, lineStyle: 0 };
+  }
+  if (n >= 2) {
+    return { color: PEAK_CONFLUENCE_COLOR, lineWidth: 2, lineStyle: 0 };
+  }
+  return { color: fallbackColor, lineWidth: 1, lineStyle: 2 };
+}
+
+function formatVacuumPeakPrice(p) {
+  const price = Number(p.price);
+  const n = vacuumPeakMatchCount(p);
+  const cls = n >= 3 ? "vacuum-lh-peak-x3" : n >= 2 ? "vacuum-lh-peak-x2" : "";
+  const tag = n >= 2 ? `<sup class="vacuum-lh-peak-tag">×${n} TF</sup>` : "";
+  return `<span class="vacuum-lh-peak${cls ? ` ${cls}` : ""}">${price}${tag}</span>`;
+}
 
 function labelTf(code) {
   return (
@@ -552,7 +579,7 @@ function renderVacuumLhBoard() {
   grid.innerHTML = vacuumLhState.signals
     .map((row) => {
       const sel = row.symbol === vacuumLhState.selected ? " selected" : "";
-      const peaks = (row.peaks || []).map((p) => p.price).join(" · ");
+      const peaks = (row.peaks || []).map((p) => formatVacuumPeakPrice(p)).join(" · ");
       return `<article class="vacuum-lh-card pump-strategy-card${sel}" data-symbol="${row.symbol}">
         <strong>${row.symbol}</strong>
         <span class="quiet">${Number(row.last_price).toFixed(4)}</span>
@@ -576,17 +603,22 @@ function renderVacuumLhInfo() {
   const lhTf = labelTf(vacuumLhState.lhInterval);
   const chartTf = labelTf(vacuumLhState.chartInterval);
   const list = peaks
-    .map(
-      (p) =>
-        `<li>LH${p.index}: <strong>${p.price}</strong> (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})</li>`,
-    )
+    .map((p) => {
+      const n = vacuumPeakMatchCount(p);
+      const cls = n >= 3 ? "vacuum-lh-peak-li-x3" : n >= 2 ? "vacuum-lh-peak-li-x2" : "";
+      const tfNote =
+        n >= 2 && p.tf_matches?.length
+          ? ` · <span class="vacuum-lh-peak-tag">${p.tf_matches.map(labelTf).join(", ")}</span>`
+          : "";
+      return `<li class="${cls}">LH${p.index}: <strong>${p.price}</strong>${n >= 2 ? ` <span class="vacuum-lh-peak-tag">×${n} TF</span>` : ""} (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})${tfNote}</li>`;
+    })
     .join("");
   pane.innerHTML = `
     <div class="psc-info-head">
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>. LH в списке: <strong>${lhTf}</strong>.</p>
+    <p>График <strong>${chartTf}</strong>. LH в списке: <strong>${lhTf}</strong>. Яркие вершины — совпадение LH на 2+ TF (5m–4H).</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <ul class="vacuum-lh-peaks">${list || "<li>—</li>"}</ul>`;
   bindVacuumLhCloseControls();
@@ -621,15 +653,19 @@ function drawVacuumPeakOverlays(runtime, peaks, chartInterval) {
   peaks.forEach((p, i) => {
     const price = Number(p.price);
     if (!price) return;
-    const color = PEAK_COLORS[i % PEAK_COLORS.length];
+    const baseColor = PEAK_COLORS[i % PEAK_COLORS.length];
+    const n = vacuumPeakMatchCount(p);
+    const style = vacuumPeakLineStyle(p, baseColor);
+    const label =
+      n >= 2 ? `LH${p.index || i + 1}·${n}TF` : `LH${p.index || i + 1}`;
     runtime._vacuumPeakLines.push(
       runtime.series.createPriceLine({
         price,
-        color,
-        lineWidth: 1,
-        lineStyle: 2,
+        color: style.color,
+        lineWidth: style.lineWidth,
+        lineStyle: style.lineStyle,
         axisLabelVisible: true,
-        title: `LH${p.index || i + 1}`,
+        title: label,
       }),
     );
     const tMs = p.time_ms ?? p.time_chart_ms ?? p.time_15m_ms;
@@ -638,9 +674,9 @@ function drawVacuumPeakOverlays(runtime, peaks, chartInterval) {
       markers.push({
         time: barTime,
         position: "aboveBar",
-        color,
-        shape: "circle",
-        text: `LH${p.index || i + 1}`,
+        color: style.color,
+        shape: n >= 2 ? "square" : "circle",
+        text: label,
       });
     }
   });

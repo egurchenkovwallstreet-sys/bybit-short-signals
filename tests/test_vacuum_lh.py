@@ -7,6 +7,8 @@ import unittest
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import pivot_highs_asymmetric_indexed
 from signal_engine.vacuum_lh import (
+    apply_peak_confluence,
+    confluence_index,
     last_lower_high_peaks,
     price_below_recent_peaks,
     project_peaks_to_chart,
@@ -69,6 +71,17 @@ class VacuumLhPeaksTest(unittest.TestCase):
         t = 1_700_000_000_000
         proj = project_peaks_to_chart([{"time": t, "price": 1.23}], "60")
         self.assertEqual(proj[0]["time_chart_ms"], (t // 3_600_000) * 3_600_000)
+
+    def test_confluence_same_time_and_price(self) -> None:
+        t = 1_700_000_000_000
+        p60 = project_peaks_to_chart([{"time": t, "price": 5.0}], "60")
+        p30 = project_peaks_to_chart([{"time": t, "price": 5.0}], "30")
+        idx = confluence_index({"60": p60, "30": p30, "5": []})
+        out = apply_peak_confluence(p60, idx)
+        self.assertTrue(out[0]["confluence"])
+        self.assertEqual(out[0]["tf_match_count"], 2)
+        self.assertIn("60", out[0]["tf_matches"])
+        self.assertIn("30", out[0]["tf_matches"])
 
     def test_scan_filters_turnover_and_price(self) -> None:
         peak_prices = [100.0, 90.0, 80.0, 70.0]

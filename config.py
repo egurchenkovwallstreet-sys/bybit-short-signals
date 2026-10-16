@@ -711,9 +711,13 @@ VACUUM_LH_LOOKBACK_DAYS = _env_int("VACUUM_LH_LOOKBACK_DAYS", 14)
 VACUUM_LH_MIN_1H_BARS = _env_int("VACUUM_LH_MIN_1H_BARS", 24)
 VACUUM_LH_INTERVALS = ("30", "60", "240")
 VACUUM_LH_DEFAULT_INTERVAL = "60"
+# Все TF графика/списка для совпадения вершин (цена + time_ms pivot).
+VACUUM_LH_CONFLUENCE_INTERVALS = ("5", "15", "30", "60", "240")
 VACUUM_LH_SCAN_INTERVAL_SEC = _env_int("VACUUM_LH_SCAN_INTERVAL_SEC", 45)
 # Минимум закрытых свечей на TF для расчёта LH.
 VACUUM_LH_MIN_BARS: dict[str, int] = {
+    "5": _env_int("VACUUM_LH_MIN_BARS_5", 48),
+    "15": _env_int("VACUUM_LH_MIN_BARS_15", 32),
     "30": _env_int("VACUUM_LH_MIN_BARS_30", 48),
     "60": _env_int("VACUUM_LH_MIN_BARS_60", 24),
     "240": _env_int("VACUUM_LH_MIN_BARS_240", 12),

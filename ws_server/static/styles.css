@@ -203,6 +203,33 @@ body {
   margin: 0 4px;
 }
 
+.vacuum-lh-peak-x2 {
+  color: #ffe566;
+  font-weight: 600;
+}
+
+.vacuum-lh-peak-x3 {
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(255, 230, 102, 0.45);
+}
+
+.vacuum-lh-peak-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ffe566;
+  margin-left: 2px;
+}
+
+.vacuum-lh-peaks .vacuum-lh-peak-li-x2 {
+  color: #ffe566;
+}
+
+.vacuum-lh-peaks .vacuum-lh-peak-li-x3 {
+  color: #fff;
+  font-weight: 600;
+}
+
 .vacuum-lh-list-wrap {
   flex: 1;
   min-height: 0;
