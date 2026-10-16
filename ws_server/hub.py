@@ -36,6 +36,8 @@ class Client:
         self.pump_strategy_symbol: str | None = None
         self.pump_strategy_interval = "15"
         self.force_pump_strategy_detail = False
+        self.vacuum_lh_symbol: str | None = None
+        self.force_vacuum_lh_detail = False
 
 
 class Hub:
@@ -49,6 +51,7 @@ class Hub:
         self.pump_scan_dirty = False
         self.x2_retrace_dirty = False
         self.pump_strategy_dirty = False
+        self.vacuum_lh_dirty = False
         self.pump_lab_dirty = False
         self.market_dirty = False
         self._stopped = False
@@ -117,6 +120,12 @@ class Hub:
             ),
             "paper_test": self.paper.view(),
             "pump_lab_board": self.cache.view_pump_lab_board(),
+            "vacuum_lh_board": self.cache.view_vacuum_lh_board(),
+            "vacuum_lh_detail": (
+                self.cache.vacuum_lh_detail(client.vacuum_lh_symbol, "15")
+                if client.vacuum_lh_symbol
+                else None
+            ),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
@@ -163,6 +172,11 @@ class Hub:
             if interval in {"1", "5", "15", "30", "60", "240", "D"}:
                 client.pump_strategy_interval = interval
                 client.force_pump_strategy_detail = True
+        elif kind == "select_vacuum_lh":
+            symbol = str(message.get("symbol") or "")
+            if symbol in self.cache.vacuum_lh_by_symbol:
+                client.vacuum_lh_symbol = symbol
+                client.force_vacuum_lh_detail = True
 
     async def run(self) -> None:
         flush = asyncio.create_task(self._flush_loop())
@@ -237,6 +251,9 @@ class Hub:
                 elif kind == "pump_strategy":
                     self.demo = False
                     self.pump_strategy_dirty = True
+                elif kind == "vacuum_lh":
+                    self.demo = False
+                    self.vacuum_lh_dirty = True
                 elif kind == "pump_lab":
                     self.demo = False
                     self.pump_lab_dirty = True
@@ -265,6 +282,7 @@ class Hub:
             pump_strategy = (
                 self.cache.view_pump_strategy_board() if self.pump_strategy_dirty else None
             )
+            vacuum_lh = self.cache.view_vacuum_lh_board() if self.vacuum_lh_dirty else None
             pump_lab = self.cache.view_pump_lab_board() if self.pump_lab_dirty else None
             send_detail = self.market_dirty
             paper = self.paper.view() if self.paper_dirty else None
@@ -272,6 +290,7 @@ class Hub:
             self.pump_scan_dirty = False
             self.x2_retrace_dirty = False
             self.pump_strategy_dirty = False
+            self.vacuum_lh_dirty = False
             self.pump_lab_dirty = False
             self.market_dirty = False
             self.paper_dirty = False
@@ -308,6 +327,23 @@ class Hub:
                                 "demo": self.demo,
                             }
                         )
+                    if vacuum_lh is not None:
+                        await client.websocket.send_json(
+                            {
+                                "type": "vacuum_lh_board",
+                                "data": vacuum_lh,
+                                "demo": self.demo,
+                            }
+                        )
+                    if client.vacuum_lh_symbol and (send_detail or client.force_vacuum_lh_detail):
+                        await client.websocket.send_json(
+                            {
+                                "type": "vacuum_lh_detail",
+                                "symbol": client.vacuum_lh_symbol,
+                                "data": self.cache.vacuum_lh_detail(client.vacuum_lh_symbol, "15"),
+                            }
+                        )
+                        client.force_vacuum_lh_detail = False
                     if pump_lab is not None:
                         await client.websocket.send_json(
                             {"type": "pump_lab_board", "data": pump_lab, "demo": self.demo}

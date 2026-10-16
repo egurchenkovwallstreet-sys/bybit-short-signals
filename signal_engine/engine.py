@@ -18,6 +18,7 @@ from signal_engine.state import SymbolState
 from signal_engine.pump_scan import build_pump_scan_board
 from signal_engine.x2_retrace import build_x2_retrace_board
 from signal_engine.pump_strategy import build_pump_strategy_board
+from signal_engine.vacuum_lh import build_vacuum_lh_board
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.pump_lab.lab import PumpLab
 from signal_engine.store import SignalStore
@@ -96,6 +97,7 @@ class Engine:
             build_pump_scan_board(self.symbols, now_ms, self.watches),
             build_x2_retrace_board(self.symbols, now_ms, self.watches),
             build_pump_strategy_board(self.symbols, now_ms, self.watches),
+            build_vacuum_lh_board(self.symbols, now_ms),
         ]
         if self.paper is not None:
             try:

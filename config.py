@@ -700,6 +700,13 @@ def chart_tf_to_oi_interval(chart_tf: str) -> str:
     return CHART_TF_TO_OI_INTERVAL.get(chart_tf, "5min")
 
 
+# --- Пылесос LH: 1H lower highs → проекция на 15m (сканер, не paper vac) -----
+VACUUM_LH_MIN_TURNOVER_24H_USDT = _env_float("VACUUM_LH_MIN_TURNOVER_24H_USDT", 300_000.0)
+VACUUM_LH_PEAK_COUNT = _env_int("VACUUM_LH_PEAK_COUNT", 5)
+VACUUM_LH_PIVOT_WING = _env_int("VACUUM_LH_PIVOT_WING", 2)
+VACUUM_LH_LOOKBACK_DAYS = _env_int("VACUUM_LH_LOOKBACK_DAYS", 14)
+VACUUM_LH_MIN_1H_BARS = _env_int("VACUUM_LH_MIN_1H_BARS", 24)
+
 # --- Вкладка «2× откат» (рост от min 5d, LH 1H/4H, OI↓, EMA) ----------------
 
 # Мин. оборот фьючерса за 24h (turnover24h USDT). Ниже — не попадают на доску.

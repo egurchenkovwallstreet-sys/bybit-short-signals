@@ -54,6 +54,7 @@ const ANALYSIS_SUB_VIEWS = {
   pump_scan: "view-pump-scan",
   x2_retrace: "view-x2-retrace",
   pump_strategy: "view-pump-strategy",
+  vacuum_lh: "view-vacuum-lh",
   pending: "view-pending",
 };
 
@@ -102,6 +103,10 @@ function showAnalysisSub(name) {
     requestAnimationFrame(() => {
       if (window.pumpStrategy?.resizeChart) window.pumpStrategy.resizeChart();
     });
+  }
+  if (name === "vacuum_lh" && window.vacuumLh) {
+    window.vacuumLh.initVacuumLhTab();
+    requestAnimationFrame(() => window.vacuumLh.resizeChart?.());
   }
   if (name === "pending") {
     renderPending();
@@ -250,6 +255,9 @@ function connectSocket() {
     if (message.pump_lab_board && window.pumpLab) {
       window.pumpLab.onPumpLabBoard(message.pump_lab_board);
     }
+    if (window.vacuumLh) {
+      window.vacuumLh.onVacuumLhSnapshot(message.vacuum_lh_board, message.vacuum_lh_detail);
+    }
   } else if (message.type === "pump_lab_board" && window.pumpLab) {
     setDemo(message.demo);
     window.pumpLab.onPumpLabBoard(message.data);
@@ -274,6 +282,11 @@ function connectSocket() {
     window.pumpStrategy.onPumpStrategyBoard(message.data);
   } else if (message.type === "pump_strategy_detail" && window.pumpStrategy) {
     window.pumpStrategy.onPumpStrategyDetail(message.symbol, message.data);
+  } else if (message.type === "vacuum_lh_board" && window.vacuumLh) {
+    setDemo(message.demo);
+    window.vacuumLh.onVacuumLhBoard(message.data);
+  } else if (message.type === "vacuum_lh_detail" && window.vacuumLh) {
+    window.vacuumLh.onVacuumLhDetail(message.symbol, message.data);
   } else if (message.type === "detail" && (!state.selected || message.symbol === state.selected)) {
     const changed = state.selected !== message.symbol;
     state.selected = message.symbol;

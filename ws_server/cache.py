@@ -95,6 +95,8 @@ class MarketCache:
         self.x2_retrace_signals: dict[str, dict[str, Any]] = {}
         self.pump_strategy_signals: list[dict[str, Any]] = []
         self.pump_strategy_by_symbol: dict[str, dict[str, Any]] = {}
+        self.vacuum_lh_signals: list[dict[str, Any]] = []
+        self.vacuum_lh_by_symbol: dict[str, dict[str, Any]] = {}
         self.pump_lab_board: dict[str, Any] = {}
 
     def apply(self, message: dict[str, Any]) -> str | None:
@@ -115,6 +117,10 @@ class MarketCache:
             self.pump_strategy_signals = list((message.get("data") or {}).get("signals") or [])
             self._reindex_pump_strategy()
             return "pump_strategy"
+        if kind == "vacuum_lh_board":
+            self.vacuum_lh_signals = list((message.get("data") or {}).get("signals") or [])
+            self._reindex_vacuum_lh()
+            return "vacuum_lh"
         if kind == "pump_lab_board":
             self.pump_lab_board = dict(message.get("data") or {})
             return "pump_lab"
@@ -175,6 +181,39 @@ class MarketCache:
             item["mini"] = self.mini_closes(symbol)
             out.append(item)
         return out
+
+    def view_vacuum_lh_board(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for signal in self.vacuum_lh_signals:
+            symbol = str(signal.get("symbol") or "")
+            if not symbol:
+                continue
+            turnover = signal.get("turnover_24h_usdt")
+            if turnover is not None and float(turnover) < config.VACUUM_LH_MIN_TURNOVER_24H_USDT:
+                continue
+            item = dict(signal)
+            live = self.mark_price.get(symbol)
+            if live is not None:
+                item["last_price"] = float(live)
+            out.append(item)
+        return out
+
+    def vacuum_lh_detail(self, symbol: str, interval: str = "15") -> dict[str, Any] | None:
+        signal = self.vacuum_lh_by_symbol.get(symbol)
+        if not signal:
+            return None
+        candles = self.klines.get((symbol, interval), [])
+        sig = dict(signal)
+        live = self.mark_price.get(symbol)
+        if live is not None:
+            sig["last_price"] = float(live)
+        return {
+            "signal": sig,
+            "interval": interval,
+            "candles": candles,
+            "book": self.book_view(symbol),
+            "funding_rate": self.funding.get(symbol),
+        }
 
     def view_x2_retrace_board(self) -> list[dict[str, Any]]:
         view = []
@@ -453,6 +492,13 @@ class MarketCache:
             symbol = signal.get("symbol")
             if symbol:
                 self.pump_strategy_by_symbol[str(symbol)] = signal
+
+    def _reindex_vacuum_lh(self) -> None:
+        self.vacuum_lh_by_symbol = {}
+        for signal in self.vacuum_lh_signals:
+            symbol = signal.get("symbol")
+            if symbol:
+                self.vacuum_lh_by_symbol[str(symbol)] = signal
 
     def _reindex_pump_scan(self) -> None:
         self.pump_scan_signals = {}
