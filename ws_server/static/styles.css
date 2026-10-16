@@ -116,6 +116,49 @@ body {
   overflow: auto;
 }
 
+.vacuum-lh-chart-pane {
+  overflow: auto;
+}
+
+.vacuum-lh-chart-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.vacuum-lh-chart-label {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vacuum-lh-chart-main {
+  min-height: min(52vh, 560px);
+  flex: none;
+}
+
+.vacuum-lh-extra-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+
+.vacuum-lh-chart-sub {
+  min-height: min(36vh, 320px);
+  flex: none;
+}
+
+@media (max-width: 900px) {
+  .vacuum-lh-extra-charts {
+    grid-template-columns: 1fr;
+  }
+}
+
 .psc-section-title {
   margin: 0 0 8px;
   font-size: 1.1rem;

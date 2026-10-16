@@ -16,6 +16,8 @@ const vacuumLhState = {
   selected: null,
   detail: null,
   chart: null,
+  chart5: null,
+  chart15: null,
   tfBound: false,
 };
 
@@ -23,10 +25,19 @@ const VAC_CHART = {
   listWrap: "vacuum-lh-list-wrap",
   workspace: "vacuum-lh-workspace",
   chart: "vacuum-lh-candle-chart",
+  chart5: "vacuum-lh-candle-chart-5",
+  chart15: "vacuum-lh-candle-chart-15",
+  mainLabel: "vacuum-lh-main-label",
   info: "vacuum-lh-info-pane",
   tfRow: "vacuum-lh-tf-row",
   status: "vacuum-lh-status",
 };
+
+const VACUUM_CHART_PANELS = [
+  { stateKey: "chart", elId: VAC_CHART.chart, intervalKey: "lh" },
+  { stateKey: "chart5", elId: VAC_CHART.chart5, interval: "5" },
+  { stateKey: "chart15", elId: VAC_CHART.chart15, interval: "15" },
+];
 
 const PEAK_COLORS = ["#e9c46a", "#f4a261", "#e76f51", "#d62828", "#9d0208"];
 
@@ -35,6 +46,8 @@ function initVacuumLhTab() {
     window.__vacuumLhBound = true;
     if (window.boardChart?.createRuntime) {
       vacuumLhState.chart = window.boardChart.createRuntime();
+      vacuumLhState.chart5 = window.boardChart.createRuntime();
+      vacuumLhState.chart15 = window.boardChart.createRuntime();
     }
     document.getElementById("vacuum-lh-grid")?.addEventListener("click", (event) => {
       const card = event.target instanceof Element ? event.target.closest(".vacuum-lh-card") : null;
@@ -173,21 +186,62 @@ function toggleVacuumLhSymbol(symbol) {
     window.signalSocket.send(JSON.stringify({ type: "select_vacuum_lh", symbol }));
   }
   const iv = vacuumLhState.lhInterval;
-  window.boardChart.scheduleAssetsPrefetch([symbol], { intervals: [iv], book: true, liq: false, priority: "high" });
+  window.boardChart.scheduleAssetsPrefetch([symbol], {
+    intervals: [iv, "5", "15"],
+    book: true,
+    liq: false,
+    priority: "high",
+  });
   void refreshVacuumLhChart(true);
+}
+
+function vacuumChartRuntime(stateKey) {
+  return vacuumLhState[stateKey];
+}
+
+function panelInterval(panel) {
+  return panel.intervalKey === "lh" ? vacuumLhState.lhInterval : panel.interval;
+}
+
+function ensureVacuumRuntimes() {
+  const BC = window.boardChart;
+  if (!BC?.createRuntime) return;
+  for (const panel of VACUUM_CHART_PANELS) {
+    if (!vacuumLhState[panel.stateKey]) {
+      vacuumLhState[panel.stateKey] = BC.createRuntime();
+    }
+  }
+}
+
+function mountVacuumCharts() {
+  const BC = window.boardChart;
+  if (!BC?.mount) return;
+  ensureVacuumRuntimes();
+  for (const panel of VACUUM_CHART_PANELS) {
+    const rt = vacuumChartRuntime(panel.stateKey);
+    if (rt && !rt.series) BC.mount(rt, panel.elId);
+  }
+  updateVacuumMainChartLabel();
+}
+
+function updateVacuumMainChartLabel() {
+  const el = document.getElementById(VAC_CHART.mainLabel);
+  if (el) el.textContent = `LH · ${labelTf(vacuumLhState.lhInterval)}`;
 }
 
 function openVacuumLhChart() {
   document.getElementById(VAC_CHART.listWrap)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.workspace)?.removeAttribute("hidden");
-  window.boardChart.mount(vacuumLhState.chart, VAC_CHART.chart);
+  mountVacuumCharts();
   renderVacuumLhInfo();
 }
 
 function closeVacuumLhChart() {
   vacuumLhState.selected = null;
   vacuumLhState.detail = null;
-  clearVacuumPeakOverlays(vacuumLhState.chart);
+  for (const panel of VACUUM_CHART_PANELS) {
+    clearVacuumPeakOverlays(vacuumChartRuntime(panel.stateKey));
+  }
   document.getElementById(VAC_CHART.workspace)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.listWrap)?.removeAttribute("hidden");
   renderVacuumLhBoard();
@@ -203,7 +257,7 @@ function onVacuumLhSnapshot(board, detail) {
   if (detail?.signal && vacuumLhState.selected === detail.signal.symbol) {
     vacuumLhState.detail = detail;
     renderVacuumLhInfo();
-    drawVacuumPeakOverlays(vacuumLhState.chart, detail.signal.peaks || []);
+    redrawVacuumLhPeakOverlays(detail.signal.peaks || []);
   }
 }
 
@@ -211,8 +265,13 @@ function onVacuumLhDetail(symbol, data) {
   if (!vacuumLhState.selected || vacuumLhState.selected !== symbol) return;
   vacuumLhState.detail = data;
   renderVacuumLhInfo();
-  if (vacuumLhState.chart?.series) {
-    drawVacuumPeakOverlays(vacuumLhState.chart, data?.signal?.peaks || []);
+  redrawVacuumLhPeakOverlays(data?.signal?.peaks || []);
+}
+
+function redrawVacuumLhPeakOverlays(peaks) {
+  for (const panel of VACUUM_CHART_PANELS) {
+    const rt = vacuumChartRuntime(panel.stateKey);
+    if (rt?.series) drawVacuumPeakOverlays(rt, peaks, panelInterval(panel));
   }
 }
 
@@ -263,7 +322,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="paper-btn vacuum-lh-close">Закрыть</button>
     </div>
-    <p>График <strong>${tf}</strong>. До пяти LH; в списке — цена ниже трёх последних.</p>
+    <p>LH на <strong>${tf}</strong> + графики <strong>5m</strong> и <strong>15m</strong>. Линии LH — с TF скана.</p>
     <p>Цена: <strong>${row.last_price ?? "—"}</strong></p>
     <ul class="vacuum-lh-peaks">${list || "<li>—</li>"}</ul>`;
 }
@@ -287,13 +346,13 @@ function clearVacuumPeakOverlays(runtime) {
   }
 }
 
-function drawVacuumPeakOverlays(runtime, peaks) {
+function drawVacuumPeakOverlays(runtime, peaks, chartInterval) {
   if (!runtime?.series) return;
   clearVacuumPeakOverlays(runtime);
   runtime._vacuumPeakLines = [];
   const markers = [];
   const BC = window.boardChart;
-  const iv = vacuumLhState.lhInterval || "60";
+  const iv = chartInterval || vacuumLhState.lhInterval || "60";
   peaks.forEach((p, i) => {
     const price = Number(p.price);
     if (!price) return;
@@ -329,31 +388,51 @@ function drawVacuumPeakOverlays(runtime, peaks) {
   }
 }
 
+async function refreshVacuumPanel(panel, symbol, resetScale, live, peaks) {
+  const BC = window.boardChart;
+  if (!BC?.mount) return;
+  const interval = panelInterval(panel);
+  const rt = vacuumChartRuntime(panel.stateKey);
+  if (!rt) return;
+  if (!rt.series) BC.mount(rt, panel.elId);
+  if (!rt.series) return;
+  BC.paintCandlesFromCache(rt, symbol, interval, resetScale, panel.elId);
+  const detailForFetch =
+    panel.intervalKey === "lh" && vacuumLhState.detail ? vacuumLhState.detail : null;
+  const candles = await BC.ensureCandles(null, symbol, interval, detailForFetch, {
+    refreshFallback: resetScale,
+  });
+  if (panel.intervalKey === "lh" && vacuumLhState.detail) {
+    vacuumLhState.detail.candles = candles;
+    vacuumLhState.detail.interval = interval;
+  }
+  BC.drawCandles(rt, candles, interval, resetScale, panel.elId, live);
+  drawVacuumPeakOverlays(rt, peaks, interval);
+}
+
 async function refreshVacuumLhChart(resetScale) {
   const symbol = vacuumLhState.selected;
   if (!symbol) return;
   const BC = window.boardChart;
   if (!BC?.mount) return;
-  if (!vacuumLhState.chart) vacuumLhState.chart = BC.createRuntime();
-  if (!vacuumLhState.chart.series) BC.mount(vacuumLhState.chart, VAC_CHART.chart);
-  if (!vacuumLhState.chart.series) return;
-  const interval = vacuumLhState.lhInterval;
-  BC.scheduleAssetsPrefetch([symbol], { intervals: [interval], book: true, priority: "high" });
-  BC.paintCandlesFromCache(vacuumLhState.chart, symbol, interval, resetScale, VAC_CHART.chart);
-  const candles = await BC.ensureCandles(null, symbol, interval, vacuumLhState.detail, { refreshFallback: resetScale });
-  if (vacuumLhState.detail) {
-    vacuumLhState.detail.candles = candles;
-    vacuumLhState.detail.interval = interval;
-  }
+  mountVacuumCharts();
+  const lhInterval = vacuumLhState.lhInterval;
+  BC.scheduleAssetsPrefetch([symbol], { intervals: [lhInterval, "5", "15"], book: true, priority: "high" });
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
-  BC.drawCandles(vacuumLhState.chart, candles, interval, resetScale, VAC_CHART.chart, live);
   const peaks = vacuumLhState.detail?.signal?.peaks || findVacuumRow(symbol)?.peaks || [];
-  drawVacuumPeakOverlays(vacuumLhState.chart, peaks);
-  if (resetScale) renderVacuumLhInfo();
+  await Promise.all(
+    VACUUM_CHART_PANELS.map((panel) => refreshVacuumPanel(panel, symbol, resetScale, live, peaks)),
+  );
+  if (resetScale) {
+    updateVacuumMainChartLabel();
+    renderVacuumLhInfo();
+  }
 }
 
 function resizeVacuumLhChart() {
-  vacuumLhState.chart?.chart?.resize?.();
+  for (const panel of VACUUM_CHART_PANELS) {
+    vacuumChartRuntime(panel.stateKey)?.chart?.resize?.();
+  }
 }
 
 window.vacuumLh = {
