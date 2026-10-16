@@ -45,6 +45,7 @@ from signal_engine.paper.detect import (
 )
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
+from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
     CSS_MANDATORY,
@@ -235,6 +236,7 @@ class PaperStrategy:
         self.plus_blocked: dict[str, set[int]] = {}
         self._sc10_used_bars: dict[str, int] = {}
         self._impulse_used_bars: dict[tuple[str, str], int] = {}
+        self._pyl_used_bars: dict[tuple[str, str], int] = {}
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -323,10 +325,10 @@ class PaperStrategy:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
                 if bar_ts:
                     self._impulse_used_bars[(variant, row["symbol"])] = bar_ts
-            if variant in config.PAPER_IMPULSE_VARIANTS:
+            if variant == config.PAPER_PYL_VARIANT:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
                 if bar_ts:
-                    self._impulse_used_bars[(variant, row["symbol"])] = bar_ts
+                    self._pyl_used_bars[(variant, row["symbol"])] = bar_ts
         if config.PAPER_CSS_VARIANT not in VARIANTS:
             dropped_css = self.store.expire_kind_watching("css", "Cursor SS снят с теста", now)
             if dropped_css:
@@ -534,6 +536,7 @@ class PaperStrategy:
         self._evaluate_css2(states, btc_state=states.get(config.PAPER_BTC_SYMBOL), now_ms=now_ms)
         self._evaluate_sc10(states, now_ms)
         self._evaluate_impulse(states, now_ms)
+        self._evaluate_pyl(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -1717,6 +1720,100 @@ class PaperStrategy:
             len(impulse_mandatory(ev.minutes)),
         )
 
+    def _evaluate_pyl(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        variant = config.PAPER_PYL_VARIANT
+        if variant not in VARIANTS:
+            return
+        cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
+        for symbol, state in states.items():
+            if not state.last_price or len(state.bars_htf.get("15") or []) < 10:
+                continue
+            if (variant, symbol) in self.trades:
+                continue
+            if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                continue
+            ev_data = evaluate_pyl(state, now_ms)
+            if not ev_data.get("passed"):
+                continue
+            bar_ts = int(ev_data.get("metrics", {}).get("bar_ts") or 0)
+            if bar_ts and self._pyl_used_bars.get((variant, symbol)) == bar_ts:
+                continue
+            balance = self.balances[variant]
+            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+            if margin <= 0 or balance - self.used_margin(variant) < margin:
+                continue
+            self._open_pyl_trade(variant, symbol, state, ev_data, margin, now_ms)
+
+    def _open_pyl_trade(
+        self, variant: str, symbol: str, state: SymbolState, entry: dict, margin: float, now_ms: int
+    ) -> None:
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            side="short",
+            stop_style="default",
+        )
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": symbol,
+                "variant": variant,
+                "candidate_id": None,
+                "kind": "pyl",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": entry.get("score", 0),
+                "grade": entry.get("grade", "C"),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=symbol,
+            kind="pyl",
+            pos=pos,
+            score=float(entry.get("score") or 0),
+            grade=str(entry.get("grade") or "C"),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=None,
+            last_check=now_ms,
+        )
+        bar_ts = int(entry.get("metrics", {}).get("bar_ts") or 0)
+        if bar_ts:
+            self._pyl_used_bars[(variant, symbol)] = bar_ts
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт шорт %s по %s, маржа %.2f USD, условий %s/%s",
+            variant,
+            symbol,
+            price,
+            margin,
+            entry.get("passed_count"),
+            len(PYL_MANDATORY),
+        )
+
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
         price = float(state.last_price)
         tape = self.tape.symbols.get(cand.symbol)
@@ -2089,6 +2186,8 @@ class PaperStrategy:
             "mini_chart_mandatory": list(MINI_CHART_MANDATORY),
             "graf_mandatory": list(GRAF_MANDATORY),
             "dps_mandatory": list(DPS_MANDATORY),
+            "pyl_check_labels": PYL_CHECK_LABELS,
+            "pyl_mandatory": list(PYL_MANDATORY),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
             "analytics": self._analytics,

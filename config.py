@@ -267,7 +267,7 @@ PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
 PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
 PAPER_VARIANTS = (
     "t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2",
-    "mt2c", "graf", "dps", "i5", "i15",
+    "mt2c", "graf", "dps", "pyl", "i5", "i15",
 )
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
@@ -308,6 +308,12 @@ PAPER_DPS_LIQ_ZONE_MAX_PCT = _env_float("PAPER_DPS_LIQ_ZONE_MAX_PCT", 10.0)
 PAPER_DPS_MIN_TURNOVER = _env_float("PAPER_DPS_MIN_TURNOVER", 10_000_000.0)
 PAPER_DPS_COOLDOWN_SEC = _env_int("PAPER_DPS_COOLDOWN_SEC", 90 * 60)
 PAPER_DPS_MAX_OPEN = _env_int("PAPER_DPS_MAX_OPEN", 3)
+
+# Пылесос: lower high 15m без пампа, вход на 2–3-й свече после 2-й вершины.
+PAPER_PYL_VARIANT = "pyl"
+PAPER_PYL_PIVOT_WING = _env_int("PAPER_PYL_PIVOT_WING", 1)
+PAPER_PYL_LOOKBACK_BARS = _env_int("PAPER_PYL_LOOKBACK_BARS", 96)
+PAPER_PYL_CONFIRM_OFFSETS = (2, 3)
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
