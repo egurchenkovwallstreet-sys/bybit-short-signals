@@ -41,7 +41,74 @@ const VACUUM_CHART_PANELS = [
 
 const PEAK_COLORS = ["#e9c46a", "#f4a261", "#e76f51", "#d62828", "#9d0208"];
 
+function vacuumExtraChartsHtml() {
+  return `
+    <div class="vacuum-lh-sub-chart">
+      <p class="vacuum-lh-chart-label">5m</p>
+      <div class="psc-chart-wrap vacuum-lh-chart-sub">
+        <div id="vacuum-lh-candle-chart-5" class="psc-candle-chart"></div>
+      </div>
+    </div>
+    <div class="vacuum-lh-sub-chart">
+      <p class="vacuum-lh-chart-label">15m</p>
+      <div class="psc-chart-wrap vacuum-lh-chart-sub">
+        <div id="vacuum-lh-candle-chart-15" class="psc-candle-chart"></div>
+      </div>
+    </div>`;
+}
+
+function ensureVacuumLhChartDom() {
+  const pane = document.querySelector(`#${VAC_CHART.workspace} .psc-chart-pane`);
+  if (!pane) return;
+  pane.classList.add("vacuum-lh-chart-pane");
+  let stack = pane.querySelector(".vacuum-lh-chart-stack");
+  if (!stack) {
+    const legacyWrap = pane.querySelector(":scope > .psc-chart-wrap");
+    stack = document.createElement("div");
+    stack.className = "vacuum-lh-chart-stack";
+    const main = document.createElement("div");
+    main.className = "vacuum-lh-main-chart";
+    const label = document.createElement("p");
+    label.className = "vacuum-lh-chart-label";
+    label.id = VAC_CHART.mainLabel;
+    label.textContent = "LH · 1H";
+    main.appendChild(label);
+    if (legacyWrap) {
+      legacyWrap.classList.add("vacuum-lh-chart-main");
+      main.appendChild(legacyWrap);
+    } else {
+      const wrap = document.createElement("div");
+      wrap.className = "psc-chart-wrap vacuum-lh-chart-main";
+      wrap.innerHTML = `<div id="${VAC_CHART.chart}" class="psc-candle-chart"></div>`;
+      main.appendChild(wrap);
+    }
+    stack.appendChild(main);
+    pane.replaceChildren(stack);
+  }
+  if (!stack.querySelector(".vacuum-lh-extra-charts")) {
+    const extra = document.createElement("div");
+    extra.className = "vacuum-lh-extra-charts";
+    extra.innerHTML = vacuumExtraChartsHtml();
+    stack.appendChild(extra);
+  }
+  const mainWrap = stack.querySelector(".vacuum-lh-main-chart .psc-chart-wrap");
+  mainWrap?.classList.add("vacuum-lh-chart-main");
+  if (!document.getElementById(VAC_CHART.mainLabel)) {
+    const main = stack.querySelector(".vacuum-lh-main-chart");
+    const p = document.createElement("p");
+    p.className = "vacuum-lh-chart-label";
+    p.id = VAC_CHART.mainLabel;
+    p.textContent = "LH · 1H";
+    main?.insertBefore(p, main.firstChild);
+  }
+}
+
+function setVacuumDetailOpen(open) {
+  document.getElementById("view-vacuum-lh")?.classList.toggle("vacuum-lh-detail-open", open);
+}
+
 function initVacuumLhTab() {
+  ensureVacuumLhChartDom();
   if (!window.__vacuumLhBound) {
     window.__vacuumLhBound = true;
     if (window.boardChart?.createRuntime) {
@@ -230,8 +297,10 @@ function updateVacuumMainChartLabel() {
 }
 
 function openVacuumLhChart() {
+  ensureVacuumLhChartDom();
   document.getElementById(VAC_CHART.listWrap)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.workspace)?.removeAttribute("hidden");
+  setVacuumDetailOpen(true);
   mountVacuumCharts();
   renderVacuumLhInfo();
 }
@@ -244,6 +313,7 @@ function closeVacuumLhChart() {
   }
   document.getElementById(VAC_CHART.workspace)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.listWrap)?.removeAttribute("hidden");
+  setVacuumDetailOpen(false);
   renderVacuumLhBoard();
 }
 
@@ -423,6 +493,7 @@ async function refreshVacuumLhChart(resetScale) {
   await Promise.all(
     VACUUM_CHART_PANELS.map((panel) => refreshVacuumPanel(panel, symbol, resetScale, live, peaks)),
   );
+  requestAnimationFrame(() => resizeVacuumLhChart());
   if (resetScale) {
     updateVacuumMainChartLabel();
     renderVacuumLhInfo();

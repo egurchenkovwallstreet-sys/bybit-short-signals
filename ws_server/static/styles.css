@@ -116,8 +116,19 @@ body {
   overflow: auto;
 }
 
+#view-vacuum-lh.vacuum-lh-detail-open {
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+#view-vacuum-lh.vacuum-lh-detail-open .psc-workspace {
+  min-height: 0;
+  align-items: start;
+}
+
 .vacuum-lh-chart-pane {
-  overflow: auto;
+  overflow: visible;
+  min-height: 0;
 }
 
 .vacuum-lh-chart-stack {
@@ -125,6 +136,16 @@ body {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
+  padding-bottom: 16px;
+}
+
+.vacuum-lh-chart-stack .psc-chart-wrap {
+  flex: none;
+}
+
+.vacuum-lh-chart-stack .psc-candle-chart {
+  min-height: 0;
+  height: 100%;
 }
 
 .vacuum-lh-chart-label {
@@ -136,9 +157,9 @@ body {
   letter-spacing: 0.04em;
 }
 
-.vacuum-lh-chart-main {
-  min-height: min(52vh, 560px);
-  flex: none;
+.vacuum-lh-chart-main.psc-chart-wrap {
+  height: min(44vh, 460px);
+  min-height: 280px;
 }
 
 .vacuum-lh-extra-charts {
@@ -146,11 +167,12 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   min-height: 0;
+  flex-shrink: 0;
 }
 
-.vacuum-lh-chart-sub {
-  min-height: min(36vh, 320px);
-  flex: none;
+.vacuum-lh-chart-sub.psc-chart-wrap {
+  height: min(32vh, 300px);
+  min-height: 220px;
 }
 
 @media (max-width: 900px) {
