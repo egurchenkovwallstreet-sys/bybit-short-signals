@@ -627,6 +627,12 @@ function onVacuumLhSnapshot(board, detail) {
   }
 }
 
+function vacuumListColumn(row) {
+  const lc = row?.live_column;
+  if (lc === "down" || lc === "up") return lc;
+  return vacuumStructureTrend(row);
+}
+
 function vacuumStructureTrend(row) {
   const key = row?.structure_trend;
   if (key === "down" || key === "up" || key === "mixed") return key;
@@ -646,9 +652,11 @@ function vacuumStructureTrend(row) {
 
 function vacuumLhCardHtml(row) {
   const sel = row.symbol === vacuumLhState.selected ? " selected" : "";
+  const hiUntil = Number(row.live_highlight_until_ms) || 0;
+  const fresh = hiUntil > Date.now() ? " vacuum-lh-card--live-new" : "";
   const peaks = (row.peaks || []).map((p) => formatVacuumPivotPrice(p, "peak")).join(" · ");
   const troughs = (row.troughs || []).map((p) => formatVacuumPivotPrice(p, "trough")).join(" · ");
-  return `<article class="vacuum-lh-card pump-strategy-card${sel}" data-symbol="${row.symbol}">
+  return `<article class="vacuum-lh-card pump-strategy-card${sel}${fresh}" data-symbol="${row.symbol}">
     <strong>${row.symbol}</strong>
     <span class="quiet">${Number(row.last_price).toFixed(4)}</span>
     <span class="quiet">−${row.gap_to_nearest_pct}% до LH</span>
@@ -685,15 +693,15 @@ function renderVacuumLhBoard() {
   }
   const buckets = { down: [], mixed: [], up: [] };
   for (const row of vacuumLhState.signals) {
-    const key = vacuumStructureTrend(row);
+    const key = vacuumListColumn(row);
     buckets[key].push(row);
   }
+  const pinSort = (a, b) =>
+    Number(b.live_pin_seq || 0) - Number(a.live_pin_seq || 0) ||
+    Number(b.gap_to_nearest_pct) - Number(a.gap_to_nearest_pct) ||
+    String(a.symbol).localeCompare(String(b.symbol));
   for (const id of ["down", "mixed", "up"]) {
-    buckets[id].sort(
-      (a, b) =>
-        Number(b.gap_to_nearest_pct) - Number(a.gap_to_nearest_pct) ||
-        String(a.symbol).localeCompare(String(b.symbol)),
-    );
+    buckets[id].sort(pinSort);
   }
   root.innerHTML = VACUUM_STRUCTURE_COLUMNS.map((col) => {
     const cards = (buckets[col.id] || []).map((row) => vacuumLhCardHtml(row)).join("");

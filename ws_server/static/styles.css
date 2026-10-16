@@ -297,6 +297,12 @@ body {
   width: 100%;
 }
 
+.vacuum-lh-card--live-new {
+  border-color: #3dd68c;
+  background: rgba(61, 214, 140, 0.12);
+  box-shadow: 0 0 0 1px rgba(61, 214, 140, 0.35);
+}
+
 .vacuum-lh-list-wrap {
   flex: 1;
   min-height: 0;

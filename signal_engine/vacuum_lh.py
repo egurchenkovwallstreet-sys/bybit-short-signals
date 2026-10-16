@@ -324,7 +324,10 @@ def build_vacuum_lh_board(
     states: dict[str, SymbolState],
     now_ms: int,
     lh_interval: str = "60",
+    live_store: object | None = None,
 ) -> dict:
+    from signal_engine.vacuum_lh_live import enrich_board_signals
+
     signals: list[dict] = []
     for state in states.values():
         if not _meets_turnover(state):
@@ -332,15 +335,28 @@ def build_vacuum_lh_board(
         row = scan_symbol(state, now_ms, lh_interval)
         if row is not None:
             signals.append(row)
-    signals.sort(key=lambda r: (-float(r["gap_to_nearest_pct"]), r["symbol"]))
+    signals = enrich_board_signals(signals, live_store)
+    signals.sort(
+        key=lambda r: (
+            -int(r.get("live_pin_seq") or 0),
+            -float(r["gap_to_nearest_pct"]),
+            r["symbol"],
+        ),
+    )
     return {"type": "vacuum_lh_board", "timestamp": now_ms, "data": {"interval": lh_interval, "signals": signals}}
 
 
-def build_vacuum_lh_boards(states: dict[str, SymbolState], now_ms: int) -> dict:
+def build_vacuum_lh_boards(
+    states: dict[str, SymbolState],
+    now_ms: int,
+    live_store: object | None = None,
+) -> dict:
     """Все TF одним сообщением — клиент переключает без повторного скана."""
+    if live_store is not None:
+        live_store.update(states, now_ms)
     intervals: dict[str, list[dict]] = {}
     for lh_interval in config.VACUUM_LH_INTERVALS:
-        board = build_vacuum_lh_board(states, now_ms, lh_interval)
+        board = build_vacuum_lh_board(states, now_ms, lh_interval, live_store)
         intervals[lh_interval] = board["data"]["signals"]
     return {
         "type": "vacuum_lh_board",

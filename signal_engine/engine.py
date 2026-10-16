@@ -19,6 +19,7 @@ from signal_engine.pump_scan import build_pump_scan_board
 from signal_engine.x2_retrace import build_x2_retrace_board
 from signal_engine.pump_strategy import build_pump_strategy_board
 from signal_engine.vacuum_lh import build_vacuum_lh_boards
+from signal_engine.vacuum_lh_live import VacuumLhLiveStore
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.pump_lab.lab import PumpLab
 from signal_engine.store import SignalStore
@@ -46,6 +47,7 @@ class Engine:
         self._vacuum_board_at_ms: int = 0
         self._vacuum_board_msg: dict | None = None
         self._vacuum_15m_bucket: int = -1
+        self._vacuum_live = VacuumLhLiveStore()
 
     def restore(self) -> None:
         self.watches.open()
@@ -130,7 +132,7 @@ class Engine:
             and now_ms - self._vacuum_board_at_ms < gap_ms
         ):
             return None
-        self._vacuum_board_msg = build_vacuum_lh_boards(self.symbols, now_ms)
+        self._vacuum_board_msg = build_vacuum_lh_boards(self.symbols, now_ms, self._vacuum_live)
         self._vacuum_board_at_ms = now_ms
         return self._vacuum_board_msg
 
