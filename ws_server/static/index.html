@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261017vac4">
+  <link rel="stylesheet" href="/static/styles.css?v=20261017vac5">
 </head>
 <body>
   <header class="topbar">
@@ -90,28 +90,10 @@
       <div id="vacuum-lh-grid" class="pump-strategy-grid"></div>
     </div>
     <div id="vacuum-lh-workspace" class="psc-workspace" hidden>
-      <div class="psc-chart-pane vacuum-lh-chart-pane">
-        <div class="vacuum-lh-chart-stack">
-          <div class="vacuum-lh-main-chart">
-            <p class="vacuum-lh-chart-label" id="vacuum-lh-main-label">LH · 1H</p>
-            <div class="psc-chart-wrap vacuum-lh-chart-main">
-              <div id="vacuum-lh-candle-chart" class="psc-candle-chart"></div>
-            </div>
-          </div>
-          <div class="vacuum-lh-extra-charts">
-            <div class="vacuum-lh-sub-chart">
-              <p class="vacuum-lh-chart-label">5m</p>
-              <div class="psc-chart-wrap vacuum-lh-chart-sub">
-                <div id="vacuum-lh-candle-chart-5" class="psc-candle-chart"></div>
-              </div>
-            </div>
-            <div class="vacuum-lh-sub-chart">
-              <p class="vacuum-lh-chart-label">15m</p>
-              <div class="psc-chart-wrap vacuum-lh-chart-sub">
-                <div id="vacuum-lh-candle-chart-15" class="psc-candle-chart"></div>
-              </div>
-            </div>
-          </div>
+      <div class="psc-chart-pane">
+        <div class="psc-tf-row" id="vacuum-lh-chart-tf-row"></div>
+        <div class="psc-chart-wrap">
+          <div id="vacuum-lh-candle-chart" class="psc-candle-chart"></div>
         </div>
       </div>
       <aside class="psc-info-pane" id="vacuum-lh-info-pane"></aside>
@@ -283,6 +265,6 @@
   <script src="/static/x2_retrace.js?v=20251008v"></script>
   <script src="/static/pump_strategy.js?v=20251008h"></script>
   <script src="/static/pump_lab.js?v=20261012study"></script>
-  <script src="/static/vacuum_lh.js?v=20261017vac4"></script>
+  <script src="/static/vacuum_lh.js?v=20261017vac5"></script>
 </body>
 </html>
