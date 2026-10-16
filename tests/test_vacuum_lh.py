@@ -9,9 +9,11 @@ from signal_engine.swing_highs import pivot_highs_asymmetric_indexed
 from signal_engine.vacuum_lh import (
     apply_peak_confluence,
     confluence_index,
+    last_higher_low_troughs,
     last_lower_high_peaks,
     price_below_recent_peaks,
     project_peaks_to_chart,
+    project_troughs_to_chart,
     scan_symbol,
 )
 
@@ -25,6 +27,10 @@ def _peak_bar(ts: int, peak: float) -> Bar:
 
 def _valley_bar(ts: int, base: float) -> Bar:
     return Bar(ts, base + 0.2, base + 0.4, base, base + 0.1, 50.0)
+
+
+def _trough_bar(ts: int, trough: float) -> Bar:
+    return Bar(ts, trough + 0.5, trough + 0.8, trough, trough + 0.3, 100.0)
 
 
 class VacuumLhPeaksTest(unittest.TestCase):
@@ -71,6 +77,34 @@ class VacuumLhPeaksTest(unittest.TestCase):
         t = 1_700_000_000_000
         proj = project_peaks_to_chart([{"time": t, "price": 1.23}], "60")
         self.assertEqual(proj[0]["time_chart_ms"], (t // 3_600_000) * 3_600_000)
+
+    def test_higher_lows_chain(self) -> None:
+        trough_prices = [80.0, 85.0, 90.0, 92.0]
+        bars: list[Bar] = []
+        t = NOW - 30 * H
+        for trough in trough_prices:
+            bars.append(_peak_bar(t, trough + 15))
+            t += H
+            bars.append(_trough_bar(t, trough))
+            t += H
+            bars.append(_peak_bar(t, trough + 12))
+            t += H
+        troughs = last_higher_low_troughs(
+            bars, "60", NOW + H, count=4, pivot_left=1, pivot_right=1
+        )
+        self.assertGreaterEqual(len(troughs), 2)
+        prices = [p["price"] for p in troughs]
+        for i in range(1, len(prices)):
+            self.assertGreater(prices[i], prices[i - 1])
+
+    def test_trough_confluence_same_time_and_price(self) -> None:
+        t = 1_700_000_000_000
+        tr60 = project_troughs_to_chart([{"time": t, "price": 3.0}], "60")
+        tr30 = project_troughs_to_chart([{"time": t, "price": 3.0}], "30")
+        idx = confluence_index({"60": tr60, "30": tr30})
+        out = apply_peak_confluence(tr60, idx)
+        self.assertTrue(out[0]["confluence"])
+        self.assertEqual(out[0]["tf_match_count"], 2)
 
     def test_confluence_same_time_and_price(self) -> None:
         t = 1_700_000_000_000

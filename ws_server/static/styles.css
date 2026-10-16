@@ -230,6 +230,40 @@ body {
   font-weight: 600;
 }
 
+.vacuum-lh-trough-x2 {
+  color: #7df9ff;
+  font-weight: 600;
+}
+
+.vacuum-lh-trough-x3 {
+  color: #e0ffff;
+  font-weight: 700;
+  text-shadow: 0 0 8px rgba(125, 249, 255, 0.35);
+}
+
+.vacuum-lh-troughs .vacuum-lh-trough-li-x2 {
+  color: #7df9ff;
+}
+
+.vacuum-lh-troughs .vacuum-lh-trough-li-x3 {
+  color: #e0ffff;
+  font-weight: 600;
+}
+
+.vacuum-lh-info-sub {
+  margin: 8px 0 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vacuum-lh-card .troughs-line {
+  display: block;
+  font-size: 12px;
+}
+
 .vacuum-lh-list-wrap {
   flex: 1;
   min-height: 0;

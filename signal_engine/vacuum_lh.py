@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import config
 from signal_engine.state import Bar, SymbolState
-from signal_engine.swing_highs import closed_bars, pivot_highs_asymmetric
+from signal_engine.swing_highs import closed_bars, pivot_highs_asymmetric, pivot_lows_asymmetric
 
 _INTERVAL_MS = {
     "5": 300_000,
@@ -64,9 +64,45 @@ def last_lower_high_peaks(
     return chain
 
 
-def _peak_match_key(p: dict) -> tuple[int, float]:
+def last_higher_low_troughs(
+    bars: list[Bar],
+    interval: str,
+    now_ms: int,
+    *,
+    count: int | None = None,
+    pivot_left: int | None = None,
+    pivot_right: int | None = None,
+) -> list[dict]:
+    """До `count` последних pivot-low, каждый выше предыдущего в цепочке (HL, от старых к новым)."""
+    n = count if count is not None else config.VACUUM_LH_PEAK_COUNT
+    pl = pivot_left if pivot_left is not None else config.VACUUM_LH_PIVOT_LEFT
+    pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
+    lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
+    closed = closed_bars(bars, interval, now_ms)
+    segment = [b for b in closed if b.timestamp >= now_ms - lookback_ms]
+    troughs = pivot_lows_asymmetric(segment, pl, pr)
+    if len(troughs) < 2:
+        return []
+    chain: list[dict] = [troughs[-1]]
+    for p in reversed(troughs[:-1]):
+        if float(p["price"]) < float(chain[0]["price"]):
+            chain.insert(0, p)
+        if len(chain) >= n:
+            break
+    if len(chain) < 2:
+        return []
+    if len(chain) > n:
+        chain = chain[-n:]
+    return chain
+
+
+def _pivot_match_key(p: dict) -> tuple[int, float]:
     t = int(p.get("time_ms") or p.get("time") or 0)
     return (t, round(float(p["price"]), 8))
+
+
+def _peak_match_key(p: dict) -> tuple[int, float]:
+    return _pivot_match_key(p)
 
 
 def lh_peaks_for_interval(state: SymbolState, now_ms: int, interval: str) -> list[dict]:
@@ -82,22 +118,34 @@ def lh_peaks_for_interval(state: SymbolState, now_ms: int, interval: str) -> lis
     return project_peaks_to_chart(chain, interval)
 
 
+def hl_troughs_for_interval(state: SymbolState, now_ms: int, interval: str) -> list[dict]:
+    if interval not in config.VACUUM_LH_CONFLUENCE_INTERVALS:
+        return []
+    bars = _bars_for_interval(state, interval)
+    if len(bars) < _min_bars(interval):
+        return []
+    chain = last_higher_low_troughs(bars, interval, now_ms)
+    if not chain:
+        return []
+    return project_troughs_to_chart(chain, interval)
+
+
 def confluence_index(peaks_by_interval: dict[str, list[dict]]) -> dict[tuple[int, float], list[str]]:
     """Ключ (time_ms, price) → список TF, где есть такая же вершина."""
     idx: dict[tuple[int, float], list[str]] = {}
     for interval, peaks in peaks_by_interval.items():
         for p in peaks:
-            key = _peak_match_key(p)
+            key = _pivot_match_key(p)
             bucket = idx.setdefault(key, [])
             if interval not in bucket:
                 bucket.append(interval)
     return idx
 
 
-def apply_peak_confluence(peaks: list[dict], index: dict[tuple[int, float], list[str]]) -> list[dict]:
+def apply_pivot_confluence(points: list[dict], index: dict[tuple[int, float], list[str]]) -> list[dict]:
     out: list[dict] = []
-    for p in peaks:
-        key = _peak_match_key(p)
+    for p in points:
+        key = _pivot_match_key(p)
         matches = list(index.get(key) or [])
         matches.sort(key=lambda x: (0 if x.isdigit() else 1, int(x) if x.isdigit() else x))
         item = dict(p)
@@ -108,12 +156,23 @@ def apply_peak_confluence(peaks: list[dict], index: dict[tuple[int, float], list
     return out
 
 
+apply_peak_confluence = apply_pivot_confluence
+
+
 def enrich_peaks_confluence(state: SymbolState, now_ms: int, peaks: list[dict]) -> list[dict]:
     by_iv = {
         iv: lh_peaks_for_interval(state, now_ms, iv) for iv in config.VACUUM_LH_CONFLUENCE_INTERVALS
     }
     index = confluence_index(by_iv)
-    return apply_peak_confluence(peaks, index)
+    return apply_pivot_confluence(peaks, index)
+
+
+def enrich_troughs_confluence(state: SymbolState, now_ms: int, troughs: list[dict]) -> list[dict]:
+    by_iv = {
+        iv: hl_troughs_for_interval(state, now_ms, iv) for iv in config.VACUUM_LH_CONFLUENCE_INTERVALS
+    }
+    index = confluence_index(by_iv)
+    return apply_pivot_confluence(troughs, index)
 
 
 def project_peaks_to_chart(peaks: list[dict], chart_interval: str) -> list[dict]:
@@ -130,6 +189,25 @@ def project_peaks_to_chart(peaks: list[dict], chart_interval: str) -> list[dict]
                 "time_ms": t,
                 "time_chart_ms": t_chart,
                 "lh_interval": chart_interval,
+            }
+        )
+    return out
+
+
+def project_troughs_to_chart(troughs: list[dict], chart_interval: str) -> list[dict]:
+    """HL-минимумы для графика (та же привязка времени, что у вершин)."""
+    step = _INTERVAL_MS.get(chart_interval, _INTERVAL_MS["60"])
+    out: list[dict] = []
+    for i, p in enumerate(troughs, start=1):
+        t = int(p["time"])
+        t_chart = (t // step) * step
+        out.append(
+            {
+                "index": i,
+                "price": round(float(p["price"]), 8),
+                "time_ms": t,
+                "time_chart_ms": t_chart,
+                "hl_interval": chart_interval,
             }
         )
     return out
@@ -169,6 +247,12 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
     if not price_below_recent_peaks(float(last), peaks):
         return None
     projected = enrich_peaks_confluence(state, now_ms, project_peaks_to_chart(peaks, lh_interval))
+    troughs_raw = last_higher_low_troughs(bars, lh_interval, now_ms)
+    projected_troughs = (
+        enrich_troughs_confluence(state, now_ms, project_troughs_to_chart(troughs_raw, lh_interval))
+        if len(troughs_raw) >= 2
+        else []
+    )
     nearest = projected[-1]["price"]
     gap_pct = (nearest - float(last)) / nearest * 100.0 if nearest > 0 else 0.0
     return {
@@ -178,6 +262,8 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
         "lh_interval": lh_interval,
         "peak_count": len(projected),
         "peaks": projected,
+        "trough_count": len(projected_troughs),
+        "troughs": projected_troughs,
         "nearest_peak_price": nearest,
         "gap_to_nearest_pct": round(gap_pct, 2),
         "updated_at": now_ms,
