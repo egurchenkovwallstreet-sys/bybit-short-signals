@@ -77,8 +77,10 @@ from signal_engine.paper.e5s_detect import (
 )
 from signal_engine.paper.impulse_detect import (
     IMPULSE_CHECK_LABELS,
+    IMPULSE5_EXTRA_MANDATORY,
     IMPULSE_MANDATORY,
     evaluate_impulse,
+    impulse_mandatory,
 )
 from signal_engine.paper.plus_detect import (
     PLUS_CHECK_LABELS,
@@ -1712,7 +1714,7 @@ class PaperStrategy:
             price,
             margin,
             ev.passed_count,
-            len(IMPULSE_MANDATORY),
+            len(impulse_mandatory(ev.minutes)),
         )
 
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
@@ -2088,6 +2090,7 @@ class PaperStrategy:
             "graf_mandatory": list(GRAF_MANDATORY),
             "dps_mandatory": list(DPS_MANDATORY),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
+            "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
             "analytics": self._analytics,
         }
 

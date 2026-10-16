@@ -82,6 +82,13 @@ class ImpulseEntryTest(unittest.TestCase):
         ev = evaluate_impulse(state, None, now, 5)
         self.assertIn("flow_side", ev.failed)
 
+    def test_impulse5_rejects_weak_body(self) -> None:
+        state, now, last_ts = _state(5, 10.0, 40.0, up=True, flat=True)
+        state.bars_1m[-1] = Bar(state.bars_1m[-1].timestamp, 1.0, 1.0005, 0.9995, 1.0002, 8.0)
+        state.last_price = 1.0002
+        ev = evaluate_impulse(state, _tape(last_ts, 5, 80.0, 20.0), now, 5)
+        self.assertIn("body_min", ev.failed)
+
 
 class ImpulseStopTest(unittest.TestCase):
     def test_short_matches_trail_20(self) -> None:

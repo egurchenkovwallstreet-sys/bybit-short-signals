@@ -134,6 +134,9 @@
     if (GRAF_VARIANTS[paper.variant]) return paper.data.graf_mandatory || [];
     if (MINI_CHART_VARIANTS[paper.variant]) return paper.data.mini_chart_mandatory || [];
     if (MINI_VARIANTS[paper.variant]) return paper.data.mini_mandatory || [];
+    if (paper.variant === "i5") {
+      return (paper.data.impulse_mandatory || []).concat(paper.data.impulse5_mandatory || []);
+    }
     if (IMPULSE_VARIANTS[paper.variant]) return paper.data.impulse_mandatory || [];
     if (PLUS_VARIANTS[paper.variant]) return paper.data.plus_mandatory || [];
     return paper.data.mandatory || [];

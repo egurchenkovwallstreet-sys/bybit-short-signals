@@ -20,11 +20,26 @@ IMPULSE_MANDATORY = (
     "flow_side",
 )
 
+IMPULSE5_EXTRA_MANDATORY = (
+    "body_min",
+    "close_strength",
+    "no_snapback",
+)
+
 IMPULSE_CHECK_LABELS = {
     "volume_x3": f"Объём свечи > ×{config.PAPER_IMPULSE_VOLUME_MIN_RATIO:g} предыдущей",
     "price_side": "Закрытие свечи в сторону сделки",
     "flow_side": f"Агрессия в сторону сделки > {config.PAPER_IMPULSE_FLOW_MIN_PCT:g}%",
+    "body_min": f"Тело 5m ≥ {config.PAPER_IMP5_MIN_BODY_PCT:g}% (импульс к локу +3% ROE)",
+    "close_strength": f"Закрытие у экстремума свечи (≤ {config.PAPER_IMP5_CLOSE_EDGE_MAX * 100:g}% диапазона)",
+    "no_snapback": f"Цена не откатила > {config.PAPER_IMP5_MAX_SNAPBACK_PCT:g}% от close импульса",
 }
+
+
+def impulse_mandatory(minutes: int) -> tuple[str, ...]:
+    if minutes == 5:
+        return IMPULSE_MANDATORY + IMPULSE5_EXTRA_MANDATORY
+    return IMPULSE_MANDATORY
 
 
 @dataclass
@@ -37,15 +52,18 @@ class ImpulseEvaluation:
 
     @property
     def passed(self) -> bool:
-        return self.side in ("long", "short") and all(self.checks[k]["ok"] for k in IMPULSE_MANDATORY)
+        keys = impulse_mandatory(self.minutes)
+        return self.side in ("long", "short") and all(self.checks.get(k, {}).get("ok") for k in keys)
 
     @property
     def failed(self) -> list[str]:
-        return [k for k in IMPULSE_MANDATORY if not self.checks[k]["ok"]]
+        keys = impulse_mandatory(self.minutes)
+        return [k for k in keys if not self.checks.get(k, {}).get("ok")]
 
     @property
     def passed_count(self) -> int:
-        return len(IMPULSE_MANDATORY) - len(self.failed)
+        keys = impulse_mandatory(self.minutes)
+        return len(keys) - len(self.failed)
 
     def to_data(self) -> dict:
         variant = config.PAPER_IMP5_VARIANT if self.minutes == 5 else config.PAPER_IMP15_VARIANT
@@ -158,6 +176,45 @@ def evaluate_impulse(
         f"доля стороны сделки > {flow_need:g}% на этой свече",
     )
 
+    if minutes == 5 and last is not None:
+        body_pct = abs(last.close - last.open) / last.open * 100.0 if last.open > 0 else None
+        checks["body_min"] = _check(
+            body_pct is not None and body_pct >= config.PAPER_IMP5_MIN_BODY_PCT,
+            _r(body_pct, 3),
+            f"≥ {config.PAPER_IMP5_MIN_BODY_PCT:g}%",
+        )
+        span = last.high - last.low
+        edge = None
+        strength_ok = None
+        if side in ("long", "short") and span > 0:
+            if side == "long":
+                edge = (last.high - last.close) / span
+            else:
+                edge = (last.close - last.low) / span
+            strength_ok = edge <= config.PAPER_IMP5_CLOSE_EDGE_MAX
+        checks["close_strength"] = _check(
+            strength_ok,
+            None if edge is None else _r(edge, 3),
+            f"≤ {config.PAPER_IMP5_CLOSE_EDGE_MAX:g} доли диапазона",
+        )
+        last_px = float(state.last_price or last.close)
+        snap_ok = None
+        snap_pct = None
+        if side == "long" and last.close > 0:
+            snap_pct = (last_px / last.close - 1.0) * 100.0
+            snap_ok = snap_pct >= -config.PAPER_IMP5_MAX_SNAPBACK_PCT
+        elif side == "short" and last.close > 0:
+            snap_pct = (last_px / last.close - 1.0) * 100.0
+            snap_ok = snap_pct <= config.PAPER_IMP5_MAX_SNAPBACK_PCT
+        checks["no_snapback"] = _check(
+            snap_ok,
+            None if snap_pct is None else _r(snap_pct, 3),
+            f"лонг: не ниже −{config.PAPER_IMP5_MAX_SNAPBACK_PCT:g}%; шорт: не выше +{config.PAPER_IMP5_MAX_SNAPBACK_PCT:g}%",
+        )
+    else:
+        for key in IMPULSE5_EXTRA_MANDATORY:
+            checks[key] = _check(True, "n/a", IMPULSE_CHECK_LABELS[key])
+
     move = None
     if last is not None and last.open > 0:
         move = (last.close / last.open - 1.0) * 100.0
@@ -174,5 +231,6 @@ def evaluate_impulse(
             "bar_ts": int(last.timestamp) if last else None,
         },
     }
-    score = 30.0 * sum(1 for key in IMPULSE_MANDATORY if checks[key]["ok"])
+    keys = impulse_mandatory(minutes)
+    score = 30.0 * sum(1 for key in keys if checks.get(key, {}).get("ok"))
     return ImpulseEvaluation(checks=checks, metrics=metrics, score=score, side=side, minutes=minutes)
