@@ -292,7 +292,8 @@ function drawVacuumPeakOverlays(runtime, peaks) {
   clearVacuumPeakOverlays(runtime);
   runtime._vacuumPeakLines = [];
   const markers = [];
-  const tzOffset = new Date().getTimezoneOffset() * 60;
+  const BC = window.boardChart;
+  const iv = vacuumLhState.lhInterval || "60";
   peaks.forEach((p, i) => {
     const price = Number(p.price);
     if (!price) return;
@@ -307,10 +308,11 @@ function drawVacuumPeakOverlays(runtime, peaks) {
         title: `LH${p.index || i + 1}`,
       }),
     );
-    const tMs = p.time_chart_ms ?? p.time_15m_ms ?? p.time_ms;
-    if (tMs) {
+    const tMs = p.time_ms ?? p.time_chart_ms ?? p.time_15m_ms;
+    const barTime = BC?.candleTime?.(tMs, iv);
+    if (barTime) {
       markers.push({
-        time: Math.floor(tMs / 1000) - tzOffset,
+        time: barTime,
         position: "aboveBar",
         color,
         shape: "circle",
