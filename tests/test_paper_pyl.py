@@ -18,34 +18,49 @@ STEP = 15 * MIN
 
 
 class PylEntryTest(unittest.TestCase):
-    def test_entry_after_two_bearish_bars(self) -> None:
+    def test_entry_below_first_bearish_close(self) -> None:
         t0 = 1_800_000_000_000
-        highs = [10, 11, 12, 20, 14, 13, 15, 14, 13]
-        lows = [9, 10, 11, 19, 13, 12, 13, 13, 12]
-        closes = [9.5, 11, 12, 19, 13.5, 12.5, 14, 13.0, 12.0]
-        opens = [10.0, 11.5, 12.5, 19.5, 14.0, 13.0, 14.5, 13.8, 12.6]
+        highs = [10, 11, 12, 20, 14, 13, 15, 14, 13, 12.5]
+        lows = [9, 10, 11, 19, 13, 12, 13, 13, 12, 11.5]
+        closes = [9.5, 11, 12, 19, 13.5, 12.5, 14, 13.0, 12.0, 11.8]
+        opens = [10.0, 11.5, 12.5, 19.5, 14.0, 13.0, 14.5, 13.8, 12.6, 12.4]
         bars = [
             Bar(t0 + i * STEP, opens[i], highs[i], lows[i], closes[i], 100.0)
             for i in range(len(highs))
         ]
-        state = SymbolState("VACUUMUSDT", bars_htf={"15": bars}, last_price=12.0)
+        state = SymbolState("VACUUMUSDT", bars_htf={"15": bars}, last_price=11.8)
         now_ms = bars[-1].timestamp + STEP
         view = evaluate_pyl(state, now_ms)
         self.assertTrue(view["passed"], view["failed"])
         self.assertIn(config.PAPER_PYL_VARIANT, view["variants"])
         self.assertEqual(view["passed_count"], len(PYL_MANDATORY))
 
-    def test_no_entry_on_bullish_confirm_candle(self) -> None:
+    def test_no_entry_when_first_after_high_is_bullish(self) -> None:
         t0 = 1_800_000_000_000
-        highs = [10, 11, 12, 20, 14, 13, 15, 14, 13]
-        lows = [9, 10, 11, 19, 13, 12, 13, 13, 12]
-        closes = [9.5, 11, 12, 19, 13.5, 12.5, 14, 13.0, 12.4]
-        opens = [10.0, 11.5, 12.5, 19.5, 14.0, 13.0, 14.5, 13.8, 12.0]
+        highs = [10, 11, 12, 20, 14, 13, 15, 14, 13, 12.5]
+        lows = [9, 10, 11, 19, 13, 12, 13, 13, 12, 11.5]
+        closes = [9.5, 11, 12, 19, 13.5, 12.5, 14, 13.2, 12.4, 11.8]
+        opens = [10.0, 11.5, 12.5, 19.5, 14.0, 13.0, 14.5, 13.0, 12.0, 12.4]
         bars = [
             Bar(t0 + i * STEP, opens[i], highs[i], lows[i], closes[i], 100.0)
             for i in range(len(highs))
         ]
-        state = SymbolState("X", bars_htf={"15": bars}, last_price=12.4)
+        state = SymbolState("X", bars_htf={"15": bars}, last_price=11.8)
+        now_ms = bars[-1].timestamp + STEP
+        view = evaluate_pyl(state, now_ms)
+        self.assertFalse(view["passed"])
+
+    def test_no_entry_when_close_not_below_bear1(self) -> None:
+        t0 = 1_800_000_000_000
+        highs = [10, 11, 12, 20, 14, 13, 15, 14, 13, 12.5]
+        lows = [9, 10, 11, 19, 13, 12, 13, 13, 12, 11.5]
+        closes = [9.5, 11, 12, 19, 13.5, 12.5, 14, 13.0, 12.0, 13.2]
+        opens = [10.0, 11.5, 12.5, 19.5, 14.0, 13.0, 14.5, 13.8, 12.6, 12.8]
+        bars = [
+            Bar(t0 + i * STEP, opens[i], highs[i], lows[i], closes[i], 100.0)
+            for i in range(len(highs))
+        ]
+        state = SymbolState("X", bars_htf={"15": bars}, last_price=13.2)
         now_ms = bars[-1].timestamp + STEP
         view = evaluate_pyl(state, now_ms)
         self.assertFalse(view["passed"])

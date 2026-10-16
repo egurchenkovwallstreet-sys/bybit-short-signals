@@ -1,4 +1,4 @@
-"""БАБЛОСОС $$$: lower high 15m; вход после двух медвежьих 15m подряд за V₂."""
+"""БАБЛОСОС $$$: lower high 15m; 1-я медвежья после V₂, вход ниже её close."""
 
 from __future__ import annotations
 
@@ -10,17 +10,15 @@ from signal_engine.swing_highs import closed_bars, pivot_highs_indexed
 PYL_MANDATORY = (
     "first_vertex",
     "lower_second",
-    "bearish_after_v2",
-    "bearish_confirm",
-    "decline_from_vertex",
+    "bearish_first_after_v2",
+    "entry_below_bearish_close",
 )
 
 PYL_CHECK_LABELS = {
     "first_vertex": "V₁ — предыдущая pivot-вершина 15m",
     "lower_second": "V₂ ниже V₁ по high (нижняя вершина)",
-    "bearish_after_v2": "1-я 15m после V₂: close < open (снижение)",
-    "bearish_confirm": "2-я 15m после V₂: close < open, затем вход",
-    "decline_from_vertex": "Close входной свечи < close V₂",
+    "bearish_first_after_v2": "1-я закрытая 15m после V₂: close < open",
+    "entry_below_bearish_close": "Close входной свечи < close 1-й медвежьей после V₂",
 }
 
 
@@ -43,10 +41,11 @@ def evaluate_pyl(state: SymbolState, now_ms: int) -> dict:
     pivots = pivot_highs_indexed(closed, wing)
     confirm_i = len(closed) - 1
     confirm = closed[confirm_i] if confirm_i >= 0 else None
-    entry_offset = config.PAPER_PYL_ENTRY_OFFSET
+    min_off = config.PAPER_PYL_ENTRY_OFFSET_MIN
+    max_off = config.PAPER_PYL_ENTRY_OFFSET_MAX
 
     match = None
-    bear1 = bear2 = None
+    bear1: Bar | None = None
     if confirm is not None and len(pivots) >= 2:
         for k in range(len(pivots) - 1, 0, -1):
             v2 = pivots[k]
@@ -54,26 +53,24 @@ def evaluate_pyl(state: SymbolState, now_ms: int) -> dict:
             vi = int(v2["bar_index"])
             if float(v2["price"]) >= float(v1["price"]) - 1e-12:
                 continue
-            if confirm_i != vi + entry_offset:
+            if confirm_i < vi + 2:
                 continue
-            v2_bar = closed[vi]
+            offset = confirm_i - vi
+            if offset < min_off or offset > max_off:
+                continue
             b1 = closed[vi + 1]
-            b2 = closed[vi + 2]
-            if not _bearish(b1) or not _bearish(b2):
+            if not _bearish(b1):
                 continue
-            if b2.timestamp != confirm.timestamp:
-                continue
-            if confirm.close >= v2_bar.close - 1e-12:
+            if confirm.close >= b1.close - 1e-12:
                 continue
             match = {
                 "v1": v1,
                 "v2": v2,
-                "offset": entry_offset,
-                "v2_bar": v2_bar,
+                "offset": offset,
+                "v2_bar": closed[vi],
                 "bear1": b1,
-                "bear2": b2,
             }
-            bear1, bear2 = b1, b2
+            bear1 = b1
             break
 
     checks = {
@@ -92,29 +89,22 @@ def evaluate_pyl(state: SymbolState, now_ms: int) -> dict:
             },
             "high(V₂) < high(V₁)",
         ),
-        "bearish_after_v2": _check(
+        "bearish_first_after_v2": _check(
             bear1 is not None and _bearish(bear1),
             None
             if bear1 is None
             else {"open": _r(bear1.open, 6), "close": _r(bear1.close, 6)},
             "close < open",
         ),
-        "bearish_confirm": _check(
-            bear2 is not None and _bearish(bear2),
+        "entry_below_bearish_close": _check(
+            match is not None and bear1 is not None and confirm is not None,
             None
-            if bear2 is None
-            else {"open": _r(bear2.open, 6), "close": _r(bear2.close, 6)},
-            "close < open, вход после 2-й",
-        ),
-        "decline_from_vertex": _check(
-            match is not None and confirm is not None,
-            None
-            if match is None or confirm is None
+            if match is None or bear1 is None or confirm is None
             else {
                 "entry_close": _r(confirm.close, 6),
-                "vertex_close": _r(match["v2_bar"].close, 6),
+                "bear1_close": _r(bear1.close, 6),
             },
-            "close входа < close V₂",
+            "close входа < close 1-й медвежьей",
         ),
     }
     failed = [k for k in PYL_MANDATORY if not checks[k]["ok"]]
@@ -133,6 +123,7 @@ def evaluate_pyl(state: SymbolState, now_ms: int) -> dict:
         metrics["v2_ts"] = int(match["v2"]["time"])
         metrics["offset_bars"] = match["offset"]
         metrics["vertex_high"] = float(match["v2"]["price"])
+        metrics["bear1_close"] = float(bear1.close) if bear1 else None
     return {
         "checks": checks,
         "metrics": metrics,
