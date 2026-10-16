@@ -267,7 +267,7 @@ PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
 PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
 PAPER_VARIANTS = (
     "t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2",
-    "mt2c", "i5", "i15",
+    "mt2c", "graf", "i5", "i15",
 )
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
@@ -285,7 +285,9 @@ PAPER_C3_VARIANT = "c3"
 PAPER_MT1_VARIANT = "mt1"
 PAPER_MT2_VARIANT = "mt2"
 PAPER_MT2C_VARIANT = "mt2c"
+PAPER_GRAF_VARIANT = "graf"
 PAPER_MINI_VARIANTS = (PAPER_MT1_VARIANT, PAPER_MT2_VARIANT)
+PAPER_GRAF_PIVOT_WING = _env_int("PAPER_GRAF_PIVOT_WING", 1)
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 

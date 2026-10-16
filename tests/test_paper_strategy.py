@@ -4,11 +4,13 @@ from pathlib import Path
 
 import config
 from signal_engine.paper.analytics import compute_analytics
+from signal_engine.paper.graf_detect import GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.detect import (
     late_entry_extension_ok,
     double_top,
     evaluate,
     find_pump,
+    PumpInfo,
     paper_entry_blocks,
     cursor3_view,
     mini_pump_floors,
@@ -681,6 +683,45 @@ def _mini_ev(metrics: dict, score: float = 8.0, passed: int = 9) -> Evaluation:
     )
     checks = {key: {"ok": i < passed, "value": 1, "need": "x"} for i, key in enumerate(keys)}
     return Evaluation(checks, metrics, score, {}, False)
+
+
+class GrafikEntryTest(unittest.TestCase):
+    def _lh_bars(self, confirm_close: float) -> tuple[SymbolState, object, int]:
+        step = 15 * MIN
+        t0 = NOW - 20 * step
+        highs = [10, 12, 14, 20, 16, 14, 12, 13, 15, max(confirm_close + 0.5, 13.0)]
+        closes = [10, 12, 14, 19, 15, 13, 12, 12.5, 14, confirm_close]
+        bars = [
+            Bar(t0 + i * step, closes[i] - 0.5, highs[i], closes[i] - 1, closes[i], 100.0)
+            for i in range(len(highs))
+        ]
+        state = SymbolState("LHUSDT")
+        state.bars_htf["15"] = bars
+        state.last_price = confirm_close
+        pump = PumpInfo(
+            kind="short",
+            trigger="4h",
+            growth_pct=35.0,
+            valley_price=10.0,
+            valley_ts=t0,
+            peak_price=20.0,
+            peak_ts=t0 + 3 * step,
+        )
+        now_ms = bars[-1].timestamp + step
+        return state, pump, now_ms
+
+    def test_lower_high_confirm_entry(self) -> None:
+        state, pump, now_ms = self._lh_bars(12.5)
+        view = evaluate_grafik(state, pump, now_ms, 5.0, False)
+        self.assertTrue(view["passed"])
+        self.assertIn(config.PAPER_GRAF_VARIANT, view["variants"])
+        self.assertEqual(len(GRAF_MANDATORY), view["passed_count"])
+
+    def test_blocks_without_confirm_break(self) -> None:
+        state, pump, now_ms = self._lh_bars(14.5)
+        view = evaluate_grafik(state, pump, now_ms, 5.0, False)
+        self.assertFalse(view["passed"])
+        self.assertNotIn(config.PAPER_GRAF_VARIANT, view["variants"])
 
 
 class MiniChartEntryTest(unittest.TestCase):
