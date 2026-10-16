@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import config
 from signal_engine.state import Bar, SymbolState
-from signal_engine.swing_highs import closed_bars, pivot_highs
+from signal_engine.swing_highs import closed_bars, pivot_highs_asymmetric
 
 _INTERVAL_MS = {
     "15": 900_000,
@@ -37,15 +37,17 @@ def last_lower_high_peaks(
     now_ms: int,
     *,
     count: int | None = None,
-    wing: int | None = None,
+    pivot_left: int | None = None,
+    pivot_right: int | None = None,
 ) -> list[dict]:
     """До `count` последних pivot-high, каждый ниже предыдущего в цепочке (от старых к новым)."""
     n = count if count is not None else config.VACUUM_LH_PEAK_COUNT
-    w = wing if wing is not None else config.VACUUM_LH_PIVOT_WING
+    pl = pivot_left if pivot_left is not None else config.VACUUM_LH_PIVOT_LEFT
+    pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
     lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
     closed = closed_bars(bars, interval, now_ms)
     segment = [b for b in closed if b.timestamp >= now_ms - lookback_ms]
-    peaks = pivot_highs(segment, w)
+    peaks = pivot_highs_asymmetric(segment, pl, pr)
     if len(peaks) < 2:
         return []
     chain: list[dict] = [peaks[-1]]

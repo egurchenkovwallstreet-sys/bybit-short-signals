@@ -704,7 +704,9 @@ def chart_tf_to_oi_interval(chart_tf: str) -> str:
 VACUUM_LH_MIN_TURNOVER_24H_USDT = _env_float("VACUUM_LH_MIN_TURNOVER_24H_USDT", 300_000.0)
 VACUUM_LH_PEAK_COUNT = _env_int("VACUUM_LH_PEAK_COUNT", 5)
 VACUUM_LH_PRICE_BELOW_LAST = _env_int("VACUUM_LH_PRICE_BELOW_LAST", 3)
-VACUUM_LH_PIVOT_WING = _env_int("VACUUM_LH_PIVOT_WING", 2)
+# Pivot-high для LH: 7 закрытых свечей слева и 2 справа с более низким high.
+VACUUM_LH_PIVOT_LEFT = _env_int("VACUUM_LH_PIVOT_LEFT", 7)
+VACUUM_LH_PIVOT_RIGHT = _env_int("VACUUM_LH_PIVOT_RIGHT", 2)
 VACUUM_LH_LOOKBACK_DAYS = _env_int("VACUUM_LH_LOOKBACK_DAYS", 14)
 VACUUM_LH_MIN_1H_BARS = _env_int("VACUUM_LH_MIN_1H_BARS", 24)
 VACUUM_LH_INTERVALS = ("30", "60", "240")

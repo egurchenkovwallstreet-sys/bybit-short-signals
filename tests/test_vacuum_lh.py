@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from signal_engine.state import Bar, SymbolState
+from signal_engine.swing_highs import pivot_highs_asymmetric_indexed
 from signal_engine.vacuum_lh import (
     last_lower_high_peaks,
     price_below_recent_peaks,
@@ -25,6 +26,18 @@ def _valley_bar(ts: int, base: float) -> Bar:
 
 
 class VacuumLhPeaksTest(unittest.TestCase):
+    def test_asymmetric_pivot_seven_left_two_right(self) -> None:
+        lows = [10.0] * 7 + [20.0, 9.0, 8.0]
+        bars = [
+            Bar(NOW + i * H, lows[i], lows[i] + 0.1, lows[i] - 0.1, lows[i], 1.0)
+            for i in range(len(lows))
+        ]
+        bars[7] = Bar(NOW + 7 * H, 18.0, 20.0, 17.0, 19.0, 1.0)
+        pivots = pivot_highs_asymmetric_indexed(bars, left=7, right=2)
+        self.assertEqual(len(pivots), 1)
+        self.assertEqual(pivots[0]["price"], 20.0)
+        self.assertEqual(pivots[0]["bar_index"], 7)
+
     def test_five_lower_highs_chain(self) -> None:
         # Убывающие вершины: 100 → 95 → 90 → 88 → 85 (между — провалы для pivot wing=1)
         peak_prices = [100.0, 95.0, 90.0, 88.0, 85.0]
@@ -37,7 +50,9 @@ class VacuumLhPeaksTest(unittest.TestCase):
             t += H
             bars.append(_valley_bar(t, peak - 4))
             t += H
-        peaks = last_lower_high_peaks(bars, "60", NOW + H, count=5, wing=1)
+        peaks = last_lower_high_peaks(
+            bars, "60", NOW + H, count=5, pivot_left=1, pivot_right=1
+        )
         self.assertGreaterEqual(len(peaks), 2)
         prices = [p["price"] for p in peaks]
         for i in range(1, len(prices)):
@@ -59,32 +74,35 @@ class VacuumLhPeaksTest(unittest.TestCase):
         peak_prices = [100.0, 90.0, 80.0, 70.0]
         bars: list[Bar] = []
         t = NOW - 50 * H
-        for _ in range(12):
+        for _ in range(20):
             bars.append(_valley_bar(t, 50.0))
             t += H
         for peak in peak_prices:
-            bars.extend(
-                [
-                    _valley_bar(t, peak - 6),
-                    _valley_bar(t + H, peak - 5),
-                    _peak_bar(t + 2 * H, peak),
-                    _valley_bar(t + 3 * H, peak - 4),
-                    _valley_bar(t + 4 * H, peak - 5),
-                ]
-            )
-            t += 5 * H
+            floor = min(40.0, peak - 20.0)
+            for _ in range(8):
+                bars.append(_valley_bar(t, floor))
+                t += H
+            bars.append(_peak_bar(t, peak))
+            t += H
+            for _ in range(3):
+                bars.append(_valley_bar(t, floor))
+                t += H
+        scan_now = t + 5 * H
+        for _ in range(6):
+            bars.append(_valley_bar(t, 35.0))
+            t += H
         state = SymbolState(
             "XUSDT",
             bars_htf={"60": bars},
             last_price=65.0,
             turnover_24h_usdt=500_000.0,
         )
-        row = scan_symbol(state, NOW + 2 * H)
+        row = scan_symbol(state, scan_now)
         self.assertIsNotNone(row)
         assert row is not None
         self.assertLess(row["last_price"], min(p["price"] for p in row["peaks"]))
         state.turnover_24h_usdt = 100_000.0
-        self.assertIsNone(scan_symbol(state, NOW + H))
+        self.assertIsNone(scan_symbol(state, scan_now))
 
 
 if __name__ == "__main__":

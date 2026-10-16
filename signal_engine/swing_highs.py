@@ -55,6 +55,32 @@ def pivot_highs_indexed(bars: list[Bar], wing: int = 3) -> list[dict]:
     return out
 
 
+def pivot_highs_asymmetric_indexed(
+    bars: list[Bar],
+    left: int = 7,
+    right: int = 2,
+) -> list[dict]:
+    """Локальный maximum: high строго выше high `left` свечей слева и `right` справа."""
+    rows = _bars_as_dicts(bars)
+    if left < 1 or right < 1 or len(rows) < left + right + 1:
+        return []
+    out: list[dict] = []
+    for i in range(left, len(rows) - right):
+        high = float(rows[i]["h"])
+        left_highs = [float(rows[j]["h"]) for j in range(i - left, i)]
+        right_highs = [float(rows[j]["h"]) for j in range(i + 1, i + right + 1)]
+        if high > max(left_highs) and high > max(right_highs):
+            out.append({"time": int(rows[i]["t"]), "price": high, "bar_index": i})
+    return out
+
+
+def pivot_highs_asymmetric(bars: list[Bar], left: int = 7, right: int = 2) -> list[dict]:
+    return [
+        {"time": p["time"], "price": p["price"]}
+        for p in pivot_highs_asymmetric_indexed(bars, left, right)
+    ]
+
+
 def loose_pivot_highs_indexed(bars: list[Bar]) -> list[dict]:
     """Мягче: high не ниже соседей слева/справа (wing=1, допуск равенства)."""
     rows = _bars_as_dicts(bars)
