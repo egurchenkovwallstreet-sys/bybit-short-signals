@@ -96,6 +96,29 @@ body {
   overflow: hidden;
 }
 
+#view-vacuum-lh.vacuum-lh-detail-open {
+  overflow-x: hidden;
+  overflow-y: auto;
+  max-height: calc(100vh - 72px);
+}
+
+#view-vacuum-lh.vacuum-lh-detail-open .psc-workspace {
+  min-height: 0;
+  height: auto;
+  align-items: start;
+}
+
+#view-vacuum-lh.vacuum-lh-detail-open .vacuum-lh-chart-wrap {
+  flex: none;
+  min-height: min(56vh, 480px);
+  max-height: min(56vh, 480px);
+}
+
+#view-vacuum-lh.vacuum-lh-detail-open .vacuum-lh-chart-wrap .psc-candle-chart {
+  min-height: 0;
+  height: 100%;
+}
+
 .pump-strategy-grid {
   display: flex;
   flex-direction: column;
