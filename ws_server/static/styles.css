@@ -1399,7 +1399,37 @@ th { cursor: pointer; color: var(--muted); }
 }
 .paper-panel h3 { margin: 0 0 6px; font-size: 15px; }
 .paper-panel h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); }
-.paper-equity { height: 220px; }
+.balance-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 16px;
+}
+.balance-view h3 { margin: 0; font-size: 15px; }
+.paper-eq-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.paper-eq-toggle {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+.paper-eq-toggle.on {
+  color: var(--eq, var(--text));
+  border-color: var(--eq, var(--blue));
+  background: rgba(255, 255, 255, 0.04);
+}
+.paper-equity {
+  flex: 1;
+  min-height: 360px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
 .paper-table { font-size: 13px; }
 .paper-table th { white-space: nowrap; cursor: default; }
 .paper-table td { white-space: nowrap; padding: 6px 8px; }

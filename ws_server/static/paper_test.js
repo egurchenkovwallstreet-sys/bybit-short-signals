@@ -13,6 +13,7 @@
     series: null,
     lines: [],
     equityChart: null,
+    equityOn: {},
     lastListFetch: 0,
     chartKey: "",
   };
@@ -191,8 +192,14 @@
   }
 
   function isVisible() {
-    const view = document.getElementById("view-paper");
-    return view && !view.hidden;
+    const paperView = document.getElementById("view-paper");
+    const balanceView = document.getElementById("view-balance");
+    return (paperView && !paperView.hidden) || (balanceView && !balanceView.hidden);
+  }
+
+  function balanceVisible() {
+    const view = document.getElementById("view-balance");
+    return !!(view && !view.hidden);
   }
 
   async function onTab() {
@@ -206,6 +213,19 @@
     }
     await fetchLists(true);
     render();
+  }
+
+  async function onBalanceTab() {
+    if (!paper.data) {
+      try {
+        const res = await fetch("/api/paper/snapshot");
+        if (res.ok) paper.data = await res.json();
+      } catch (_err) {
+        /* ignore */
+      }
+    }
+    render();
+    requestAnimationFrame(() => paper.equityChart && paper.equityChart.resize());
   }
 
   async function fetchLists(force) {
@@ -444,35 +464,132 @@
       .join("");
   }
 
+  function loadEquityOn() {
+    try {
+      const raw = JSON.parse(localStorage.getItem("paperEquityOn") || "{}");
+      if (raw && typeof raw === "object") paper.equityOn = raw;
+    } catch (_err) {
+      paper.equityOn = {};
+    }
+  }
+
+  function saveEquityOn() {
+    const on = {};
+    Object.keys(paper.equityOn).forEach((key) => {
+      if (paper.equityOn[key] === true) on[key] = true;
+    });
+    paper.equityOn = on;
+    localStorage.setItem("paperEquityOn", JSON.stringify(on));
+  }
+
+  function renderEquityToggles() {
+    const row = document.getElementById("paper-equity-toggles");
+    if (!row) return;
+    row.innerHTML = tableVariants()
+      .map((v) => {
+        const on = paper.equityOn[v] === true;
+        const color = VARIANT_COLORS[v] || "#8e9aab";
+        return `<button type="button" class="paper-eq-toggle${on ? " on" : ""}" data-variant="${v}" style="--eq:${color}">${esc(vlabel(v))}</button>`;
+      })
+      .join("");
+    row.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const variant = btn.dataset.variant;
+        paper.equityOn[variant] = paper.equityOn[variant] !== true;
+        saveEquityOn();
+        renderEquity();
+      });
+    });
+  }
+
   function renderEquity() {
+    renderEquityToggles();
     const box = document.getElementById("paper-equity");
     if (!box || typeof echarts === "undefined") return;
-    if (!paper.equityChart) paper.equityChart = echarts.init(box, null, { renderer: "canvas" });
-    const series = tableVariants().map((v) => {
+    if (!paper.equityChart) {
+      if (!balanceVisible()) return;
+      paper.equityChart = echarts.init(box, null, { renderer: "canvas" });
+    }
+    const start = Number(((paper.data && paper.data.summary) || {}).start_balance) || 1000;
+    const enabled = tableVariants().filter((v) => paper.equityOn[v] === true);
+    let yMin = start;
+    let yMax = start;
+    let t0 = Infinity;
+    let t1 = -Infinity;
+    tableVariants().forEach((v) => {
+      (vstats(v).equity || []).forEach((row) => {
+        const ts = Number(row[0]);
+        if (Number.isFinite(ts)) {
+          t0 = Math.min(t0, ts);
+          t1 = Math.max(t1, ts);
+        }
+      });
+    });
+    const series = enabled.map((v) => {
       const rows = vstats(v).equity || [];
       const color = VARIANT_COLORS[v] || "#8e9aab";
+      rows.forEach((row) => {
+        const value = Number(row[2]);
+        if (!Number.isFinite(value)) return;
+        yMin = Math.min(yMin, value);
+        yMax = Math.max(yMax, value);
+      });
       return {
         name: vlabel(v),
         type: "line",
         showSymbol: false,
-        data: rows.map((r) => [r[0], r[2]]),
-        lineStyle: { color, width: v === paper.variant ? 2.5 : 1.2 },
+        data: rows.map((row) => [row[0], row[2]]),
+        lineStyle: { color, width: 1.6 },
         itemStyle: { color },
       };
     });
+    if (!Number.isFinite(t0) || !Number.isFinite(t1)) {
+      t1 = Date.now();
+      t0 = t1 - 3_600_000;
+    }
+    if (t0 === t1) t1 = t0 + 60_000;
+    series.push({
+      name: "Старт",
+      type: "line",
+      silent: true,
+      showSymbol: false,
+      data: [[t0, start], [t1, start]],
+      lineStyle: { color: "#f3d27a", width: 1.5 },
+      itemStyle: { color: "#f3d27a" },
+      tooltip: { show: false },
+      z: 10,
+    });
+    const pad = Math.max((yMax - yMin) * 0.08, 20);
     paper.equityChart.setOption(
       {
         backgroundColor: "transparent",
-        grid: { left: 60, right: 20, top: 44, bottom: 30 },
-        tooltip: { trigger: "axis" },
-        legend: { data: series.map((s) => s.name), textStyle: { color: "#8e9aab" }, top: 0 },
+        grid: { left: 64, right: 24, top: 24, bottom: 32 },
+        tooltip: {
+          trigger: "axis",
+          formatter(params) {
+            const rows = (Array.isArray(params) ? params : [params]).filter((item) => item.seriesName !== "Старт");
+            if (!rows.length) return "";
+            const lines = rows.map((item) => {
+              const value = Array.isArray(item.value) ? item.value[1] : item.value;
+              return `${item.marker}${item.seriesName}: ${Number(value).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            });
+            return [`${rows[0].axisValueLabel || ""}`, ...lines].join("<br>");
+          },
+        },
+        legend: { show: false },
         xAxis: { type: "time", axisLabel: { color: "#8e9aab" } },
-        yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
+        yAxis: {
+          type: "value",
+          min: yMin - pad,
+          max: yMax + pad,
+          axisLabel: { color: "#8e9aab" },
+          splitLine: { lineStyle: { color: "#2c3544" } },
+        },
         series,
       },
       true,
     );
-    paper.equityChart.resize();
+    if (balanceVisible()) paper.equityChart.resize();
   }
 
   // --- таблицы ---
@@ -1020,6 +1137,8 @@
     );
   }
 
+  loadEquityOn();
+
   document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("paper-detail-close")?.addEventListener("click", () => {
       paper.selected = null;
@@ -1029,5 +1148,5 @@
   });
   window.addEventListener("resize", () => paper.equityChart && paper.equityChart.resize());
 
-  window.paperTest = { onSnapshot, onTab };
+  window.paperTest = { onSnapshot, onTab, onBalanceTab };
 })();

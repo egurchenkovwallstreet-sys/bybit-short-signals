@@ -309,11 +309,16 @@ function showTab(name) {
   document.getElementById("view-stats").hidden = name !== "stats";
   const paperView = document.getElementById("view-paper");
   if (paperView) paperView.hidden = name !== "paper";
+  const balanceView = document.getElementById("view-balance");
+  if (balanceView) balanceView.hidden = name !== "balance";
   if (name === "pump_lab") {
     showAnalysisSub(state.analysisSub || "pump_lab");
   }
   if (name === "paper" && window.paperTest) {
     requestAnimationFrame(() => window.paperTest.onTab());
+  }
+  if (name === "balance" && window.paperTest) {
+    requestAnimationFrame(() => window.paperTest.onBalanceTab());
   }
   if (name === "stats") {
     renderStats();
