@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import config
 from signal_engine.state import Bar, SymbolState
-from signal_engine.swing_highs import closed_bars, pivot_highs_asymmetric, pivot_lows_asymmetric
+from signal_engine.swing_highs import (
+    closed_bars,
+    pivot_highs_floating_left,
+    pivot_lows_floating_left,
+)
 
 _INTERVAL_MS = {
     "5": 300_000,
@@ -44,11 +48,12 @@ def last_lower_high_peaks(
     """До `count` последних pivot-high, каждый ниже предыдущего в цепочке (от старых к новым)."""
     n = count if count is not None else config.VACUUM_LH_PEAK_COUNT
     pl = pivot_left if pivot_left is not None else config.VACUUM_LH_PIVOT_LEFT
+    pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
     lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
     closed = closed_bars(bars, interval, now_ms)
     segment = [b for b in closed if b.timestamp >= now_ms - lookback_ms]
-    peaks = pivot_highs_asymmetric(segment, pl, pr)
+    peaks = pivot_highs_floating_left(segment, pl, pl_max, pr)
     if len(peaks) < 2:
         return []
     chain: list[dict] = [peaks[-1]]
@@ -76,11 +81,12 @@ def last_higher_low_troughs(
     """До `count` последних pivot-low, каждый выше предыдущего в цепочке (HL, от старых к новым)."""
     n = count if count is not None else config.VACUUM_LH_PEAK_COUNT
     pl = pivot_left if pivot_left is not None else config.VACUUM_LH_PIVOT_LEFT
+    pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
     lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
     closed = closed_bars(bars, interval, now_ms)
     segment = [b for b in closed if b.timestamp >= now_ms - lookback_ms]
-    troughs = pivot_lows_asymmetric(segment, pl, pr)
+    troughs = pivot_lows_floating_left(segment, pl, pl_max, pr)
     if len(troughs) < 2:
         return []
     chain: list[dict] = [troughs[-1]]
@@ -189,6 +195,7 @@ def project_peaks_to_chart(peaks: list[dict], chart_interval: str) -> list[dict]
                 "time_ms": t,
                 "time_chart_ms": t_chart,
                 "lh_interval": chart_interval,
+                "left_strength": int(p.get("left_strength") or config.VACUUM_LH_PIVOT_LEFT),
             }
         )
     return out
@@ -208,6 +215,7 @@ def project_troughs_to_chart(troughs: list[dict], chart_interval: str) -> list[d
                 "time_ms": t,
                 "time_chart_ms": t_chart,
                 "hl_interval": chart_interval,
+                "left_strength": int(p.get("left_strength") or config.VACUUM_LH_PIVOT_LEFT),
             }
         )
     return out

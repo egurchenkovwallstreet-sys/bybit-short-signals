@@ -5,7 +5,10 @@ from __future__ import annotations
 import unittest
 
 from signal_engine.state import Bar, SymbolState
-from signal_engine.swing_highs import pivot_highs_asymmetric_indexed
+from signal_engine.swing_highs import (
+    pivot_highs_asymmetric_indexed,
+    pivot_highs_floating_left_indexed,
+)
 from signal_engine.vacuum_lh import (
     apply_peak_confluence,
     classify_lh_hl_structure,
@@ -37,6 +40,17 @@ def _trough_bar(ts: int, trough: float) -> Bar:
 
 
 class VacuumLhPeaksTest(unittest.TestCase):
+    def test_floating_left_strength_up_to_twenty(self) -> None:
+        lows = [10.0] * 7 + [20.0, 9.0, 8.0]
+        bars = [
+            Bar(NOW + i * H, lows[i], lows[i] + 0.1, lows[i] - 0.1, lows[i], 1.0)
+            for i in range(len(lows))
+        ]
+        bars[7] = Bar(NOW + 7 * H, 18.0, 20.0, 17.0, 19.0, 1.0)
+        pivots = pivot_highs_floating_left_indexed(bars, left_min=7, left_max=20, right=2)
+        self.assertEqual(len(pivots), 1)
+        self.assertGreaterEqual(pivots[0]["left_strength"], 7)
+
     def test_asymmetric_pivot_seven_left_two_right(self) -> None:
         lows = [10.0] * 7 + [20.0, 9.0, 8.0]
         bars = [

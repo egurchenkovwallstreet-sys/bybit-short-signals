@@ -107,6 +107,101 @@ def pivot_lows_asymmetric(bars: list[Bar], left: int = 7, right: int = 2) -> lis
     ]
 
 
+def pivot_highs_floating_left_indexed(
+    bars: list[Bar],
+    left_min: int = 7,
+    left_max: int = 20,
+    right: int = 2,
+) -> list[dict]:
+    """High выше high `right` справа; слева — макс. K in [left_min..left_max], где high выше всех K свечей."""
+    rows = _bars_as_dicts(bars)
+    if left_min < 1 or left_max < left_min or right < 1 or len(rows) < left_min + right + 1:
+        return []
+    out: list[dict] = []
+    for i in range(left_min, len(rows) - right):
+        high = float(rows[i]["h"])
+        right_highs = [float(rows[j]["h"]) for j in range(i + 1, i + right + 1)]
+        if high <= max(right_highs):
+            continue
+        cap = min(left_max, i)
+        left_strength = 0
+        for k in range(cap, left_min - 1, -1):
+            left_highs = [float(rows[j]["h"]) for j in range(i - k, i)]
+            if high > max(left_highs):
+                left_strength = k
+                break
+        if left_strength < left_min:
+            continue
+        out.append(
+            {
+                "time": int(rows[i]["t"]),
+                "price": high,
+                "bar_index": i,
+                "left_strength": left_strength,
+            }
+        )
+    return out
+
+
+def pivot_highs_floating_left(
+    bars: list[Bar],
+    left_min: int = 7,
+    left_max: int = 20,
+    right: int = 2,
+) -> list[dict]:
+    return [
+        {"time": p["time"], "price": p["price"], "left_strength": p.get("left_strength", left_min)}
+        for p in pivot_highs_floating_left_indexed(bars, left_min, left_max, right)
+    ]
+
+
+def pivot_lows_floating_left_indexed(
+    bars: list[Bar],
+    left_min: int = 7,
+    left_max: int = 20,
+    right: int = 2,
+) -> list[dict]:
+    rows = _bars_as_dicts(bars)
+    if left_min < 1 or left_max < left_min or right < 1 or len(rows) < left_min + right + 1:
+        return []
+    out: list[dict] = []
+    for i in range(left_min, len(rows) - right):
+        low = float(rows[i]["l"])
+        right_lows = [float(rows[j]["l"]) for j in range(i + 1, i + right + 1)]
+        if low >= min(right_lows):
+            continue
+        cap = min(left_max, i)
+        left_strength = 0
+        for k in range(cap, left_min - 1, -1):
+            left_lows = [float(rows[j]["l"]) for j in range(i - k, i)]
+            if low < min(left_lows):
+                left_strength = k
+                break
+        if left_strength < left_min:
+            continue
+        out.append(
+            {
+                "time": int(rows[i]["t"]),
+                "price": low,
+                "bar_index": i,
+                "left_strength": left_strength,
+            }
+        )
+    return out
+
+
+def pivot_lows_floating_left(
+    bars: list[Bar],
+    left_min: int = 7,
+    left_max: int = 20,
+    right: int = 2,
+) -> list[dict]:
+    return [
+        {"time": p["time"], "price": p["price"], "left_strength": p.get("left_strength", left_min)}
+        for p in pivot_lows_floating_left_indexed(bars, left_min, left_max, right)
+    ]
+
+
 def loose_pivot_highs_indexed(bars: list[Bar]) -> list[dict]:
     """Мягче: high не ниже соседей слева/справа (wing=1, допуск равенства)."""
     rows = _bars_as_dicts(bars)

@@ -118,7 +118,11 @@ function formatVacuumInfoPivot(p, prefix, lhTf) {
     n >= 2 && p.tf_matches?.length
       ? ` · <span class="vacuum-lh-peak-tag">${p.tf_matches.map(labelTf).join(", ")}</span>`
       : "";
-  return `<li class="${cls}">${prefix}${p.index}: <strong>${p.price}</strong>${n >= 2 ? ` <span class="vacuum-lh-peak-tag">×${n} TF</span>` : ""} (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})${tfNote}</li>`;
+  const str =
+    p.left_strength >= 8
+      ? ` <span class="vacuum-lh-peak-tag" title="Свечей слева не перебили">L${p.left_strength}</span>`
+      : "";
+  return `<li class="${cls}">${prefix}${p.index}: <strong>${p.price}</strong>${str}${n >= 2 ? ` <span class="vacuum-lh-peak-tag">×${n} TF</span>` : ""} (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})${tfNote}</li>`;
 }
 
 function labelTf(code) {

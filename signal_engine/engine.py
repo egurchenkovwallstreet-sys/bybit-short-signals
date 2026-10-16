@@ -45,6 +45,7 @@ class Engine:
         self._signal_column_pending: dict[str, tuple[int, int]] = {}
         self._vacuum_board_at_ms: int = 0
         self._vacuum_board_msg: dict | None = None
+        self._vacuum_15m_bucket: int = -1
 
     def restore(self) -> None:
         self.watches.open()
@@ -119,7 +120,15 @@ class Engine:
 
     def _maybe_vacuum_board(self, now_ms: int) -> dict | None:
         gap_ms = config.VACUUM_LH_SCAN_INTERVAL_SEC * 1000
-        if self._vacuum_board_msg is not None and now_ms - self._vacuum_board_at_ms < gap_ms:
+        bucket_15m = now_ms // 900_000
+        live_15m_close = bucket_15m != self._vacuum_15m_bucket
+        if live_15m_close:
+            self._vacuum_15m_bucket = bucket_15m
+        if (
+            self._vacuum_board_msg is not None
+            and not live_15m_close
+            and now_ms - self._vacuum_board_at_ms < gap_ms
+        ):
             return None
         self._vacuum_board_msg = build_vacuum_lh_boards(self.symbols, now_ms)
         self._vacuum_board_at_ms = now_ms
