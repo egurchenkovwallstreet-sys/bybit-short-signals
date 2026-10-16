@@ -33,7 +33,9 @@ const PEAK_COLORS = ["#e9c46a", "#f4a261", "#e76f51", "#d62828", "#9d0208"];
 function initVacuumLhTab() {
   if (!window.__vacuumLhBound) {
     window.__vacuumLhBound = true;
-    vacuumLhState.chart = window.boardChart.createRuntime();
+    if (window.boardChart?.createRuntime) {
+      vacuumLhState.chart = window.boardChart.createRuntime();
+    }
     document.getElementById("vacuum-lh-grid")?.addEventListener("click", (event) => {
       const card = event.target instanceof Element ? event.target.closest(".vacuum-lh-card") : null;
       if (card?.dataset.symbol) toggleVacuumLhSymbol(card.dataset.symbol);
@@ -329,6 +331,8 @@ async function refreshVacuumLhChart(resetScale) {
   const symbol = vacuumLhState.selected;
   if (!symbol) return;
   const BC = window.boardChart;
+  if (!BC?.mount) return;
+  if (!vacuumLhState.chart) vacuumLhState.chart = BC.createRuntime();
   if (!vacuumLhState.chart.series) BC.mount(vacuumLhState.chart, VAC_CHART.chart);
   if (!vacuumLhState.chart.series) return;
   const interval = vacuumLhState.lhInterval;

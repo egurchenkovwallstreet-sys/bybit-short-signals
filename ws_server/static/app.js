@@ -77,16 +77,20 @@ function initAnalysisSubtabs() {
   });
 }
 
+function analysisViewId(subName) {
+  return ANALYSIS_SUB_VIEWS[subName] || `view-${String(subName || "").replace(/_/g, "-")}`;
+}
+
 function showAnalysisSub(name) {
   initAnalysisSubtabs();
   state.analysisSub = name;
   document.querySelectorAll(".analysis-subtab").forEach((button) => {
     button.classList.toggle("active", button.dataset.analysisSub === name);
   });
-  for (const [sub, id] of Object.entries(ANALYSIS_SUB_VIEWS)) {
-    const el = document.getElementById(id);
-    if (el) el.hidden = sub !== name;
-  }
+  const activeId = analysisViewId(name);
+  document.querySelectorAll("#view-analysis-hub > section").forEach((el) => {
+    el.hidden = el.id !== activeId;
+  });
   if (name === "pump_lab" && window.pumpLab) {
     window.pumpLab.onTab();
   }
@@ -104,9 +108,17 @@ function showAnalysisSub(name) {
       if (window.pumpStrategy?.resizeChart) window.pumpStrategy.resizeChart();
     });
   }
-  if (name === "vacuum_lh" && window.vacuumLh) {
-    window.vacuumLh.initVacuumLhTab();
-    requestAnimationFrame(() => window.vacuumLh.resizeChart?.());
+  if (name === "vacuum_lh") {
+    if (window.vacuumLh) {
+      window.vacuumLh.initVacuumLhTab();
+      requestAnimationFrame(() => window.vacuumLh.resizeChart?.());
+    } else {
+      const grid = document.getElementById("vacuum-lh-grid");
+      if (grid) {
+        grid.innerHTML =
+          '<p class="quiet pump-strategy-empty">Не загрузился скрипт вкладки. Обновите страницу: Ctrl+F5 (полная перезагрузка).</p>';
+      }
+    }
   }
   if (name === "pending") {
     renderPending();
