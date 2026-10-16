@@ -338,6 +338,35 @@ def _profit_lock_prices(
     return prices
 
 
+def pyl_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """Пылесос: до +3% ROE стоп −10% ROE, дальше как t20 (без пик−10)."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    floors = _profit_lock_prices(
+        entry, peak, lev, margin, entry_fee, funding_paid, include_plus10=False
+    )
+    if peak < config.PAPER_BE_ARM_ROE:
+        initial = net_roe_stop_price(
+            entry, margin, config.PAPER_PYL_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+        )
+        return min(initial, liquidation_price(entry, lev))
+    if peak < config.PAPER_LOCK_ARM_ROE:
+        return min(floors) if floors else price_for_roe(entry, config.PAPER_BE_LOCK_NET_ROE, lev)
+    lock_roe = max(config.PAPER_LOCK_MIN_ROE, peak - config.PAPER_TRAIL_GAP_ROE)
+    stop = price_for_roe(entry, lock_roe, lev)
+    for floor in floors:
+        stop = min(stop, floor)
+    return stop
+
+
 def trail_stop(
     entry: float,
     best_price: float,
@@ -559,6 +588,29 @@ class Position:
                 funding_paid=self.funding_paid,
             )
             self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "pyl":
+            trail = pyl_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+            )
+            stop = min(self.liq_price, trail)
+            if self.loss_cap_armed or self.gross_pnl(last) < 0:
+                self.loss_cap_armed = True
+                cap = net_roe_stop_price(
+                    self.entry_price,
+                    self.margin,
+                    config.PAPER_LOSS_CAP_ROE,
+                    self.leverage,
+                    self.entry_fee,
+                    self.funding_paid,
+                )
+                stop = min(stop, cap)
+            self.stop_price = stop
             return
         if self.side == "long":
             trail = trail_stop_long(

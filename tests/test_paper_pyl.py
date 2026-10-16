@@ -2,6 +2,7 @@
 import unittest
 
 import config
+from signal_engine.paper.position import Position, liquidation_price, net_roe_stop_price, pyl_trail_stop
 from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
 from signal_engine.state import Bar, SymbolState
 
@@ -39,6 +40,31 @@ class PylEntryTest(unittest.TestCase):
         now_ms = bars[-1].timestamp + STEP
         view = evaluate_pyl(state, now_ms)
         self.assertFalse(view["passed"])
+
+
+class PylStopTest(unittest.TestCase):
+    def test_initial_stop_minus_10_roe(self) -> None:
+        pos = Position(
+            symbol="X",
+            opened_at=0,
+            entry_price=1.0,
+            margin=50.0,
+            side="short",
+            stop_style="pyl",
+        )
+        want = net_roe_stop_price(1.0, 50.0, -10.0, 10, pos.entry_fee, 0.0)
+        self.assertAlmostEqual(pos.stop_price, min(want, pos.liq_price), places=6)
+        self.assertLess(pos.stop_price, liquidation_price(1.0, 10))
+        pos.best_price = 0.97
+        pos._sync_stop(0.97)
+        self.assertAlmostEqual(
+            pos.stop_price,
+            min(
+                pos.liq_price,
+                pyl_trail_stop(1.0, 0.97, 10, margin=50.0, entry_fee=pos.entry_fee),
+            ),
+            places=6,
+        )
 
 
 if __name__ == "__main__":

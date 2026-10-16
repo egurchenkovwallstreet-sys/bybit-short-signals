@@ -1757,7 +1757,7 @@ class PaperStrategy:
             margin=margin,
             next_funding_ts=nft,
             side="short",
-            stop_style="default",
+            stop_style=config.paper_stop_style(variant),
         )
         trade_id = self.store.insert_trade(
             {

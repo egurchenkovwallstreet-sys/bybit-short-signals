@@ -314,6 +314,7 @@ PAPER_PYL_VARIANT = "pyl"
 PAPER_PYL_PIVOT_WING = _env_int("PAPER_PYL_PIVOT_WING", 1)
 PAPER_PYL_LOOKBACK_BARS = _env_int("PAPER_PYL_LOOKBACK_BARS", 96)
 PAPER_PYL_CONFIRM_OFFSETS = (2, 3)
+PAPER_PYL_INITIAL_STOP_ROE = _env_float("PAPER_PYL_INITIAL_STOP_ROE", -10.0)
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
@@ -384,6 +385,8 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
+    if variant == PAPER_PYL_VARIANT:
+        return "pyl"
     return "default"
 
 
