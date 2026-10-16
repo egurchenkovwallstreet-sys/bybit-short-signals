@@ -895,6 +895,26 @@
     const L = labels();
     const m = ev.metrics || {};
     const p = m.pump || {};
+    const pylOnly = PYL_VARIANTS[paper.variant] || (p.kind === "pyl" && paper.variant === "pyl");
+    if (pylOnly) {
+      let html = `<h4>Условия: выполнено ${passedText(ev)} · ${esc(vlabel(paper.variant))}</h4><ul class="paper-check-list">`;
+      html += mandatory()
+        .map((key) => {
+          const c = ev.checks[key] || {};
+          return `<li class="${c.ok ? "ok" : "fail"}">${c.ok ? "✓" : "✗"} ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
+        })
+        .join("");
+      html += "</ul>";
+      if (m.v2_ts) {
+        html += kv([
+          ["V₁ / V₂", `${time(m.v1_ts)} → ${time(m.v2_ts)}`],
+          ["High V₂", price(m.vertex_high)],
+          ["Смещение подтверждения", m.offset_bars != null ? `${m.offset_bars}×15m` : "—"],
+          ["Откат от high V₂", m.pullback_from_vertex_pct != null ? `${num(m.pullback_from_vertex_pct, 2)}%` : "—"],
+        ]);
+      }
+      return html;
+    }
     const g = p.growth || {};
     const fits = (ev.variants || []).map(vbadge).join(" ");
     let html = `<h4>Условия: выполнено ${passedText(ev)}${fits ? ` · подходит под ${fits}` : ""}</h4><ul class="paper-check-list">`;

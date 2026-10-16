@@ -20,30 +20,46 @@ STEP = 15 * MIN
 class PylEntryTest(unittest.TestCase):
     def test_lower_high_confirm_on_third_bar(self) -> None:
         t0 = 1_800_000_000_000
-        highs = [10, 11, 12, 20, 14, 13, 15, 14, 13, 12.0]
-        lows = [9, 10, 11, 19, 13, 12, 13, 13, 12, 11.5]
-        closes = [9.5, 11, 12, 19, 13.5, 12.5, 14, 13.5, 12.5, 12.0]
+        highs = [8, 9, 10, 11, 20, 12, 11, 13, 14, 13, 12.0]
+        lows = [7, 8, 9, 10, 19, 11, 10, 12, 13, 12, 11.5]
+        closes = [7.5, 9, 10, 11, 19, 11.5, 10.5, 12.5, 13.5, 13.0, 13.4]
         bars = [
             Bar(t0 + i * STEP, closes[i] - 0.5, highs[i], lows[i], closes[i], 100.0)
             for i in range(len(highs))
         ]
-        state = SymbolState("VACUUMUSDT", bars_htf={"15": bars}, last_price=12.0)
+        state = SymbolState("VACUUMUSDT", bars_htf={"15": bars}, last_price=13.4)
         now_ms = bars[-1].timestamp + STEP
         view = evaluate_pyl(state, now_ms)
         self.assertTrue(view["passed"], view["failed"])
         self.assertIn(config.PAPER_PYL_VARIANT, view["variants"])
         self.assertEqual(view["passed_count"], len(PYL_MANDATORY))
+        self.assertEqual(view["metrics"]["offset_bars"], 2)
 
-    def test_first_bar_after_vertex_does_not_enter(self) -> None:
+    def test_no_entry_when_close_not_below_vertex(self) -> None:
         t0 = 1_800_000_000_000
-        highs = [10, 11, 12, 20, 14, 13, 15, 14]
-        lows = [9, 10, 11, 19, 13, 12, 13, 13]
-        closes = [9.5, 11, 12, 19, 13.5, 12.5, 14, 13.0]
+        highs = [8, 9, 10, 11, 20, 12, 11, 13, 14, 14]
+        lows = [7, 8, 9, 10, 19, 11, 10, 12, 13, 13]
+        closes = [7.5, 9, 10, 11, 19, 11.5, 10.5, 12.5, 13.5, 14.0]
         bars = [
             Bar(t0 + i * STEP, closes[i] - 0.5, highs[i], lows[i], closes[i], 100.0)
             for i in range(len(highs))
         ]
-        state = SymbolState("X", bars_htf={"15": bars}, last_price=13.0)
+        state = SymbolState("X", bars_htf={"15": bars}, last_price=14.0)
+        now_ms = bars[-1].timestamp + STEP
+        view = evaluate_pyl(state, now_ms)
+        self.assertFalse(view["passed"])
+
+    def test_rejects_micro_bounce_at_bottom(self) -> None:
+        """Отскок у дна: V₂ не max high после V₁ — входа нет."""
+        t0 = 1_800_000_000_000
+        highs = [8, 9, 10, 11, 20, 12, 11, 13, 14, 13, 12, 11, 10.5, 10.2, 10.0, 10.3, 10.1]
+        lows = [7] * len(highs)
+        closes = [h - 0.3 for h in highs]
+        bars = [
+            Bar(t0 + i * STEP, c - 0.2, highs[i], lows[i], closes[i], 100.0)
+            for i, c in enumerate(closes)
+        ]
+        state = SymbolState("X", bars_htf={"15": bars}, last_price=closes[-1])
         now_ms = bars[-1].timestamp + STEP
         view = evaluate_pyl(state, now_ms)
         self.assertFalse(view["passed"])
