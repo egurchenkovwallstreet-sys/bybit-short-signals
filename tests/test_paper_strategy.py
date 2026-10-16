@@ -518,11 +518,21 @@ class EntryGateTest(unittest.TestCase):
         self.assertIn("since_too_late", paper_entry_blocks(bad))
 
     def test_paper_entry_blocks_helper(self) -> None:
-        self.assertEqual(
-            paper_entry_blocks({"pump": {"trigger": "4h", "volume_ratio": 10}, "since_peak_min": 30}),
-            [],
-        )
-        self.assertIn("no_14d", paper_entry_blocks({"pump": {"trigger": "14d"}, "since_peak_min": 30}))
+        allowed = {"pump": {"trigger": "4h", "volume_ratio": 10}, "since_peak_min": 30, "drawdown_from_peak_pct": 5}
+        self.assertEqual(paper_entry_blocks(allowed), [])
+        self.assertIn("no_14d", paper_entry_blocks({**allowed, "pump": {"trigger": "14d", "volume_ratio": 10}}))
+
+    def test_blocks_drawdown_deeper_than_12_percent(self) -> None:
+        base = {"pump": {"trigger": "4h", "volume_ratio": 10}, "since_peak_min": 30, "drawdown_from_peak_pct": 12}
+        self.assertNotIn("drawdown_too_deep", paper_entry_blocks(base))
+        deep = {**base, "drawdown_from_peak_pct": 12.01}
+        self.assertIn("drawdown_too_deep", paper_entry_blocks(deep))
+        self.assertIn("drawdown_too_deep", paper_entry_blocks({**base, "drawdown_from_peak_pct": None}))
+        ev = self._eval()
+        ev.metrics["drawdown_from_peak_pct"] = 18.0
+        self.assertIn("drawdown_too_deep", ev.entry_blocked)
+        self.assertNotIn("t20", ev.variants)
+        self.assertNotIn("p10", ev.variants)
 
     def test_stale_last_eval_hides_blocked_variants(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

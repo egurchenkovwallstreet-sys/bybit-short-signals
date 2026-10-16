@@ -119,6 +119,7 @@ ENTRY_GATE_LABELS = {
     ),
     "late_megavol": f"объём ×{config.PAPER_ENTRY_MEGAVOL_RATIO:g}+ при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
     "late_double_top": f"двойная вершина при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
+    "drawdown_too_deep": f"откат от пика больше {config.PAPER_ENTRY_MAX_DRAWDOWN_PCT:g}%",
 }
 
 _TF_WEIGHT = {"15": 1.0, "30": 1.5, "60": 2.0, "240": 3.0}
@@ -573,6 +574,19 @@ def late_entry_extension_ok(metrics: dict) -> bool:
     return True
 
 
+def _drawdown_pct(metrics: dict) -> float | None:
+    raw = metrics.get("drawdown_from_peak_pct")
+    if isinstance(raw, bool) or raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(value) or math.isinf(value):
+        return None
+    return value
+
+
 def paper_entry_blocks(metrics: dict) -> list[str]:
     """Жёсткий шлюз поверх 9 условий. Пустой список — вход разрешён."""
     pump = metrics.get("pump") or {}
@@ -590,6 +604,9 @@ def paper_entry_blocks(metrics: dict) -> list[str]:
         blocked.append("late_megavol")
     if late and metrics.get("double_top"):
         blocked.append("late_double_top")
+    drawdown = _drawdown_pct(metrics)
+    if drawdown is None or drawdown > config.PAPER_ENTRY_MAX_DRAWDOWN_PCT:
+        blocked.append("drawdown_too_deep")
     return blocked
 
 

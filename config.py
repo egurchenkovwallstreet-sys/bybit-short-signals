@@ -288,11 +288,13 @@ PAPER_MINI_VARIANTS = (PAPER_MT1_VARIANT, PAPER_MT2_VARIANT)
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
-# Жёсткий шлюз входа (все варианты): режет поздние 14d и выдохшиеся/мегаобъёмные пампы.
+# Жёсткий шлюз входа (t20, p10, mln и копии на том же шлюзе).
 PAPER_ENTRY_SINCE_PEAK_MIN = _env_float("PAPER_ENTRY_SINCE_PEAK_MIN", 6.0)
 PAPER_ENTRY_SINCE_PEAK_MAX = _env_float("PAPER_ENTRY_SINCE_PEAK_MAX", 180.0)
 PAPER_ENTRY_LATE_MIN = _env_float("PAPER_ENTRY_LATE_MIN", 60.0)
 PAPER_ENTRY_MEGAVOL_RATIO = _env_float("PAPER_ENTRY_MEGAVOL_RATIO", 80.0)
+# Не шортить, если цена уже ушла от пика пампа дальше этого отката.
+PAPER_ENTRY_MAX_DRAWDOWN_PCT = _env_float("PAPER_ENTRY_MAX_DRAWDOWN_PCT", 12.0)
 # После PAPER_ENTRY_SINCE_PEAK_MAX (180 мин): вход разрешён, если все условия «позднего» шлюза.
 PAPER_ENTRY_LATE_EXT_MAX_DRAWDOWN_PCT = _env_float("PAPER_ENTRY_LATE_EXT_MAX_DRAWDOWN_PCT", 30.0)
 PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT = _env_float("PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT", 60.0)
