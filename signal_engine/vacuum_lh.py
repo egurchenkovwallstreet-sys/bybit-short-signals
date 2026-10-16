@@ -213,6 +213,26 @@ def project_troughs_to_chart(troughs: list[dict], chart_interval: str) -> list[d
     return out
 
 
+def classify_lh_hl_structure(peaks: list[dict], troughs: list[dict]) -> str:
+    """down | up | mixed — по последним 3 вершинам и 3 минимумам цепочки."""
+    if len(peaks) < 3 or len(troughs) < 3:
+        return "mixed"
+    peak_tail = [float(p["price"]) for p in peaks[-3:]]
+    trough_tail = [float(t["price"]) for t in troughs[-3:]]
+
+    def strictly_down(values: list[float]) -> bool:
+        return values[0] > values[1] > values[2]
+
+    def strictly_up(values: list[float]) -> bool:
+        return values[0] < values[1] < values[2]
+
+    if strictly_down(peak_tail) and strictly_down(trough_tail):
+        return "down"
+    if strictly_up(peak_tail) and strictly_up(trough_tail):
+        return "up"
+    return "mixed"
+
+
 def price_below_recent_peaks(
     last_price: float,
     peaks: list[dict],
@@ -264,6 +284,7 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
         "peaks": projected,
         "trough_count": len(projected_troughs),
         "troughs": projected_troughs,
+        "structure_trend": classify_lh_hl_structure(projected, projected_troughs),
         "nearest_peak_price": nearest,
         "gap_to_nearest_pct": round(gap_pct, 2),
         "updated_at": now_ms,

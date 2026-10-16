@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261017vac14">
+  <link rel="stylesheet" href="/static/styles.css?v=20261017vac15">
 </head>
 <body>
   <header class="topbar">
@@ -80,14 +80,14 @@
 
   <section id="view-vacuum-lh" class="pump-strategy-view" hidden>
     <p class="quiet">
-      Оборот 24h &gt; $300k. LH на выбранном TF (30m / 1H / 4H); максимум — high выше <strong>7</strong> свечей слева и <strong>2</strong> справа; в списке — цена ниже <strong>трёх последних</strong> вершин.
+      Оборот 24h &gt; $300k. Основной TF — <strong>15m</strong> (можно 30m / 1H / 4H). Pivot: high/low выше/ниже <strong>7</strong> свечей слева и <strong>2</strong> справа. В списке — цена ниже <strong>трёх последних</strong> вершин; три колонки — по последним <strong>3 вершинам и 3 минимумам</strong> цепочки.
     </p>
     <div class="vacuum-lh-toolbar">
       <div class="psc-tf-row" id="vacuum-lh-tf-row"></div>
       <span id="vacuum-lh-status" class="quiet"></span>
     </div>
     <div id="vacuum-lh-list-wrap" class="vacuum-lh-list-wrap">
-      <div id="vacuum-lh-grid" class="pump-strategy-grid"></div>
+      <div id="vacuum-lh-columns" class="columns pump-columns vacuum-lh-columns"></div>
     </div>
     <div id="vacuum-lh-workspace" class="psc-workspace" hidden>
       <div class="psc-chart-pane">
@@ -265,6 +265,6 @@
   <script src="/static/x2_retrace.js?v=20251008v"></script>
   <script src="/static/pump_strategy.js?v=20251008h"></script>
   <script src="/static/pump_lab.js?v=20261012study"></script>
-  <script src="/static/vacuum_lh.js?v=20261017vac14"></script>
+  <script src="/static/vacuum_lh.js?v=20261017vac15"></script>
 </body>
 </html>

@@ -113,9 +113,9 @@ function showAnalysisSub(name) {
       window.vacuumLh.initVacuumLhTab();
       requestAnimationFrame(() => window.vacuumLh.resizeChart?.());
     } else {
-      const grid = document.getElementById("vacuum-lh-grid");
-      if (grid) {
-        grid.innerHTML =
+      const cols = document.getElementById("vacuum-lh-columns");
+      if (cols) {
+        cols.innerHTML =
           '<p class="quiet pump-strategy-empty">Не загрузился скрипт вкладки. Обновите страницу: Ctrl+F5 (полная перезагрузка).</p>';
       }
     }

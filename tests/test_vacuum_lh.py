@@ -8,6 +8,7 @@ from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import pivot_highs_asymmetric_indexed
 from signal_engine.vacuum_lh import (
     apply_peak_confluence,
+    classify_lh_hl_structure,
     confluence_index,
     last_higher_low_troughs,
     last_lower_high_peaks,
@@ -96,6 +97,15 @@ class VacuumLhPeaksTest(unittest.TestCase):
         prices = [p["price"] for p in troughs]
         for i in range(1, len(prices)):
             self.assertGreater(prices[i], prices[i - 1])
+
+    def test_structure_trend_columns(self) -> None:
+        peaks = [{"price": 10}, {"price": 9}, {"price": 8}]
+        troughs = [{"price": 5}, {"price": 4}, {"price": 3}]
+        self.assertEqual(classify_lh_hl_structure(peaks, troughs), "down")
+        peaks_up = [{"price": 8}, {"price": 9}, {"price": 10}]
+        troughs_up = [{"price": 3}, {"price": 4}, {"price": 5}]
+        self.assertEqual(classify_lh_hl_structure(peaks_up, troughs_up), "up")
+        self.assertEqual(classify_lh_hl_structure(peaks, troughs_up), "mixed")
 
     def test_trough_confluence_same_time_and_price(self) -> None:
         t = 1_700_000_000_000

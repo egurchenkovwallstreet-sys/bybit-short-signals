@@ -1,9 +1,31 @@
-/* Пылесос LH: список 30m/1H/4H; у монеты один график, TF 5m–4H, буфер свечей на каждый TF. */
+/* Пылесос LH: список 15m/30m/1H/4H, 3 колонки; график TF 5m–4H. */
 
 const VACUUM_LIST_TF = [
+  ["15", "15m"],
   ["30", "30m"],
   ["60", "1H"],
   ["240", "4H"],
+];
+
+const VACUUM_STRUCTURE_COLUMNS = [
+  {
+    id: "down",
+    color: "vacuum-col-down",
+    title: "Снижаются",
+    hint: "3 вершины ↓ и 3 минимума ↓",
+  },
+  {
+    id: "mixed",
+    color: "vacuum-col-mixed",
+    title: "Вразрез",
+    hint: "вершины и минимумы не в одну сторону",
+  },
+  {
+    id: "up",
+    color: "vacuum-col-up",
+    title: "Растут",
+    hint: "3 вершины ↑ и 3 минимума ↑",
+  },
 ];
 
 const VACUUM_CHART_TF = [
@@ -18,8 +40,8 @@ const VACUUM_BUFFER_TF = VACUUM_CHART_TF.map(([c]) => c);
 const VACUUM_MIN_BARS = 8;
 
 const vacuumLhState = {
-  lhInterval: "60",
-  chartInterval: "60",
+  lhInterval: "15",
+  chartInterval: "15",
   byInterval: {},
   updatedAt: 0,
   loading: false,
@@ -471,6 +493,13 @@ function ingestVacuumPayload(data) {
     }
     vacuumLhState.updatedAt = data.updated_at || vacuumLhState.updatedAt;
     vacuumLhState.loaded = true;
+    const def = data.default_interval;
+    if (def && VACUUM_LIST_TF.some(([c]) => c === def) && !vacuumLhState.selected) {
+      vacuumLhState.lhInterval = def;
+      if (vacuumLhState.chartInterval === "15" || vacuumLhState.chartInterval === "60") {
+        vacuumLhState.chartInterval = def;
+      }
+    }
     applyVacuumInterval(vacuumLhState.lhInterval);
   } else if (Array.isArray(data)) {
     vacuumLhState.byInterval[vacuumLhState.lhInterval] = data;
@@ -594,6 +623,34 @@ function onVacuumLhSnapshot(board, detail) {
   }
 }
 
+function vacuumStructureTrend(row) {
+  const key = row?.structure_trend;
+  if (key === "down" || key === "up" || key === "mixed") return key;
+  const peaks = row?.peaks || [];
+  const troughs = row?.troughs || [];
+  if (peaks.length < 3 || troughs.length < 3) return "mixed";
+  const pp = peaks.slice(-3).map((p) => Number(p.price));
+  const tt = troughs.slice(-3).map((p) => Number(p.price));
+  const down = (arr) => arr[0] > arr[1] && arr[1] > arr[2];
+  const up = (arr) => arr[0] < arr[1] && arr[1] < arr[2];
+  if (down(pp) && down(tt)) return "down";
+  if (up(pp) && up(tt)) return "up";
+  return "mixed";
+}
+
+function vacuumLhCardHtml(row) {
+  const sel = row.symbol === vacuumLhState.selected ? " selected" : "";
+  const peaks = (row.peaks || []).map((p) => formatVacuumPivotPrice(p, "peak")).join(" · ");
+  const troughs = (row.troughs || []).map((p) => formatVacuumPivotPrice(p, "trough")).join(" · ");
+  return `<article class="vacuum-lh-card pump-strategy-card${sel}" data-symbol="${row.symbol}">
+    <strong>${row.symbol}</strong>
+    <span class="quiet">${Number(row.last_price).toFixed(4)}</span>
+    <span class="quiet">−${row.gap_to_nearest_pct}% до LH</span>
+    <span class="quiet peaks-line">LH: ${peaks || "—"}</span>
+    <span class="quiet troughs-line">HL: ${troughs || "—"}</span>
+  </article>`;
+}
+
 function onVacuumLhDetail(symbol, data) {
   if (!vacuumLhState.selected || vacuumLhState.selected !== symbol) return;
   mergeVacuumDetail(data);
@@ -609,30 +666,37 @@ function onVacuumLhDetail(symbol, data) {
 }
 
 function renderVacuumLhBoard() {
-  const grid = document.getElementById("vacuum-lh-grid");
-  if (!grid) return;
+  const root = document.getElementById("vacuum-lh-columns");
+  if (!root) return;
   if (vacuumLhState.loading) {
-    grid.innerHTML = '<p class="quiet pump-strategy-empty">Загрузка монет…</p>';
+    root.innerHTML = '<p class="quiet pump-strategy-empty">Загрузка монет…</p>';
     return;
   }
+  const tfLabel = labelTf(vacuumLhState.lhInterval);
   if (!vacuumLhState.signals.length) {
-    grid.innerHTML = `<p class="quiet pump-strategy-empty">На ${labelTf(vacuumLhState.lhInterval)}: нет монет с ≥3 LH и ценой ниже 3 последних вершин (оборот &gt; $300k). Список обновляется каждые ~45 с.</p>`;
+    root.innerHTML = `<p class="quiet pump-strategy-empty">На ${tfLabel}: нет монет с ≥3 LH и ценой ниже 3 последних вершин (оборот &gt; $300k). Список обновляется каждые ~45 с.</p>`;
     return;
   }
-  grid.innerHTML = vacuumLhState.signals
-    .map((row) => {
-      const sel = row.symbol === vacuumLhState.selected ? " selected" : "";
-      const peaks = (row.peaks || []).map((p) => formatVacuumPivotPrice(p, "peak")).join(" · ");
-      const troughs = (row.troughs || []).map((p) => formatVacuumPivotPrice(p, "trough")).join(" · ");
-      return `<article class="vacuum-lh-card pump-strategy-card${sel}" data-symbol="${row.symbol}">
-        <strong>${row.symbol}</strong>
-        <span class="quiet">${Number(row.last_price).toFixed(4)}</span>
-        <span class="quiet">−${row.gap_to_nearest_pct}% до LH</span>
-        <span class="quiet peaks-line">LH: ${peaks || "—"}</span>
-        <span class="quiet troughs-line">HL: ${troughs || "—"}</span>
-      </article>`;
-    })
-    .join("");
+  const buckets = { down: [], mixed: [], up: [] };
+  for (const row of vacuumLhState.signals) {
+    const key = vacuumStructureTrend(row);
+    buckets[key].push(row);
+  }
+  for (const id of ["down", "mixed", "up"]) {
+    buckets[id].sort(
+      (a, b) =>
+        Number(b.gap_to_nearest_pct) - Number(a.gap_to_nearest_pct) ||
+        String(a.symbol).localeCompare(String(b.symbol)),
+    );
+  }
+  root.innerHTML = VACUUM_STRUCTURE_COLUMNS.map((col) => {
+    const cards = (buckets[col.id] || []).map((row) => vacuumLhCardHtml(row)).join("");
+    return `<section class="column ${col.color}">
+      <h2>${col.title}</h2>
+      <p class="quiet vacuum-lh-col-hint">${col.hint} · ${tfLabel}</p>
+      ${cards || '<p class="quiet">нет монет</p>'}
+    </section>`;
+  }).join("");
 }
 
 function renderVacuumLhInfo() {

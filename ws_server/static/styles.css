@@ -264,6 +264,39 @@ body {
   font-size: 12px;
 }
 
+.vacuum-lh-columns {
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  align-items: start;
+}
+
+.vacuum-lh-columns .column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.vacuum-lh-col-hint {
+  margin: -4px 0 4px;
+  font-size: 12px;
+}
+
+.vacuum-col-down h2 {
+  color: #ff8a9b;
+}
+
+.vacuum-col-mixed h2 {
+  color: #c5d0de;
+}
+
+.vacuum-col-up h2 {
+  color: #6ee7a8;
+}
+
+.vacuum-lh-columns .vacuum-lh-card {
+  width: 100%;
+}
+
 .vacuum-lh-list-wrap {
   flex: 1;
   min-height: 0;
