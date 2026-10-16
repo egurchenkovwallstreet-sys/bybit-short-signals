@@ -267,7 +267,7 @@ PAPER_SHORT_VARIANTS = ("t20", "p10", "mln")
 PAPER_PLUS_VARIANTS = ("t20p", "p10p", "mlnp")
 PAPER_VARIANTS = (
     "t20", "p10", "mln", "t20p", "p10p", "mlnp", "lt20", "css2", "sc10", "e5s", "e5p", "c3", "mt1", "mt2",
-    "mt2c", "graf", "dps", "pyl", "i5", "i15",
+    "mt2c", "graf", "dps", "pyl", "vac", "i5", "i15",
 )
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
@@ -319,6 +319,23 @@ PAPER_PYL_INITIAL_STOP_ROE = _env_float("PAPER_PYL_INITIAL_STOP_ROE", -10.0)
 PAPER_PYL_LOSS_CAP_ROE = _env_float("PAPER_PYL_LOSS_CAP_ROE", -10.0)
 PAPER_PYL_TRAIL_ARM_ROE = _env_float("PAPER_PYL_TRAIL_ARM_ROE", 10.0)
 PAPER_PYL_TRAIL_GAP_ROE = _env_float("PAPER_PYL_TRAIL_GAP_ROE", 5.0)
+
+# Пылесос (vac): A→C→B на 5m, выход как pyl.
+PAPER_VAC_VARIANT = "vac"
+PAPER_VAC_SWING_CONFIRM = _env_int("PAPER_VAC_SWING_CONFIRM", 3)
+PAPER_VAC_LOOKBACK_BARS = _env_int("PAPER_VAC_LOOKBACK_BARS", 240)
+PAPER_VAC_ATR_PERIOD = _env_int("PAPER_VAC_ATR_PERIOD", 14)
+PAPER_VAC_MIN_ATR_PCT = _env_float("PAPER_VAC_MIN_ATR_PCT", 0.5)
+PAPER_VAC_MIN_SWING_PCT = _env_float("PAPER_VAC_MIN_SWING_PCT", 1.5)
+PAPER_VAC_MIN_AB_DIFF_PCT = _env_float("PAPER_VAC_MIN_AB_DIFF_PCT", 0.3)
+PAPER_VAC_MIN_RANGE_PCT = _env_float("PAPER_VAC_MIN_RANGE_PCT", 0.3)
+PAPER_VAC_RANGE_BARS = _env_int("PAPER_VAC_RANGE_BARS", 20)
+PAPER_VAC_PIN_WICK_RATIO = _env_float("PAPER_VAC_PIN_WICK_RATIO", 0.66)
+PAPER_VAC_PIN_BODY_RATIO = _env_float("PAPER_VAC_PIN_BODY_RATIO", 0.33)
+PAPER_VAC_ENTRY_MIN_BARS_AFTER_B_CONFIRM = _env_int("PAPER_VAC_ENTRY_MIN_BARS_AFTER_B_CONFIRM", 1)
+PAPER_VAC_ENTRY_MAX_BARS_AFTER_B_CONFIRM = _env_int("PAPER_VAC_ENTRY_MAX_BARS_AFTER_B_CONFIRM", 2)
+PAPER_VAC_PROMOTE_A_AFTER_BARS = _env_int("PAPER_VAC_PROMOTE_A_AFTER_BARS", 5)
+
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
 
@@ -389,7 +406,7 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
-    if variant == PAPER_PYL_VARIANT:
+    if variant in (PAPER_PYL_VARIANT, PAPER_VAC_VARIANT):
         return "pyl"
     return "default"
 

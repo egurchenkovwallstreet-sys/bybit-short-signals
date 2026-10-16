@@ -46,6 +46,7 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
+from signal_engine.paper.vac_detect import VAC_CHECK_LABELS, VAC_MANDATORY, evaluate_vac
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
     CSS_MANDATORY,
@@ -238,6 +239,8 @@ class PaperStrategy:
         self._impulse_used_bars: dict[tuple[str, str], int] = {}
         self._pyl_used_bars: dict[tuple[str, str], int] = {}
         self._pyl_watch: list[dict] = []
+        self._vac_used_bars: dict[tuple[str, str], int] = {}
+        self._vac_watch: list[dict] = []
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -330,6 +333,10 @@ class PaperStrategy:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
                 if bar_ts:
                     self._pyl_used_bars[(variant, row["symbol"])] = bar_ts
+            if variant == config.PAPER_VAC_VARIANT:
+                bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
+                if bar_ts:
+                    self._vac_used_bars[(variant, row["symbol"])] = bar_ts
         if config.PAPER_CSS_VARIANT not in VARIANTS:
             dropped_css = self.store.expire_kind_watching("css", "Cursor SS снят с теста", now)
             if dropped_css:
@@ -538,6 +545,7 @@ class PaperStrategy:
         self._evaluate_sc10(states, now_ms)
         self._evaluate_impulse(states, now_ms)
         self._evaluate_pyl(states, now_ms)
+        self._evaluate_vac(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -1831,6 +1839,116 @@ class PaperStrategy:
             len(PYL_MANDATORY),
         )
 
+    def _evaluate_vac(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        variant = config.PAPER_VAC_VARIANT
+        if variant not in VARIANTS:
+            return
+        cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
+        watch: list[dict] = []
+        for symbol, state in states.items():
+            if not state.last_price or len(state.bars_htf.get("5") or state.bars or []) < 30:
+                continue
+            ev_data = evaluate_vac(state, now_ms)
+            pc = int(ev_data.get("passed_count") or 0)
+            if pc > 0:
+                watch.append(
+                    {
+                        "symbol": symbol,
+                        "passed_count": pc,
+                        "failed": list(ev_data.get("failed") or []),
+                        "eval": {"vac": ev_data},
+                        "grade": ev_data.get("grade"),
+                        "score": ev_data.get("score"),
+                        "ready": bool(ev_data.get("passed")),
+                    }
+                )
+            if (variant, symbol) in self.trades:
+                continue
+            if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                continue
+            if not ev_data.get("passed"):
+                continue
+            bar_ts = int(ev_data.get("metrics", {}).get("bar_ts") or 0)
+            if bar_ts and self._vac_used_bars.get((variant, symbol)) == bar_ts:
+                continue
+            balance = self.balances[variant]
+            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+            if margin <= 0 or balance - self.used_margin(variant) < margin:
+                continue
+            self._open_vac_trade(variant, symbol, state, ev_data, margin, now_ms)
+        watch.sort(key=lambda r: (-int(r["passed_count"]), r["symbol"]))
+        self._vac_watch = watch[:100]
+
+    def _open_vac_trade(
+        self, variant: str, symbol: str, state: SymbolState, entry: dict, margin: float, now_ms: int
+    ) -> None:
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            side="short",
+            stop_style=config.paper_stop_style(variant),
+        )
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": symbol,
+                "variant": variant,
+                "candidate_id": None,
+                "kind": "vac",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": entry.get("score", 0),
+                "grade": entry.get("grade", "C"),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=symbol,
+            kind="vac",
+            pos=pos,
+            score=float(entry.get("score") or 0),
+            grade=str(entry.get("grade") or "C"),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=None,
+            last_check=now_ms,
+        )
+        bar_ts = int(entry.get("metrics", {}).get("bar_ts") or 0)
+        if bar_ts:
+            self._vac_used_bars[(variant, symbol)] = bar_ts
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт шорт %s по %s, маржа %.2f USD, условий %s/%s",
+            variant,
+            symbol,
+            price,
+            margin,
+            entry.get("passed_count"),
+            len(VAC_MANDATORY),
+        )
+
     def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
         price = float(state.last_price)
         tape = self.tape.symbols.get(cand.symbol)
@@ -2206,6 +2324,9 @@ class PaperStrategy:
             "pyl_check_labels": PYL_CHECK_LABELS,
             "pyl_mandatory": list(PYL_MANDATORY),
             "pyl_watch": list(self._pyl_watch),
+            "vac_check_labels": VAC_CHECK_LABELS,
+            "vac_mandatory": list(VAC_MANDATORY),
+            "vac_watch": list(self._vac_watch),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
             "analytics": self._analytics,
