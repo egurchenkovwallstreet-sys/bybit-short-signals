@@ -30,6 +30,7 @@ const vacuumLhState = {
   chart: null,
   bufferSymbol: null,
   bufferLoading: false,
+  _loadSeq: 0,
 };
 
 const VAC_CHART = {
@@ -100,6 +101,17 @@ function initVacuumLhTab() {
     if (window.boardChart?.createRuntime) {
       vacuumLhState.chart = window.boardChart.createRuntime();
     }
+    document.addEventListener(
+      "click",
+      (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        if (!target?.closest(".vacuum-lh-close") || !vacuumLhState.selected) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeVacuumLhChart();
+      },
+      true,
+    );
     const root = document.getElementById("view-vacuum-lh");
     root?.addEventListener("click", (event) => {
       const target = event.target instanceof Element ? event.target : null;
@@ -237,11 +249,17 @@ function paintVacuumChartFromBuffer(resetScale) {
   return drawVacuumCandles(candles, resetScale);
 }
 
+function vacuumLoadStillValid(seq, symbol) {
+  return vacuumLhState._loadSeq === seq && vacuumLhState.selected === symbol;
+}
+
 async function loadVacuumChartDisplay(resetScale) {
   const symbol = vacuumLhState.selected;
   if (!symbol) return;
+  const seq = ++vacuumLhState._loadSeq;
   setVacuumChartPlaceholder("Загрузка свечей…");
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  if (!vacuumLoadStillValid(seq, symbol)) return;
   if (!mountVacuumChart()) {
     setVacuumChartPlaceholder("График недоступен (нет lightweight-charts)");
     return;
@@ -249,10 +267,12 @@ async function loadVacuumChartDisplay(resetScale) {
   const BC = window.boardChart;
   const interval = vacuumLhState.chartInterval;
   await ensureVacuumBuffers(symbol, vacuumLhState.bufferSymbol !== symbol);
+  if (!vacuumLoadStillValid(seq, symbol)) return;
   let candles = BC.getCachedCandles(symbol, interval);
   if (candles.length < VACUUM_MIN_BARS) {
     candles = await BC.ensureCandles(null, symbol, interval, null, { refreshFallback: true });
   }
+  if (!vacuumLoadStillValid(seq, symbol)) return;
   if (candles.length < 1) {
     setVacuumChartPlaceholder("Нет данных свечей для этого TF — попробуйте 15m или 1H");
     return;
@@ -385,7 +405,13 @@ function ingestVacuumPayload(data) {
 }
 
 function findVacuumRow(symbol) {
-  return vacuumLhState.signals.find((s) => s.symbol === symbol);
+  const inList = vacuumLhState.signals.find((s) => s.symbol === symbol);
+  if (inList) return inList;
+  for (const rows of Object.values(vacuumLhState.byInterval)) {
+    const hit = (rows || []).find((s) => s.symbol === symbol);
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 async function toggleVacuumLhSymbol(symbol) {
@@ -415,6 +441,7 @@ function openVacuumLhChart() {
 }
 
 function closeVacuumLhChart() {
+  vacuumLhState._loadSeq += 1;
   vacuumLhState.selected = null;
   vacuumLhState.detail = null;
   vacuumLhState.bufferSymbol = null;
@@ -429,14 +456,28 @@ function closeVacuumLhChart() {
 
 function patchVacuumLivePrice() {
   const sym = vacuumLhState.selected;
-  if (!sym || !vacuumLhState.chart?.series || !vacuumLhState.chart._lastBars?.length) return;
+  const rt = vacuumLhState.chart;
+  if (!sym || !rt?.series || !rt._lastBars?.length) return;
   const live = findVacuumRow(sym)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
   if (live == null) return;
   const BC = window.boardChart;
-  const bars = vacuumLhState.chart._lastBars.map((b) => ({ ...b }));
+  const bars = rt._lastBars.map((b) => ({ ...b }));
   BC.patchLiveLastBar(bars, live);
-  vacuumLhState.chart.series.setData(bars);
-  vacuumLhState.chart._lastBars = bars;
+  const last = bars[bars.length - 1];
+  try {
+    rt.series.update(last);
+    if (rt.volumeSeries) {
+      rt.volumeSeries.update({
+        time: last.time,
+        value: last.volume ?? 0,
+        color:
+          last.close >= last.open ? "rgba(61, 214, 140, 0.45)" : "rgba(255, 93, 115, 0.45)",
+      });
+    }
+  } catch (_e) {
+    return;
+  }
+  rt._lastBars = bars;
   const priceEl = document.querySelector(`#${VAC_CHART.info} [data-vac-live='price']`);
   if (priceEl) priceEl.textContent = String(live);
 }
@@ -457,7 +498,9 @@ function onVacuumLhSnapshot(board, detail) {
   if (detail?.signal && vacuumLhState.selected === detail.signal.symbol) {
     mergeVacuumDetail(detail);
     renderVacuumLhInfo();
-    drawVacuumPeakOverlays(vacuumLhState.chart, getVacuumPeaks(), vacuumLhState.chartInterval);
+    if (vacuumLhState.chart?._lastBars?.length) {
+      drawVacuumPeakOverlays(vacuumLhState.chart, getVacuumPeaks(), vacuumLhState.chartInterval);
+    }
   }
 }
 
@@ -465,7 +508,9 @@ function onVacuumLhDetail(symbol, data) {
   if (!vacuumLhState.selected || vacuumLhState.selected !== symbol) return;
   mergeVacuumDetail(data);
   renderVacuumLhInfo();
-  drawVacuumPeakOverlays(vacuumLhState.chart, getVacuumPeaks(), vacuumLhState.chartInterval);
+  if (vacuumLhState.chart?._lastBars?.length) {
+    drawVacuumPeakOverlays(vacuumLhState.chart, getVacuumPeaks(), vacuumLhState.chartInterval);
+  }
 }
 
 function renderVacuumLhBoard() {
@@ -514,7 +559,7 @@ function renderVacuumLhInfo() {
   pane.innerHTML = `
     <div class="psc-info-head">
       <h3>${sym}</h3>
-      <button type="button" class="paper-btn vacuum-lh-close">Закрыть</button>
+      <button type="button" class="paper-btn vacuum-lh-close" data-action="vacuum-close">Закрыть</button>
     </div>
     <p>График <strong>${chartTf}</strong>. LH в списке: <strong>${lhTf}</strong>.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
@@ -583,6 +628,7 @@ function drawVacuumPeakOverlays(runtime, peaks, chartInterval) {
 }
 
 function resizeVacuumLhChart() {
+  if (!vacuumLhState.selected) return;
   resizeVacuumChartNow();
 }
 

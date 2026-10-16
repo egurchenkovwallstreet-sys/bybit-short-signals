@@ -108,6 +108,25 @@ body {
   align-items: start;
 }
 
+#view-vacuum-lh.vacuum-lh-detail-open .psc-chart-pane {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#view-vacuum-lh.vacuum-lh-detail-open .psc-info-pane {
+  position: relative;
+  z-index: 30;
+  pointer-events: auto;
+}
+
+#view-vacuum-lh.vacuum-lh-detail-open .vacuum-lh-close {
+  position: relative;
+  z-index: 31;
+  cursor: pointer;
+}
+
 #view-vacuum-lh.vacuum-lh-detail-open .vacuum-lh-chart-wrap {
   flex: none;
   position: relative;
