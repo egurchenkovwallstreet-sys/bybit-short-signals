@@ -599,17 +599,17 @@ class Position:
                 funding_paid=self.funding_paid,
             )
             stop = min(self.liq_price, trail)
-            if self.loss_cap_armed or self.gross_pnl(last) < 0:
+            cap = net_roe_stop_price(
+                self.entry_price,
+                self.margin,
+                config.PAPER_PYL_LOSS_CAP_ROE,
+                self.leverage,
+                self.entry_fee,
+                self.funding_paid,
+            )
+            stop = min(stop, cap)
+            if self.gross_pnl(last) < 0:
                 self.loss_cap_armed = True
-                cap = net_roe_stop_price(
-                    self.entry_price,
-                    self.margin,
-                    config.PAPER_LOSS_CAP_ROE,
-                    self.leverage,
-                    self.entry_fee,
-                    self.funding_paid,
-                )
-                stop = min(stop, cap)
             self.stop_price = stop
             return
         if self.side == "long":
