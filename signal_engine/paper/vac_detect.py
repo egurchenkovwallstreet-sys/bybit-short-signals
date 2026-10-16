@@ -28,7 +28,7 @@ VAC_CHECK_LABELS = {
 
 
 def _bars5(state: SymbolState) -> list[Bar]:
-    raw = state.bars_htf.get("5") or state.bars or []
+    raw = state.bars_htf.get("5") or []
     return [Bar(b.timestamp, b.open, b.high, b.low, b.close, b.volume) for b in raw]
 
 

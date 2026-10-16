@@ -1846,7 +1846,7 @@ class PaperStrategy:
         cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
         watch: list[dict] = []
         for symbol, state in states.items():
-            if not state.last_price or len(state.bars_htf.get("5") or state.bars or []) < 30:
+            if not state.last_price or len(state.bars_htf.get("5") or []) < 30:
                 continue
             ev_data = evaluate_vac(state, now_ms)
             pc = int(ev_data.get("passed_count") or 0)
