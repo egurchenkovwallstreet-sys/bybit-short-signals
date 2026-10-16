@@ -27,7 +27,13 @@ const vacuumLhState = {
   chart: null,
   scanTfBound: false,
   chartTfBound: false,
+  _chartPullAt: 0,
+  _hadDetail: false,
+  _refreshGen: 0,
 };
+
+let _vacuumRefreshInflight = null;
+let _vacuumRefreshQueued = null;
 
 const VAC_CHART = {
   listWrap: "vacuum-lh-list-wrap",
@@ -90,7 +96,10 @@ function setVacuumDetailOpen(open) {
 }
 
 function initVacuumLhTab() {
-  normalizeVacuumChartDom();
+  if (!window.__vacuumLhDomReady) {
+    normalizeVacuumChartDom();
+    window.__vacuumLhDomReady = true;
+  }
   if (!window.__vacuumLhBound) {
     window.__vacuumLhBound = true;
     if (window.boardChart?.createRuntime) {
@@ -281,10 +290,6 @@ function mountVacuumChart() {
   const container = document.getElementById(VAC_CHART.chart);
   if (!container) return;
   if (!vacuumLhState.chart) vacuumLhState.chart = BC.createRuntime();
-  if (vacuumLhState.chart._chartContainer !== container) {
-    destroyVacuumChartRuntime();
-    vacuumLhState.chart = BC.createRuntime();
-  }
   BC.mount(vacuumLhState.chart, VAC_CHART.chart);
 }
 
@@ -302,6 +307,8 @@ function openVacuumLhChart() {
 function closeVacuumLhChart() {
   vacuumLhState.selected = null;
   vacuumLhState.detail = null;
+  vacuumLhState._hadDetail = false;
+  vacuumLhState._chartPullAt = 0;
   clearVacuumPeakOverlays(vacuumLhState.chart);
   document.getElementById(VAC_CHART.workspace)?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.listWrap)?.removeAttribute("hidden");
@@ -309,25 +316,62 @@ function closeVacuumLhChart() {
   renderVacuumLhBoard();
 }
 
+function updateVacuumLhLive() {
+  const sym = vacuumLhState.selected;
+  if (!sym) return;
+  const row = findVacuumRow(sym);
+  const live = row?.last_price ?? vacuumLhState.detail?.signal?.last_price;
+  const rt = vacuumLhState.chart;
+  const BC = window.boardChart;
+  if (!BC || !rt?.series) return;
+  const interval = vacuumLhState.chartInterval;
+  const cached = BC.getCachedCandles(sym, interval);
+  if (cached.length >= 24) {
+    BC.drawCandles(rt, cached, interval, false, VAC_CHART.chart, live);
+    const peaks = row?.peaks || vacuumLhState.detail?.signal?.peaks || [];
+    drawVacuumPeakOverlays(rt, peaks, interval);
+  } else if (live != null && rt._lastBars?.length) {
+    const bars = rt._lastBars.map((b) => ({ ...b }));
+    BC.patchLiveLastBar(bars, live);
+    rt.series.setData(bars);
+    rt._lastBars = bars;
+  }
+  const priceEl = document.querySelector(`#${VAC_CHART.info} [data-vac-live='price']`);
+  if (priceEl && live != null) priceEl.textContent = String(live);
+}
+
+function mergeVacuumDetail(data) {
+  if (!data) return;
+  const prev = vacuumLhState.detail;
+  vacuumLhState.detail = data;
+  const chartIv = vacuumLhState.chartInterval;
+  if (data.interval && data.interval !== chartIv && prev?.interval === chartIv && prev?.candles?.length) {
+    vacuumLhState.detail.candles = prev.candles;
+    vacuumLhState.detail.interval = chartIv;
+  }
+}
+
 function onVacuumLhBoard(data) {
   ingestVacuumPayload(data);
-  if (vacuumLhState.selected) void refreshVacuumLhChart(false);
+  if (vacuumLhState.selected) updateVacuumLhLive();
 }
 
 function onVacuumLhSnapshot(board, detail) {
   ingestVacuumPayload(board);
   if (detail?.signal && vacuumLhState.selected === detail.signal.symbol) {
-    vacuumLhState.detail = detail;
+    mergeVacuumDetail(detail);
     renderVacuumLhInfo();
-    void refreshVacuumLhChart(false);
+    void refreshVacuumLhChart(!vacuumLhState._hadDetail);
+    vacuumLhState._hadDetail = true;
   }
 }
 
 function onVacuumLhDetail(symbol, data) {
   if (!vacuumLhState.selected || vacuumLhState.selected !== symbol) return;
-  vacuumLhState.detail = data;
+  mergeVacuumDetail(data);
   renderVacuumLhInfo();
-  void refreshVacuumLhChart(false);
+  void refreshVacuumLhChart(!vacuumLhState._hadDetail);
+  vacuumLhState._hadDetail = true;
 }
 
 function redrawVacuumLhPeakOverlays(peaks) {
@@ -385,7 +429,7 @@ function renderVacuumLhInfo() {
       <button type="button" class="paper-btn vacuum-lh-close">Закрыть</button>
     </div>
     <p>График <strong>${chartTf}</strong>. LH посчитаны на <strong>${scanTf}</strong> (кнопки над списком).</p>
-    <p>Цена: <strong>${row.last_price ?? "—"}</strong></p>
+    <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <ul class="vacuum-lh-peaks">${list || "<li>—</li>"}</ul>`;
 }
 
@@ -450,11 +494,33 @@ function drawVacuumPeakOverlays(runtime, peaks, chartInterval) {
   }
 }
 
-async function refreshVacuumLhChart(resetScale) {
+function refreshVacuumLhChart(resetScale) {
+  if (_vacuumRefreshInflight) {
+    _vacuumRefreshQueued = resetScale || _vacuumRefreshQueued;
+    return _vacuumRefreshInflight;
+  }
+  _vacuumRefreshInflight = refreshVacuumLhChartInner(resetScale).finally(() => {
+    _vacuumRefreshInflight = null;
+    if (_vacuumRefreshQueued !== null) {
+      const q = _vacuumRefreshQueued;
+      _vacuumRefreshQueued = null;
+      refreshVacuumLhChart(q);
+    }
+  });
+  return _vacuumRefreshInflight;
+}
+
+async function refreshVacuumLhChartInner(resetScale) {
   const symbol = vacuumLhState.selected;
   if (!symbol) return;
   const BC = window.boardChart;
   if (!BC?.mount) return;
+  if (!resetScale) {
+    updateVacuumLhLive();
+    const now = Date.now();
+    if (vacuumLhState._chartPullAt && now - vacuumLhState._chartPullAt < 12_000) return;
+    vacuumLhState._chartPullAt = now;
+  }
   mountVacuumChart();
   if (!vacuumLhState.chart?.series) {
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -462,15 +528,19 @@ async function refreshVacuumLhChart(resetScale) {
   }
   if (!vacuumLhState.chart?.series) return;
   const interval = vacuumLhState.chartInterval;
-  const gen = ++vacuumLhState.chart.chartGen;
+  const gen = ++vacuumLhState._refreshGen;
   BC.scheduleAssetsPrefetch([symbol], { intervals: chartPrefetchIntervals(), book: true, priority: "high" });
   BC.paintCandlesFromCache(vacuumLhState.chart, symbol, interval, resetScale, VAC_CHART.chart);
   const detailForFetch =
     vacuumLhState.detail?.interval === interval ? vacuumLhState.detail : null;
-  const candles = await BC.ensureCandles(null, symbol, interval, detailForFetch, {
+  let candles = await BC.ensureCandles(null, symbol, interval, detailForFetch, {
     refreshFallback: resetScale,
   });
-  if (gen !== vacuumLhState.chart.chartGen) return;
+  if (gen !== vacuumLhState._refreshGen) return;
+  if (!candles.length && vacuumLhState.chart._lastBars?.length) {
+    candles = BC.getCachedCandles(symbol, interval);
+  }
+  if (!candles.length && vacuumLhState.chart._lastBars?.length) return;
   if (vacuumLhState.detail) {
     vacuumLhState.detail.candles = candles;
     vacuumLhState.detail.interval = interval;
