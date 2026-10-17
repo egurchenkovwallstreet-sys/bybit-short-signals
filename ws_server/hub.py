@@ -307,6 +307,7 @@ class Hub:
                     },
                     "updated_at": self.cache.vacuum_lh_updated_at,
                     "default_interval": config.VACUUM_LH_DEFAULT_INTERVAL,
+                    "chart_pivots": self.cache.vacuum_lh_chart_pivots,
                 }
             pump_lab = self.cache.view_pump_lab_board() if self.pump_lab_dirty else None
             send_detail = self.market_dirty
@@ -360,14 +361,20 @@ class Hub:
                                 "demo": self.demo,
                             }
                         )
-                    if client.vacuum_lh_symbol and (send_detail or client.force_vacuum_lh_detail):
+                    # Скан сам обновляет detail: новый pivot не ждёт market_dirty.
+                    if client.vacuum_lh_symbol and (
+                        send_detail or client.force_vacuum_lh_detail or vacuum_lh_payload is not None
+                    ):
+                        detail = self.cache.vacuum_lh_detail(
+                            client.vacuum_lh_symbol, client.vacuum_lh_chart_interval
+                        )
+                        if detail:
+                            detail = {key: value for key, value in detail.items() if key != "candles"}
                         await client.websocket.send_json(
                             {
                                 "type": "vacuum_lh_detail",
                                 "symbol": client.vacuum_lh_symbol,
-                                "data": self.cache.vacuum_lh_detail(
-                                    client.vacuum_lh_symbol, client.vacuum_lh_chart_interval
-                                ),
+                                "data": detail,
                             }
                         )
                         client.force_vacuum_lh_detail = False

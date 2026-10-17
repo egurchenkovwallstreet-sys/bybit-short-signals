@@ -70,6 +70,20 @@ def _patch_signal_oi_from_cache(signal: dict[str, Any] | None, oi_rows: list[dic
         signal["oi_change_4h_pct"] = round(h4, 2)
 
 
+def merge_kline_candles(existing: list[dict[str, Any]] | None, incoming: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Хвост свечей поверх уже лежащего ряда. Полные 14–30 дней заново не качаем."""
+    merged: dict[int, dict[str, Any]] = {}
+    for row in existing or []:
+        ts = row.get("timestamp")
+        if ts is not None:
+            merged[int(ts)] = row
+    for row in incoming or []:
+        ts = row.get("timestamp")
+        if ts is not None:
+            merged[int(ts)] = row
+    return [merged[key] for key in sorted(merged)]
+
+
 class MarketCache:
     def __init__(self) -> None:
         self.columns: list[dict[str, Any]] = []
@@ -99,6 +113,7 @@ class MarketCache:
         self.vacuum_lh_default_interval = config.VACUUM_LH_DEFAULT_INTERVAL
         self.vacuum_lh_updated_at: int = 0
         self.vacuum_lh_by_symbol: dict[str, dict[str, Any]] = {}
+        self.vacuum_lh_chart_pivots: dict[str, dict[str, Any]] = {}
         self.pump_lab_board: dict[str, Any] = {}
 
     def apply(self, message: dict[str, Any]) -> str | None:
@@ -131,6 +146,9 @@ class MarketCache:
             else:
                 iv = str(data.get("interval") or config.VACUUM_LH_DEFAULT_INTERVAL)
                 self.vacuum_lh_intervals = {iv: list(data.get("signals") or [])}
+            pivots = data.get("chart_pivots")
+            if isinstance(pivots, dict):
+                self.vacuum_lh_chart_pivots = {str(k): dict(v or {}) for k, v in pivots.items()}
             self.vacuum_lh_updated_at = int(message.get("timestamp") or 0)
             self._reindex_vacuum_lh(self.vacuum_lh_default_interval)
             return "vacuum_lh"
@@ -219,37 +237,41 @@ class MarketCache:
             "intervals": list(self.vacuum_lh_intervals.keys()),
             "updated_at": self.vacuum_lh_updated_at,
             "signals": out,
+            "chart_pivots": self.vacuum_lh_chart_pivots,
         }
 
     def vacuum_lh_detail(self, symbol: str, chart_interval: str = "60") -> dict[str, Any] | None:
-        from signal_engine.vacuum_lh import (
-            all_anchor_peaks,
-            all_anchor_troughs,
-            bars_from_candle_rows,
-        )
+        from signal_engine.vacuum_lh import chart_pivots_from_candles, union_pivot_points
 
         signal = self.vacuum_lh_by_symbol.get(symbol)
         if not signal:
-            return None
+            scanned = (self.vacuum_lh_chart_pivots.get(str(chart_interval)) or {}).get(symbol)
+            if not scanned:
+                return None
+            signal = {"symbol": symbol, "lh_interval": chart_interval}
         candles = self.klines.get((symbol, chart_interval), [])
         sig = dict(signal)
         live = self.mark_price.get(symbol)
         if live is not None:
             sig["last_price"] = float(live)
         now_ms = int(self.vacuum_lh_updated_at or 0) or int(time.time() * 1000)
-        bars = bars_from_candle_rows(candles)
-        anchor_peaks = all_anchor_peaks(bars, chart_interval, now_ms) if bars else []
-        anchor_troughs = all_anchor_troughs(bars, chart_interval, now_ms) if bars else []
-        if not anchor_peaks and str(sig.get("lh_interval")) == str(chart_interval):
-            anchor_peaks = list(sig.get("all_peaks") or sig.get("peaks") or [])
-        if not anchor_troughs and str(sig.get("lh_interval")) == str(chart_interval):
-            anchor_troughs = list(sig.get("all_troughs") or sig.get("troughs") or [])
+        packed = chart_pivots_from_candles(candles, chart_interval, now_ms) if candles else {}
+        anchor_peaks = list(packed.get("anchor_peaks") or [])
+        anchor_troughs = list(packed.get("anchor_troughs") or [])
+        if str(sig.get("lh_interval")) == str(chart_interval):
+            anchor_peaks = union_pivot_points(anchor_peaks, sig.get("all_peaks"))
+            anchor_troughs = union_pivot_points(anchor_troughs, sig.get("all_troughs"))
+        scanned = (self.vacuum_lh_chart_pivots.get(str(chart_interval)) or {}).get(symbol) or {}
+        anchor_peaks = union_pivot_points(anchor_peaks, scanned.get("all_peaks"))
+        anchor_troughs = union_pivot_points(anchor_troughs, scanned.get("all_troughs"))
         return {
             "signal": sig,
             "interval": chart_interval,
             "candles": candles,
             "anchor_peaks": anchor_peaks,
             "anchor_troughs": anchor_troughs,
+            "peaks": packed.get("peaks") or scanned.get("peaks") or [],
+            "troughs": packed.get("troughs") or scanned.get("troughs") or [],
             "anchor_days": config.VACUUM_LH_LOOKBACK_DAYS,
             "book": self.book_view(symbol),
             "funding_rate": self.funding.get(symbol),

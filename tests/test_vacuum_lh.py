@@ -13,6 +13,7 @@ from signal_engine.swing_highs import (
 from signal_engine.vacuum_lh import (
     all_anchor_peaks,
     apply_peak_confluence,
+    build_vacuum_lh_boards,
     classify_lh_hl_structure,
     hour_range_pct,
     structure_trend_on_interval,
@@ -20,10 +21,12 @@ from signal_engine.vacuum_lh import (
     confluence_index,
     last_higher_low_troughs,
     last_lower_high_peaks,
+    pivots_from_bars,
     price_below_recent_peaks,
     project_peaks_to_chart,
     project_troughs_to_chart,
     scan_symbol,
+    union_pivot_points,
 )
 
 H = 3_600_000
@@ -276,6 +279,38 @@ class VacuumHourRangeTest(unittest.TestCase):
         )
         self.assertIsNone(hour_range_pct(state, now, 100.0))
         self.assertIsNone(scan_symbol(state, now))
+
+
+class VacuumChartPivotTest(unittest.TestCase):
+    def test_union_keeps_old_and_new(self) -> None:
+        old = [{"time_ms": 1, "price": 10.0, "left_strength": 15, "index": 1}]
+        fresh = [{"time_ms": 2, "price": 12.0, "left_strength": 22, "tf_match_count": 1}]
+        out = union_pivot_points(old, fresh)
+        self.assertEqual([p["price"] for p in out], [10.0, 12.0])
+
+    def test_board_carries_5m_chart_pivots(self) -> None:
+        board = build_vacuum_lh_boards({}, NOW)
+        self.assertIn("5", board["data"]["chart_pivots"])
+
+    def test_anchor_outside_lh_chain_stays(self) -> None:
+        bars: list[Bar] = []
+        t = NOW - 400 * H
+        peaks = [100.0, 70.0, 90.0, 60.0, 80.0]
+        for peak in peaks:
+            for _ in range(40):
+                bars.append(_valley_bar(t, peak - 30.0))
+                t += H
+            bars.append(_peak_bar(t, peak))
+            t += H
+        for _ in range(8):
+            bars.append(_valley_bar(t, 20.0))
+            t += H
+        scan_now = t
+        packed = pivots_from_bars(bars, "60", scan_now)
+        anchor_px = {round(float(p["price"]), 4) for p in packed["anchor_peaks"]}
+        chain_px = {round(float(p["price"]), 4) for p in packed["peaks"]}
+        self.assertTrue(chain_px)
+        self.assertTrue(anchor_px - chain_px)
 
 
 if __name__ == "__main__":

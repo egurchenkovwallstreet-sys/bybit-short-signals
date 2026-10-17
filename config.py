@@ -694,6 +694,10 @@ CHART_TF_TO_OI_INTERVAL = {
 }
 
 
+def kline_bar_ms(interval: str) -> int:
+    return _KLINE_BAR_MINUTES.get(interval, 60) * 60_000
+
+
 def kline_bars_for_days(interval: str, days: int | None = None) -> int:
     import math
 
@@ -702,12 +706,32 @@ def kline_bars_for_days(interval: str, days: int | None = None) -> int:
     return max(10, int(math.ceil(span * 24 * 60 / minutes)))
 
 
+def kline_tail_fresh(last_ts_ms: int, interval: str, now_ms: int) -> bool:
+    """Последняя свеча — текущий бар (биржа отдаёт и незакрытую)."""
+    bar_ms = kline_bar_ms(interval)
+    if bar_ms <= 0 or int(last_ts_ms or 0) <= 0:
+        return False
+    bucket = (int(now_ms) // bar_ms) * bar_ms
+    return int(last_ts_ms) >= bucket
+
+
+def kline_history_complete(oldest_ts_ms: int, interval: str, days: int, now_ms: int) -> bool:
+    """Ряд достаёт до начала окна days, а не обрывается на коротком кэше."""
+    if int(oldest_ts_ms or 0) <= 0 or int(days or 0) <= 0:
+        return False
+    cutoff = int(now_ms) - int(days) * 86_400_000
+    return int(oldest_ts_ms) <= cutoff + kline_bar_ms(interval) * 2
+
+
 def kline_cache_servable(count: int, last_ts_ms: int, interval: str, min_bars: int, now_ms: int) -> bool:
-    """Можно отдать свечи из памяти, не запрашивая биржу ещё раз."""
+    """Можно отдать свечи из памяти, не запрашивая биржу ещё раз.
+
+    Полный ряд с устаревшим хвостом не отдаём: последняя свеча должна быть текущим баром.
+    """
     if count <= 0:
         return False
     if count >= min_bars:
-        return True
+        return kline_tail_fresh(last_ts_ms, interval, now_ms)
     if count < 48 or last_ts_ms <= 0:
         return False
     minutes = _KLINE_BAR_MINUTES.get(interval, 60)

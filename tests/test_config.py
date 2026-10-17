@@ -20,6 +20,14 @@ class ConfigDefaultsTest(unittest.TestCase):
         self.assertFalse(config.kline_cache_servable(10, now, "5", full, now))
         self.assertTrue(config.kline_cache_servable(60, now, "5", full, now))
         self.assertFalse(config.kline_cache_servable(60, now - 3_600_000, "5", full, now))
+        bar = 300_000
+        bucket = (now // bar) * bar
+        stale = bucket - bar
+        self.assertTrue(config.kline_tail_fresh(bucket, "5", now))
+        self.assertFalse(config.kline_tail_fresh(stale, "5", now))
+        self.assertFalse(config.kline_cache_servable(full, stale, "5", full, now))
+        self.assertTrue(config.kline_history_complete(now - 14 * 86_400_000, "5", 14, now))
+        self.assertFalse(config.kline_history_complete(now - 3_600_000, "5", 14, now))
 
     def test_reconnect_backoff(self) -> None:
         self.assertEqual(config.RECONNECT_DELAYS_SEC, (1, 2, 4, 8))

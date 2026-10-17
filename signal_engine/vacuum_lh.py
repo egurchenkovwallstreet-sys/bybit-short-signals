@@ -281,6 +281,87 @@ def enrich_troughs_confluence(state: SymbolState, now_ms: int, troughs: list[dic
     return apply_pivot_confluence(troughs, index)
 
 
+def union_pivot_points(*groups: list | None) -> list[dict]:
+    """Склеить pivot по (time_ms, price). Новый экстремум скана не затирает старые."""
+    merged: dict[tuple[int, float], dict] = {}
+    for group in groups:
+        for raw in group or []:
+            if not isinstance(raw, dict) or raw.get("price") is None:
+                continue
+            key = _pivot_match_key(raw)
+            prev = merged.get(key)
+            if prev is None:
+                merged[key] = dict(raw)
+                continue
+            item = dict(prev)
+            for field, value in raw.items():
+                if value in (None, "", []):
+                    continue
+                item[field] = value
+            item["left_strength"] = max(
+                int(prev.get("left_strength") or 0),
+                int(raw.get("left_strength") or 0),
+            )
+            if int(prev.get("tf_match_count") or 0) > int(raw.get("tf_match_count") or 0):
+                item["tf_match_count"] = prev.get("tf_match_count")
+                item["tf_matches"] = prev.get("tf_matches")
+                item["confluence"] = prev.get("confluence")
+                if prev.get("index"):
+                    item["index"] = prev.get("index")
+            merged[key] = item
+    out = list(merged.values())
+    out.sort(key=lambda p: int(p.get("time_ms") or p.get("time") or 0))
+    return out
+
+
+def pivots_from_bars(bars: list[Bar], interval: str, now_ms: int) -> dict:
+    """Все якоря TF и цепочка LH/HL для подписей. Те же правила, что у скана."""
+    if not bars:
+        return {
+            "all_peaks": [],
+            "all_troughs": [],
+            "anchor_peaks": [],
+            "anchor_troughs": [],
+            "peaks": [],
+            "troughs": [],
+        }
+    anchors_p = all_anchor_peaks(bars, interval, now_ms)
+    anchors_t = all_anchor_troughs(bars, interval, now_ms)
+    chain_p = last_lower_high_peaks(bars, interval, now_ms)
+    chain_t = last_higher_low_troughs(bars, interval, now_ms)
+    return {
+        "all_peaks": anchors_p,
+        "all_troughs": anchors_t,
+        "anchor_peaks": anchors_p,
+        "anchor_troughs": anchors_t,
+        "peaks": project_peaks_to_chart(chain_p, interval) if chain_p else [],
+        "troughs": project_troughs_to_chart(chain_t, interval) if len(chain_t) >= 2 else [],
+    }
+
+
+def chart_pivots_from_candles(rows: list[dict], interval: str, now_ms: int) -> dict:
+    return pivots_from_bars(bars_from_candle_rows(rows), interval, now_ms)
+
+
+def chart_pivots_for_symbols(
+    states: dict[str, SymbolState],
+    symbols: set[str] | list[str],
+    interval: str,
+    now_ms: int,
+) -> dict[str, dict]:
+    """Свежие якоря движка по монетам доски (короче истории графика, но сразу после подтверждения)."""
+    out: dict[str, dict] = {}
+    for sym in symbols:
+        state = states.get(sym)
+        if state is None:
+            continue
+        bars = _bars_for_interval(state, interval)
+        if len(bars) < _min_bars(interval):
+            continue
+        out[sym] = pivots_from_bars(bars, interval, now_ms)
+    return out
+
+
 def project_peaks_to_chart(peaks: list[dict], chart_interval: str) -> list[dict]:
     """Привязка времени вершины к началу свечи графика."""
     step = _INTERVAL_MS.get(chart_interval, _INTERVAL_MS["60"])
@@ -463,8 +544,14 @@ def build_vacuum_lh_boards(
     for lh_interval in config.VACUUM_LH_INTERVALS:
         board = build_vacuum_lh_board(states, now_ms, lh_interval, live_store)
         intervals[lh_interval] = board["data"]["signals"]
+    symbols = {str(row.get("symbol") or "") for rows in intervals.values() for row in rows}
+    symbols.discard("")
     return {
         "type": "vacuum_lh_board",
         "timestamp": now_ms,
-        "data": {"intervals": intervals, "default_interval": config.VACUUM_LH_DEFAULT_INTERVAL},
+        "data": {
+            "intervals": intervals,
+            "default_interval": config.VACUUM_LH_DEFAULT_INTERVAL,
+            "chart_pivots": {"5": chart_pivots_for_symbols(states, symbols, "5", now_ms)},
+        },
     }

@@ -293,12 +293,73 @@ async def liquidation_zones(symbol: str, interval: str = "60") -> dict[str, Any]
     return {"symbol": symbol, "interval": interval, **payload}
 
 
+def _kline_reply(
+    symbol: str,
+    interval: str,
+    window_days: int,
+    candles: list[dict[str, Any]],
+    *,
+    history_complete: bool,
+    pivots: bool,
+    now_ms: int,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "symbol": symbol,
+        "interval": interval,
+        "window_days": window_days,
+        "candles": candles,
+        "history_complete": history_complete,
+    }
+    if pivots and interval in config.VACUUM_LH_CONFLUENCE_INTERVALS:
+        from signal_engine.vacuum_lh import chart_pivots_from_candles
+
+        packed = chart_pivots_from_candles(candles, interval, now_ms)
+        payload["anchor_peaks"] = packed["anchor_peaks"]
+        payload["anchor_troughs"] = packed["anchor_troughs"]
+        payload["peaks"] = packed["peaks"]
+        payload["troughs"] = packed["troughs"]
+    return payload
+
+
+async def _bybit_rest():
+    from collector.rest_client import BybitRest
+
+    rest: BybitRest | None = getattr(app.state, "bybit_rest", None)
+    if rest is None:
+        rest = BybitRest()
+        await rest.open()
+        app.state.bybit_rest = rest
+    return rest
+
+
+async def _refresh_kline_tail(symbol: str, interval: str, cached: list[dict[str, Any]], now_ms: int) -> list[dict[str, Any]] | None:
+    """Дописать свежие бары. None — дыра длиннее лимита биржи, нужен полный ряд."""
+    from ws_server.cache import merge_kline_candles
+
+    if not cached:
+        return None
+    last_ts = int((cached[-1] or {}).get("timestamp") or 0)
+    bar_ms = config.kline_bar_ms(interval)
+    gap = 8 if bar_ms <= 0 else max(8, int((now_ms - last_ts) / bar_ms) + 3)
+    if gap > config.BYBIT_KLINE_MAX_LIMIT:
+        return None
+    rest = await _bybit_rest()
+    message = await rest.fetch_klines(symbol, interval, limit=gap)
+    incoming = (message.get("data") or {}).get("candles") or [] if message else []
+    if not incoming:
+        return list(cached)
+    merged = merge_kline_candles(cached, incoming)
+    return merged
+
+
 @app.get("/api/klines/{symbol}")
 async def klines(
     symbol: str,
     interval: str = "1",
     refresh: bool = False,
     days: int = 0,
+    tail: bool = False,
+    pivots: bool = False,
 ) -> dict[str, Any]:
     if not _SYMBOL.fullmatch(symbol or ""):
         raise HTTPException(status_code=400, detail="Некорректный тикер")
@@ -312,28 +373,68 @@ async def klines(
         if days > 0
         else max(100, config.KLINE_FETCH_LIMIT // 2)
     )
-    cached = hub.cache.klines.get(key) or []
+    now_ms = int(time.time() * 1000)
+    cached = list(hub.cache.klines.get(key) or [])
     last_ts = int((cached[-1] or {}).get("timestamp") or 0) if cached else 0
-    if not refresh and config.kline_cache_servable(len(cached), last_ts, interval, min_bars, int(time.time() * 1000)):
-        return {"symbol": symbol, "interval": interval, "window_days": window_days, "candles": cached}
-    from collector.rest_client import BybitRest
-
-    rest: BybitRest | None = getattr(app.state, "bybit_rest", None)
-    if rest is None:
-        rest = BybitRest()
-        await rest.open()
-        app.state.bybit_rest = rest
-    if days > 0 or refresh:
-        message = await rest.fetch_klines_for_days(symbol, interval, window_days)
-    else:
-        message = await rest.fetch_klines(symbol, interval)
-    candles = (message.get("data") or {}).get("candles") or [] if message else []
-    if candles:
-        hub.cache.klines[key] = list(candles)
-        hub.cache.market_dirty = True
-    elif cached:
+    oldest = int((cached[0] or {}).get("timestamp") or 0) if cached else 0
+    full_enough = len(cached) >= min_bars
+    tail_fresh = config.kline_tail_fresh(last_ts, interval, now_ms)
+    did_full = False
+    fetched_ok = False
+    candles: list[dict[str, Any]]
+    if refresh:
+        candles = []
+    elif pivots or tail:
+        if full_enough and tail_fresh:
+            candles = cached
+        elif full_enough:
+            merged = await _refresh_kline_tail(symbol, interval, cached, now_ms)
+            candles = merged if merged is not None else []
+            if merged is None:
+                did_full = True
+        else:
+            candles = []
+            did_full = True
+    elif full_enough and tail_fresh:
         candles = cached
-    return {"symbol": symbol, "interval": interval, "window_days": window_days, "candles": candles}
+    elif full_enough:
+        merged = await _refresh_kline_tail(symbol, interval, cached, now_ms)
+        candles = merged if merged is not None else []
+        if merged is None:
+            did_full = True
+    elif config.kline_cache_servable(len(cached), last_ts, interval, min_bars, now_ms):
+        candles = cached
+    else:
+        candles = []
+        did_full = True
+    if did_full or (refresh and not candles):
+        rest = await _bybit_rest()
+        if days > 0 or refresh or pivots or tail:
+            message = await rest.fetch_klines_for_days(symbol, interval, window_days)
+        else:
+            message = await rest.fetch_klines(symbol, interval)
+        fetched = (message.get("data") or {}).get("candles") or [] if message else []
+        if fetched:
+            candles = list(fetched)
+            fetched_ok = True
+            hub.cache.market_dirty = True
+        elif cached and not candles:
+            candles = cached
+    if candles and candles is not cached:
+        hub.cache.klines[key] = list(candles)
+    oldest_out = int((candles[0] or {}).get("timestamp") or 0) if candles else oldest
+    history_complete = config.kline_history_complete(oldest_out, interval, window_days, now_ms) or (
+        fetched_ok and len(candles) < min_bars
+    )
+    return _kline_reply(
+        symbol,
+        interval,
+        window_days,
+        candles,
+        history_complete=history_complete,
+        pivots=pivots,
+        now_ms=now_ms,
+    )
 
 
 @app.websocket("/ws")

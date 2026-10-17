@@ -9,7 +9,7 @@ from pathlib import Path
 from signal_engine.models import Signal
 from signal_engine.store import SignalStore
 from ws_server.app import bybit_trade_url
-from ws_server.cache import MarketCache
+from ws_server.cache import MarketCache, merge_kline_candles
 from ws_server.stats import compute_stats
 from fastapi import HTTPException
 
@@ -154,6 +154,31 @@ class BookTest(unittest.TestCase):
         )
         pnl = cache.pnl_items()[0]["pnl_pct"]
         self.assertAlmostEqual(pnl, 30.0)
+
+
+class KlineTailMergeTest(unittest.TestCase):
+    def test_tail_overwrites_same_bar_and_appends(self) -> None:
+        merged = merge_kline_candles(
+            [{"timestamp": 1, "close": 1}, {"timestamp": 2, "close": 2}],
+            [{"timestamp": 2, "close": 2.5}, {"timestamp": 3, "close": 3}],
+        )
+        self.assertEqual([row["close"] for row in merged], [1, 2.5, 3])
+
+    def test_vacuum_scan_pivots_kept(self) -> None:
+        cache = MarketCache()
+        cache.apply(
+            {
+                "type": "vacuum_lh_board",
+                "timestamp": 10,
+                "data": {
+                    "intervals": {"15": [{"symbol": "ABCUSDT", "all_peaks": [{"time_ms": 1, "price": 2}]}]},
+                    "default_interval": "15",
+                    "chart_pivots": {"5": {"ABCUSDT": {"all_peaks": [{"time_ms": 5, "price": 3}]}}},
+                },
+            }
+        )
+        self.assertEqual(cache.vacuum_lh_chart_pivots["5"]["ABCUSDT"]["all_peaks"][0]["price"], 3)
+        self.assertIn("5", cache.view_vacuum_lh_board("15")["chart_pivots"])
 
 
 class BybitLinkTest(unittest.TestCase):
