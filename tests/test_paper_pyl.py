@@ -180,6 +180,14 @@ class M5HtfGateTest(unittest.TestCase):
 
 
 class PivotConfirmClockTest(unittest.TestCase):
+    def test_fifteen_min_window_is_ten_seconds(self) -> None:
+        pivot = T0 - (T0 % 900_000)
+        close_at = second_bar_close_ms(pivot, "15")
+        self.assertEqual(close_at, pivot + 3 * 900_000)
+        self.assertTrue(just_confirmed(pivot, close_at + 1_000, "15"))
+        self.assertFalse(just_confirmed(pivot, close_at + 11_000, "15"))
+        self.assertTrue(first_bar_waiting(pivot, close_at - 1_000, "15"))
+
     def test_window_is_ten_seconds_after_second_bar(self) -> None:
         pivot = T0
         close_at = second_bar_close_ms(pivot, "5")

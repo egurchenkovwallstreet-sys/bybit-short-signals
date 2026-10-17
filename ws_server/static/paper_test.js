@@ -753,7 +753,9 @@
       const candNote = document.querySelector("#paper-cand-section .quiet");
       if (candNote) {
         candNote.textContent =
-          `${vpsChartInterval(paper.variant)}m: pivot-max → шорт, pivot-min → лонг. Вход только на 1-й незакрытой свече после 2 свечей подтверждения pivot. Одна сделка на сигнал. Стоп −10% ROE, трейл − 10 п.п.`;
+          paper.variant === "vps5"
+            ? "5м экстремум своей 15м, слабее предыдущей, без пробоя 30м. Вход и закрытие в 10 секунд после второй свечи. Стоп −10% ROE, трейл − 10 п.п."
+            : "15м: максимум → шорт, минимум → лонг. Вход и закрытие в 10 секунд после второй свечи. Стоп −10% ROE, трейл − 10 п.п.";
       }
       const tf = vpsChartInterval(paper.variant);
       const rows = vpsWatchRows();

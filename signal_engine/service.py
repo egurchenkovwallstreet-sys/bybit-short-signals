@@ -150,43 +150,22 @@ class SignalService:
         try:
             while True:
                 await self._sleep_until_five_min_close(0.6)
-                symbols = paper.confirm_fetch_symbols()
-                if not symbols:
-                    continue
                 started = time.time()
                 close_ms = int(started) // 300 * 300 * 1000
+                symbols = paper.confirm_fetch_symbols()
+                symbols_15 = paper.confirm_fetch_symbols_15() if close_ms % 900_000 == 0 else []
+                if not symbols and not symbols_15:
+                    continue
                 self._confirm_burst = True
                 try:
-                    pending = list(symbols)
-                    for pause in (0.0, 1.4, 2.2):
-                        if pause:
-                            await asyncio.sleep(pause)
-                        if not pending or time.time() - started > 8:
-                            break
-                        fetched = await self._fetch_five_min_tail(rest, pending, limit, parallel)
-                        still: list[str] = []
-                        ready = 0
-                        now_ms = int(time.time() * 1000)
-                        for symbol in pending:
-                            message = fetched.get(symbol)
-                            candles = ((message or {}).get("data") or {}).get("candles") or []
-                            if message and batch_has_closed_bar(candles, close_ms, now_ms):
-                                self.engine.ingest(message)
-                                ready += 1
-                            else:
-                                still.append(symbol)
-                        pending = still
-                        if ready:
-                            for item in self.engine.scan(now_ms):
-                                if self._publisher is not None:
-                                    self._publisher.publish(item)
-                    lag_ms = int((time.time() - (close_ms / 1000)) * 1000)
-                    log.info(
-                        "Пивот 5м: проверка %s монет, осталось без закрытой свечи %s, %d мс после закрытия",
-                        len(symbols),
-                        len(pending),
-                        lag_ms,
-                    )
+                    jobs = []
+                    if symbols:
+                        jobs.append(self._confirm_interval(rest, symbols, "5", close_ms, started, limit, parallel))
+                    if symbols_15:
+                        jobs.append(
+                            self._confirm_interval(rest, symbols_15, "15", close_ms, started, limit, parallel)
+                        )
+                    await asyncio.gather(*jobs)
                 finally:
                     self._confirm_burst = False
         finally:
@@ -200,17 +179,53 @@ class SignalService:
             return
         await asyncio.sleep(300 - into + after_sec)
 
-    async def _fetch_five_min_tail(self, rest, symbols: list[str], limit: int, parallel: int) -> dict:
+    async def _confirm_interval(self, rest, symbols: list[str], interval: str, close_ms: int, started: float, limit: int, parallel: int) -> None:
+        step = 900_000 if interval == "15" else 300_000
+        pending = list(symbols)
+        try:
+            for pause in (0.0, 1.4, 2.2):
+                if pause:
+                    await asyncio.sleep(pause)
+                if not pending or time.time() - started > 8:
+                    break
+                fetched = await self._fetch_kline_tail(rest, pending, interval, limit, parallel)
+                still: list[str] = []
+                ready = 0
+                now_ms = int(time.time() * 1000)
+                for symbol in pending:
+                    message = fetched.get(symbol)
+                    candles = ((message or {}).get("data") or {}).get("candles") or []
+                    if message and batch_has_closed_bar(candles, close_ms, now_ms, step):
+                        self.engine.ingest(message)
+                        ready += 1
+                    else:
+                        still.append(symbol)
+                pending = still
+                if ready:
+                    for item in self.engine.scan(now_ms):
+                        if self._publisher is not None:
+                            self._publisher.publish(item)
+        finally:
+            lag_ms = int((time.time() - (close_ms / 1000)) * 1000)
+            log.info(
+                "Пивот %sм: проверка %s монет, осталось без закрытой свечи %s, %d мс после закрытия",
+                interval,
+                len(symbols),
+                len(pending),
+                lag_ms,
+            )
+
+    async def _fetch_kline_tail(self, rest, symbols: list[str], interval: str, limit: int, parallel: int) -> dict:
         sem = asyncio.Semaphore(parallel)
 
         async def one(symbol: str):
             async with sem:
                 try:
-                    return symbol, await rest.fetch_klines(symbol, "5", limit, locked=False)
+                    return symbol, await rest.fetch_klines(symbol, interval, limit, locked=False)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    log.exception("Подтверждение 5м %s не получено", symbol)
+                    log.exception("Подтверждение %sм %s не получено", interval, symbol)
                     return symbol, None
 
         pairs = await asyncio.gather(*(one(symbol) for symbol in symbols))
