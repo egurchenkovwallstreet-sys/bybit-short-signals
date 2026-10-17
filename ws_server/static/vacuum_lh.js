@@ -463,6 +463,25 @@ function setVacuumChartPlaceholder(text) {
   el.textContent = text;
 }
 
+function focusVacuumTradeWindow(runtime) {
+  const bars = runtime?._lastBars;
+  if (!runtime?.chart || !bars?.length) return;
+  const show = Math.min(bars.length, 180);
+  runtime._programmaticChartView = true;
+  try {
+    runtime.chart.timeScale().applyOptions({ barSpacing: 7, rightOffset: 10 });
+    runtime.chart.timeScale().setVisibleLogicalRange({
+      from: Math.max(0, bars.length - show),
+      to: bars.length + 10,
+    });
+  } catch (_e) {
+    /* ignore */
+  }
+  queueMicrotask(() => {
+    runtime._programmaticChartView = false;
+  });
+}
+
 function drawVacuumCandles(candles, resetScale) {
   const symbol = vacuumLhState.selected;
   if (!symbol || !candles?.length || !mountVacuumChart()) return false;
@@ -470,6 +489,7 @@ function drawVacuumCandles(candles, resetScale) {
   const interval = vacuumLhState.chartInterval;
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
   BC.drawCandles(vacuumLhState.chart, candles, interval, resetScale, VAC_CHART.chart, live);
+  if (resetScale) focusVacuumTradeWindow(vacuumLhState.chart);
   ensureVacuumLhMarkerHooks(vacuumLhState.chart);
   drawVacuumLhOverlays(vacuumLhState.chart, getVacuumChartPeaks(), getVacuumChartTroughs(), interval);
   requestAnimationFrame(resizeVacuumChartNow);
