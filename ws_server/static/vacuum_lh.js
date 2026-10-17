@@ -78,17 +78,26 @@ function vacuumPivotMatchCount(p) {
   return p?.confluence ? 2 : 1;
 }
 
+function vacuumLeftStrength(p) {
+  const ls = Number(p?.left_strength);
+  if (ls >= 7 && ls <= 20) return ls;
+  return 7;
+}
+
 function vacuumPivotLineStyle(p, fallbackColor, kind) {
   const n = vacuumPivotMatchCount(p);
+  const ls = vacuumLeftStrength(p);
+  const amp = Math.min(1, Math.max(0, (ls - 7) / 13));
   const strong = kind === "trough" ? TROUGH_CONFLUENCE_STRONG : PEAK_CONFLUENCE_STRONG;
   const mid = kind === "trough" ? TROUGH_CONFLUENCE_COLOR : PEAK_CONFLUENCE_COLOR;
   if (n >= 3) {
-    return { color: strong, lineWidth: 3, lineStyle: 0 };
+    return { color: strong, lineWidth: 3, lineStyle: 0, amp: 1 };
   }
   if (n >= 2) {
-    return { color: mid, lineWidth: 2, lineStyle: 0 };
+    return { color: mid, lineWidth: 2, lineStyle: 0, amp: 0.85 + amp * 0.15 };
   }
-  return { color: fallbackColor, lineWidth: 1, lineStyle: 2 };
+  const lw = 1 + Math.round(amp * 2);
+  return { color: fallbackColor, lineWidth: lw, lineStyle: 0, amp };
 }
 
 function formatVacuumPivotPrice(p, kind) {
@@ -374,6 +383,7 @@ function drawVacuumCandles(candles, resetScale) {
   const interval = vacuumLhState.chartInterval;
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
   BC.drawCandles(vacuumLhState.chart, candles, interval, resetScale, VAC_CHART.chart, live);
+  ensureVacuumLhMarkerHooks(vacuumLhState.chart);
   drawVacuumLhOverlays(vacuumLhState.chart, getVacuumPeaks(), getVacuumTroughs(), interval);
   requestAnimationFrame(resizeVacuumChartNow);
   setVacuumChartPlaceholder("");
@@ -628,6 +638,7 @@ function patchVacuumLivePrice() {
     return;
   }
   rt._lastBars = bars;
+  scheduleVacuumLhMarkerRedraw();
   const priceEl = document.querySelector(`#${VAC_CHART.info} [data-vac-live='price']`);
   if (priceEl) priceEl.textContent = String(live);
 }
@@ -776,7 +787,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>: точки H/L за <strong>14 д</strong> (pivot ≥7 свечей между max и между min). Цепочка списка: <strong>${lhTf}</strong>.</p>
+    <p>График <strong>${chartTf}</strong>: точки H/L за <strong>14 д</strong> (разнос ≥7 свечей, сила pivot <strong>L7–L20</strong>). Цепочка списка: <strong>${lhTf}</strong>.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
@@ -787,16 +798,6 @@ function renderVacuumLhInfo() {
 
 function clearVacuumLhOverlays(runtime) {
   if (!runtime?.series) return;
-  for (const bucket of [runtime._vacuumPeakLines, runtime._vacuumTroughLines]) {
-    if (!bucket?.length) continue;
-    for (const line of bucket) {
-      try {
-        runtime.series.removePriceLine(line);
-      } catch (_e) {
-        /* ignore */
-      }
-    }
-  }
   runtime._vacuumPeakLines = [];
   runtime._vacuumTroughLines = [];
   try {
@@ -806,9 +807,55 @@ function clearVacuumLhOverlays(runtime) {
   }
 }
 
+function scheduleVacuumLhMarkerRedraw() {
+  const rt = vacuumLhState.chart;
+  if (!rt?.series || !vacuumLhState.selected) return;
+  if (rt._vacMarkerRedrawTimer) clearTimeout(rt._vacMarkerRedrawTimer);
+  rt._vacMarkerRedrawTimer = setTimeout(() => {
+    rt._vacMarkerRedrawTimer = 0;
+    if (!rt._lastBars?.length) return;
+    drawVacuumLhOverlays(rt, getVacuumPeaks(), getVacuumTroughs(), vacuumLhState.chartInterval);
+  }, 40);
+}
+
+function ensureVacuumLhMarkerHooks(runtime) {
+  if (!runtime?.chart || runtime._vacLhMarkerHooks) return;
+  runtime._vacLhMarkerHooks = true;
+  const redraw = () => scheduleVacuumLhMarkerRedraw();
+  runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(redraw);
+  if (typeof runtime.chart.timeScale().subscribeVisibleTimeRangeChange === "function") {
+    runtime.chart.timeScale().subscribeVisibleTimeRangeChange(redraw);
+  }
+}
+
+function vacuumMarkerBarTime(runtime, p, iv) {
+  const BC = window.boardChart;
+  const tMs = p.time_chart_ms ?? p.time_ms ?? p.time_15m_ms;
+  if (!tMs || !BC?.candleTime) return null;
+  const wantSec = BC.barTimeToSec(BC.candleTime(tMs, iv));
+  const step = BC.INTERVAL_SEC?.[iv] || 900;
+  const bars = runtime._lastBars || [];
+  let best = null;
+  let bestDist = step + 1;
+  for (const b of bars) {
+    const bs = BC.barTimeToSec(b.time);
+    const d = Math.abs(bs - wantSec);
+    if (d < bestDist) {
+      bestDist = d;
+      best = b.time;
+    }
+  }
+  if (best != null && bestDist <= step) return best;
+  return BC.candleTime(tMs, iv);
+}
+
+function vacuumMarkerTimeKey(time) {
+  const BC = window.boardChart;
+  return BC?.barTimeKey ? BC.barTimeKey(time) : String(time);
+}
+
 function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
   const markers = [];
-  const BC = window.boardChart;
   const iv = chartInterval || vacuumLhState.chartInterval || "60";
   const colors = kind === "trough" ? TROUGH_COLORS : PEAK_COLORS;
   const prefix = kind === "trough" ? "HL" : "LH";
@@ -819,30 +866,34 @@ function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
     const inChain = chainKeys?.has(vacuumPivotKey(p));
     const baseColor = colors[i % colors.length];
     const n = vacuumPivotMatchCount(p);
+    const ls = vacuumLeftStrength(p);
     let style = inChain
       ? vacuumPivotLineStyle(p, baseColor, kind)
-      : { color: baseColor, lineWidth: 1, lineStyle: 2 };
+      : vacuumPivotLineStyle(p, baseColor, kind);
     if (!inChain) {
-      style = { ...style, color: kind === "trough" ? "rgba(76,201,240,0.55)" : "rgba(233,196,106,0.55)" };
+      const a = style.amp ?? 0.5;
+      style = {
+        ...style,
+        color: kind === "trough" ? `rgba(76,201,240,${0.45 + a * 0.45})` : `rgba(233,196,106,${0.45 + a * 0.45})`,
+      };
     }
+    const lsTag = ls >= 8 ? `L${ls}` : "";
     const label = inChain
       ? n >= 2
-        ? `${prefix}${p.index || i + 1}·${n}TF`
-        : `${prefix}${p.index || i + 1}`
-      : kind === "trough"
-        ? "L"
-        : "H";
-    const tMs = p.time_ms ?? p.time_chart_ms ?? p.time_15m_ms;
-    const barTime = BC?.candleTime?.(tMs, iv);
-    if (barTime) {
-      markers.push({
-        time: barTime,
-        position,
-        color: style.color,
-        shape: n >= 2 ? "square" : "circle",
-        text: label,
-      });
-    }
+        ? `${prefix}${p.index || i + 1}·${n}TF${lsTag ? ` ${lsTag}` : ""}`
+        : `${prefix}${p.index || i + 1}${lsTag ? ` ${lsTag}` : ""}`
+      : lsTag || (kind === "trough" ? "L" : "H");
+    const barTime = vacuumMarkerBarTime(runtime, p, iv);
+    if (!barTime) return;
+    const rank = (inChain ? 1000 : 0) + ls * 10 + n;
+    markers.push({
+      time: barTime,
+      position,
+      color: style.color,
+      shape: n >= 2 || ls >= 14 ? "square" : "circle",
+      text: label,
+      _rank: rank,
+    });
   });
   return markers;
 }
@@ -854,10 +905,23 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   runtime._vacuumTroughLines = [];
   const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
   const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
-  const markers = [
+  const raw = [
     ...vacuumLhPivotMarkers(runtime, peaks || [], chartInterval, "peak", chainPeakKeys),
     ...vacuumLhPivotMarkers(runtime, troughs || [], chartInterval, "trough", chainTroughKeys),
   ];
+  const byTime = new Map();
+  for (const m of raw) {
+    const k = vacuumMarkerTimeKey(m.time);
+    const prev = byTime.get(k);
+    if (!prev || (m._rank || 0) > (prev._rank || 0)) byTime.set(k, m);
+  }
+  const markers = [...byTime.values()]
+    .map(({ _rank, ...rest }) => rest)
+    .sort((a, b) => {
+      const ta = window.boardChart.barTimeToSec(a.time);
+      const tb = window.boardChart.barTimeToSec(b.time);
+      return ta - tb;
+    });
   if (markers.length) {
     try {
       runtime.series.setMarkers(markers);

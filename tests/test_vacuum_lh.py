@@ -71,14 +71,23 @@ class VacuumLhPeaksTest(unittest.TestCase):
 
     def test_pivot_min_gap_seven_bars(self) -> None:
         pivots = [
-            {"bar_index": 0, "price": 10.0, "time": 0},
-            {"bar_index": 3, "price": 11.0, "time": 3},
-            {"bar_index": 10, "price": 9.0, "time": 10},
+            {"bar_index": 0, "price": 10.0, "time": 0, "left_strength": 7},
+            {"bar_index": 3, "price": 11.0, "time": 3, "left_strength": 7},
+            {"bar_index": 10, "price": 9.0, "time": 10, "left_strength": 12},
         ]
         out = filter_pivots_min_bar_gap(pivots, 7, kind="peak")
         self.assertEqual(len(out), 2)
         self.assertEqual(out[0]["bar_index"], 3)
         self.assertEqual(out[1]["bar_index"], 10)
+
+    def test_pivot_gap_prefers_left_strength(self) -> None:
+        pivots = [
+            {"bar_index": 0, "price": 12.0, "left_strength": 8},
+            {"bar_index": 4, "price": 11.0, "left_strength": 18},
+        ]
+        out = filter_pivots_min_bar_gap(pivots, 7, kind="peak")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["left_strength"], 18)
 
     def test_floating_left_strength_up_to_twenty(self) -> None:
         lows = [10.0] * 7 + [20.0, 9.0, 8.0]
