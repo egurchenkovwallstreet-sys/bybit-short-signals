@@ -2565,6 +2565,7 @@ class PaperStrategy:
                 "btc_strict": btc_4h is not None and btc_4h >= config.PAPER_BTC_STRICT_4H_PCT,
                 "margin_pct": config.PAPER_MARGIN_PCT,
                 "leverage": config.PAPER_LEVERAGE,
+                "fee_rate": config.PAPER_FEE_RATE_TAKER,
             },
             "variants": list(VARIANTS),
             "test_variants": [v for v in VARIANTS if v not in config.PAPER_DESK_VARIANTS],

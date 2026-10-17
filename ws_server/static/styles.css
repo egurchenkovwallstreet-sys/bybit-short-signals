@@ -166,33 +166,39 @@ body {
 
 .vacuum-trade-box.plus {
   background: rgba(61, 214, 140, 0.2);
-  border-color: rgba(61, 214, 140, 0.45);
+  border-color: rgba(61, 214, 140, 0.55);
 }
 
 .vacuum-trade-box.minus {
   background: rgba(255, 93, 115, 0.2);
-  border-color: rgba(255, 93, 115, 0.45);
+  border-color: rgba(255, 93, 115, 0.55);
 }
 
 .vacuum-trade-signal {
   position: absolute;
-  left: 4px;
-  top: 4px;
+  z-index: 2;
   padding: 1px 6px;
   border-radius: 3px;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #0f141b;
-  background: rgba(255, 255, 255, 0.88);
+  line-height: 1.3;
+  pointer-events: none;
 }
 
-.vacuum-trade-box.minus .vacuum-trade-signal {
-  background: rgba(255, 210, 216, 0.92);
+.vacuum-trade-signal.long {
+  color: #0f141b;
+  background: #3ddc84;
+}
+
+.vacuum-trade-signal.short {
+  color: #fff;
+  background: #ff5d73;
 }
 
 .vacuum-trade-pnl {
   position: absolute;
+  z-index: 3;
   min-width: 72px;
   padding: 3px 7px;
   border-radius: 5px;

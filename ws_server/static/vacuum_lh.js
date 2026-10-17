@@ -50,6 +50,9 @@ const vacuumLhState = {
   paper: null,
   closed: [],
   closedMap: { pyl: [], vps5: [] },
+  symbolClosed: {},
+  liveWorst: {},
+  _symbolClosedSeq: 0,
   closedReady: false,
   closedVariant: "",
   _lastOpenCount: null,
@@ -233,6 +236,7 @@ function initVacuumLhTab() {
     if (window.boardChart?.createRuntime) {
       vacuumLhState.chart = window.boardChart.createRuntime();
     }
+    ensureVacuumTradeClock();
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !vacuumLhState.selected) return;
       const view = document.getElementById("view-vacuum-lh");
@@ -312,6 +316,7 @@ function renderVacuumModes() {
 
 function setVacuumMode(mode) {
   if (!VACUUM_DESK.some(([id]) => id === mode)) return;
+  const prevInterval = vacuumLhState.chartInterval;
   vacuumLhState.mode = mode;
   if (mode === "pyl" || mode === "vps5") {
     vacuumLhState.chartInterval = "5";
@@ -323,6 +328,12 @@ function setVacuumMode(mode) {
   renderVacuumModes();
   renderVacuumTfControls();
   renderVacuumLhBoard();
+  if (!vacuumLhState.selected) return;
+  if (vacuumLhState.chartInterval !== prevInterval) {
+    void loadVacuumChartDisplay(true);
+  } else if (vacuumLhState.chart?._lastBars?.length) {
+    drawVacuumTradeOverlay(vacuumLhState.chart);
+  }
 }
 
 async function ensureVacuumPaper() {
@@ -666,6 +677,7 @@ async function toggleVacuumLhSymbol(symbol) {
   }
   await ensureVacuumPaper();
   void fetchVacuumDeskClosed(false);
+  void fetchVacuumSymbolClosed(symbol);
   await loadVacuumChartDisplay(true);
 }
 
@@ -1012,7 +1024,6 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   const raw = [
     ...vacuumLhPivotMarkers(runtime, peaks || [], chartInterval, "peak", chainPeakKeys),
     ...vacuumLhPivotMarkers(runtime, troughs || [], chartInterval, "trough", chainTroughKeys),
-    ...vacuumTradeMarkers(runtime, chartInterval),
   ];
   const byTime = new Map();
   for (const m of raw) {
@@ -1046,16 +1057,26 @@ function vacuumChartTradeVariants() {
   return vacuumLhState.mode === "scan" ? ["pyl", "vps5"] : [vacuumDeskVariant()];
 }
 
+function vacuumClosedForSymbol(symbol) {
+  const variants = vacuumChartTradeVariants();
+  const bag = vacuumLhState.symbolClosed[symbol];
+  if (bag) return variants.flatMap((v) => bag[v] || []);
+  return variants
+    .flatMap((v) => vacuumLhState.closedMap[v] || [])
+    .filter((t) => t.symbol === symbol);
+}
+
 function vacuumSymbolTrades(symbol) {
   if (!symbol) return [];
   const variants = new Set(vacuumChartTradeVariants());
   const opens = ((vacuumLhState.paper || {}).open_trades || []).filter(
     (t) => t.symbol === symbol && variants.has(t.variant),
   );
-  const closed = vacuumChartTradeVariants().flatMap((v) => vacuumLhState.closedMap[v] || []);
+  const seen = new Set(opens.map((t) => t.id));
+  const closed = vacuumClosedForSymbol(symbol).filter((t) => t.id == null || !seen.has(t.id));
   return [
     ...opens.map((t) => ({ ...t, _open: true })),
-    ...closed.filter((t) => t.symbol === symbol).map((t) => ({ ...t, _open: false })),
+    ...closed.map((t) => ({ ...t, _open: false })),
   ];
 }
 
@@ -1063,30 +1084,58 @@ function vacuumTradeSide(trade) {
   return trade.side || trade.entry?.side || (trade.entry?.metrics || {}).side || "short";
 }
 
+function vacuumChartLivePrice(runtime, symbol) {
+  const last = runtime?._lastBars?.[runtime._lastBars.length - 1];
+  const fromBar = Number(last?.close);
+  if (fromBar > 0) return fromBar;
+  const row = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
+  const n = Number(row);
+  return n > 0 ? n : 0;
+}
+
 function vacuumTradeCurrentPrice(trade, live) {
-  if (trade._open) {
-    const liveN = Number(live);
-    if (liveN > 0) return liveN;
-    return Number(trade.last_price) || Number(trade.entry_price) || 0;
+  if (!trade._open) {
+    const exitPx = Number(trade.exit_price || trade.last_price);
+    return exitPx > 0 ? exitPx : 0;
   }
-  return Number(trade.exit_price || trade.last_price || trade.entry_price) || 0;
+  const liveN = Number(live);
+  if (liveN > 0) return liveN;
+  const last = Number(trade.last_price);
+  return last > 0 ? last : 0;
 }
 
-function vacuumTradeWorstPrice(trade, current) {
-  const entry = Number(trade.entry_price) || 0;
-  const stored = Number(trade.worst_price) || entry;
-  if (vacuumTradeSide(trade) === "long") return Math.min(stored, current || stored, entry || stored);
-  return Math.max(stored, current || stored, entry || stored);
+function vacuumTradeWorstPrice(trade, live) {
+  const stored = Number(trade.worst_price);
+  if (!(stored > 0)) return 0;
+  if (!trade._open) return stored;
+  const long = vacuumTradeSide(trade) === "long";
+  let worst = stored;
+  const seen = Number(vacuumLhState.liveWorst[trade.id]);
+  if (seen > 0) worst = long ? Math.min(worst, seen) : Math.max(worst, seen);
+  const px = Number(live);
+  if (px > 0) worst = long ? Math.min(worst, px) : Math.max(worst, px);
+  if (trade.id != null) vacuumLhState.liveWorst[trade.id] = worst;
+  return worst;
 }
 
-function vacuumTradeBoxPrices(trade, live) {
-  const entry = Number(trade.entry_price) || 0;
-  const current = vacuumTradeCurrentPrice(trade, live);
-  const worst = vacuumTradeWorstPrice(trade, current);
-  if (vacuumTradeSide(trade) === "long") {
-    return { top: Math.max(current, entry), bottom: Math.min(worst, current, entry) };
+function vacuumTradePnl(trade, price) {
+  if (!trade._open) {
+    return { roe: Number(trade.roe_pct), pnl: Number(trade.pnl_usd) };
   }
-  return { top: Math.max(worst, entry, current), bottom: Math.min(current, entry) };
+  const entry = Number(trade.entry_price);
+  const qty = Number(trade.qty);
+  const margin = Number(trade.margin);
+  const px = Number(price);
+  const entryFee = Number(trade.entry_fee) || 0;
+  const funding = Number(trade.funding_paid) || 0;
+  const rawFee = Number((vacuumLhState.paper || {}).summary?.fee_rate);
+  const fee = Number.isFinite(rawFee) ? rawFee : 0.00055;
+  if (!(entry > 0) || !(qty > 0) || !(margin > 0) || !(px > 0)) {
+    return { roe: Number(trade.roe_pct), pnl: Number(trade.pnl_usd) };
+  }
+  const gross = vacuumTradeSide(trade) === "long" ? (px - entry) * qty : (entry - px) * qty;
+  const pnl = gross - entryFee - qty * px * fee + funding;
+  return { roe: (pnl / margin) * 100, pnl };
 }
 
 function ensureVacuumTradeOverlayEl() {
@@ -1103,12 +1152,53 @@ function ensureVacuumTradeOverlayEl() {
   return el;
 }
 
-function vacuumCoordTime(runtime, ms, iv) {
-  if (!ms) return null;
-  const barTime = vacuumMarkerBarTime(runtime, { time_ms: ms }, iv);
-  if (!barTime || !runtime.chart) return null;
-  const x = runtime.chart.timeScale().timeToCoordinate(barTime);
-  return x == null || Number.isNaN(x) ? null : x;
+function vacuumTimeToX(runtime, ms) {
+  const BC = window.boardChart;
+  const bars = runtime?._lastBars;
+  if (!runtime?.chart || !bars?.length || !ms || !BC?.barTimeToSec) return null;
+  const target = Number(ms) / 1000;
+  if (!Number.isFinite(target)) return null;
+  const scale = runtime.chart.timeScale();
+  const secs = bars.map((b) => BC.barTimeToSec(b.time));
+  const xAt = (idx) => {
+    const x = scale.timeToCoordinate(bars[idx].time);
+    return x == null || Number.isNaN(x) ? null : x;
+  };
+  const pxPerSec = (i0, i1) => {
+    const x0 = xAt(i0);
+    const x1 = xAt(i1);
+    const span = secs[i1] - secs[i0];
+    if (x0 == null || x1 == null || !(span > 0)) return null;
+    return { x0, sec0: secs[i0], px: (x1 - x0) / span };
+  };
+  const last = secs.length - 1;
+  if (target <= secs[0]) {
+    if (last < 1) return xAt(0);
+    const step = pxPerSec(0, 1);
+    return step ? step.x0 + (target - step.sec0) * step.px : xAt(0);
+  }
+  if (target >= secs[last]) {
+    if (last < 1) return xAt(last);
+    const step = pxPerSec(last - 1, last);
+    if (!step) return xAt(last);
+    const xLast = xAt(last);
+    return xLast == null ? null : xLast + (target - secs[last]) * step.px;
+  }
+  let lo = 0;
+  let hi = last;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (secs[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+  const step = pxPerSec(lo - 1, lo);
+  return step ? step.x0 + (target - step.sec0) * step.px : xAt(lo);
+}
+
+function vacuumFmtSigned(n, digits, suffix) {
+  if (!Number.isFinite(n)) return "—";
+  const sign = n >= 0 ? "+" : "−";
+  return `${sign}${Math.abs(n).toFixed(digits)}${suffix || ""}`;
 }
 
 function drawVacuumTradeOverlay(runtime) {
@@ -1119,77 +1209,101 @@ function drawVacuumTradeOverlay(runtime) {
     el.innerHTML = "";
     return;
   }
-  const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
+  const live = vacuumChartLivePrice(runtime, symbol);
   const trades = vacuumSymbolTrades(symbol);
   if (!trades.length) {
     el.innerHTML = "";
     return;
   }
-  const iv = vacuumLhState.chartInterval;
   const hostW = el.clientWidth || 0;
   const hostH = el.clientHeight || 0;
-  const lastBar = runtime._lastBars?.[runtime._lastBars.length - 1];
-  const nowX =
-    lastBar && runtime.chart.timeScale().timeToCoordinate(lastBar.time);
+  const nowMs = Date.now();
   const parts = [];
+  const placed = [];
   for (const trade of trades) {
     const entry = Number(trade.entry_price);
-    if (!entry) continue;
-    const left = vacuumCoordTime(runtime, trade.opened_at, iv);
-    let right = trade._open
-      ? nowX
-      : vacuumCoordTime(runtime, trade.closed_at, iv);
-    if (left == null && right == null) continue;
-    const x1 = left == null ? 0 : left;
-    const x2 = right == null || Number.isNaN(right) ? hostW : right;
-    const leftPx = Math.max(0, Math.min(x1, x2));
-    const rightPx = Math.min(hostW || x2, Math.max(x1, x2));
-    const width = Math.max(8, rightPx - leftPx);
+    if (!(entry > 0) || !trade.opened_at) continue;
+    const left = vacuumTimeToX(runtime, trade.opened_at);
+    const rightMs = trade._open ? nowMs : Number(trade.closed_at);
+    const right = vacuumTimeToX(runtime, rightMs);
+    if (left == null || right == null) continue;
+    const xL = Math.min(left, right);
+    const xR = Math.max(left, right);
+    if (hostW > 0 && (xR < -8 || xL > hostW + 8)) continue;
     const current = vacuumTradeCurrentPrice(trade, live);
-    const box = vacuumTradeBoxPrices(trade, live);
-    const yTop = runtime.series.priceToCoordinate(box.top);
-    const yBot = runtime.series.priceToCoordinate(box.bottom);
+    const worst = vacuumTradeWorstPrice(trade, trade._open ? current : 0);
+    if (!(current > 0) || !(worst > 0)) continue;
+    const yTop = runtime.series.priceToCoordinate(Math.max(current, worst));
+    const yBot = runtime.series.priceToCoordinate(Math.min(current, worst));
     const yCur = runtime.series.priceToCoordinate(current);
-    if (yTop == null || yBot == null) continue;
-    const topPx = Math.max(0, Math.min(yTop, yBot));
-    const botPx = Math.max(yTop, yBot);
-    const height = Math.max(6, botPx - topPx);
-    const roe = Number(trade.roe_pct);
-    const pnl = Number(trade.pnl_usd);
-    const plus = (Number.isFinite(roe) ? roe : pnl) >= 0;
+    const yEntry = runtime.series.priceToCoordinate(entry);
+    if (yTop == null || yBot == null || Number.isNaN(yTop) || Number.isNaN(yBot)) continue;
+    const topPx = Math.min(yTop, yBot);
+    const height = Math.max(2, Math.abs(yBot - yTop));
+    const width = Math.max(2, xR - xL);
+    const money = vacuumTradePnl(trade, current);
+    const plus = (Number.isFinite(money.roe) ? money.roe : money.pnl) >= 0;
     const tone = plus ? "plus" : "minus";
-    const sideText = vacuumTradeSide(trade) === "long" ? "лонг" : "шорт";
-    const roeTxt = Number.isFinite(roe) ? `${roe >= 0 ? "+" : ""}${roe.toFixed(1)}%` : "—";
-    const pnlTxt = Number.isFinite(pnl) ? `${pnl >= 0 ? "+" : ""}$${Math.abs(pnl).toFixed(2)}` : "—";
-    const labelTop = yCur == null || Number.isNaN(yCur) ? topPx + height / 2 - 16 : yCur - 16;
-    const labelLeft = Math.min(hostW - 86, Math.max(leftPx + width - 4, leftPx + 8));
+    const long = vacuumTradeSide(trade) === "long";
+    const sideText = long ? "лонг" : "шорт";
+    const sigY = yEntry == null || Number.isNaN(yEntry) ? topPx + height / 2 : yEntry;
+    const sigShift = long ? "translate(-50%, 6px)" : "translate(-50%, calc(-100% - 6px))";
+    let labelLeft = xR + 8;
+    let labelTop = yCur == null || Number.isNaN(yCur) ? topPx + height / 2 : yCur;
+    if (hostW > 0 && labelLeft > hostW - 86) labelLeft = Math.max(4, xR - 86);
+    if (hostH > 0) labelTop = Math.max(18, Math.min(hostH - 18, labelTop));
+    for (let n = 0; n < 6; n += 1) {
+      if (!placed.some((p) => Math.abs(p.x - labelLeft) < 84 && Math.abs(p.y - labelTop) < 32)) break;
+      labelTop += 34;
+    }
+    placed.push({ x: labelLeft, y: labelTop });
     parts.push(
-      `<div class="vacuum-trade-box ${tone}" style="left:${Math.round(leftPx)}px;top:${Math.round(topPx)}px;width:${Math.round(width)}px;height:${Math.round(height)}px">
-        <span class="vacuum-trade-signal">${sideText}</span>
-      </div>
-      <div class="vacuum-trade-pnl ${tone}" style="left:${Math.round(labelLeft)}px;top:${Math.round(Math.max(2, Math.min(hostH - 36, labelTop)))}px">${roeTxt}<br>${pnlTxt}</div>`,
+      `<div class="vacuum-trade-box ${tone}" style="left:${Math.round(xL)}px;top:${Math.round(topPx)}px;width:${Math.round(width)}px;height:${Math.round(height)}px"></div>
+      <div class="vacuum-trade-signal ${long ? "long" : "short"}" style="left:${Math.round(left)}px;top:${Math.round(sigY)}px;transform:${sigShift}">${sideText}</div>
+      <div class="vacuum-trade-pnl ${tone}" style="left:${Math.round(labelLeft)}px;top:${Math.round(labelTop)}px;transform:translateY(-50%)">${vacuumFmtSigned(money.roe, 1, "%")}<br>${Number.isFinite(money.pnl) ? `${money.pnl >= 0 ? "+" : "−"}$${Math.abs(money.pnl).toFixed(2)}` : "—"}</div>`,
     );
   }
   el.innerHTML = parts.join("");
 }
 
-function vacuumTradeMarkers(runtime, chartInterval) {
-  const markers = [];
-  const trades = vacuumSymbolTrades(vacuumLhState.selected);
-  for (const trade of trades) {
-    const barTime = vacuumMarkerBarTime(runtime, { time_ms: trade.opened_at }, chartInterval);
-    if (!barTime) continue;
-    const long = vacuumTradeSide(trade) === "long";
-    markers.push({
-      time: barTime,
-      position: long ? "belowBar" : "aboveBar",
-      color: long ? "#3ddc84" : "#ff5d73",
-      shape: long ? "arrowUp" : "arrowDown",
-      text: long ? "лонг" : "шорт",
-      _rank: 5000,
-    });
+function ensureVacuumTradeClock() {
+  if (vacuumLhState._tradeClock) return;
+  vacuumLhState._tradeClock = setInterval(() => {
+    const rt = vacuumLhState.chart;
+    if (!vacuumLhState.selected || !rt?._lastBars?.length) return;
+    if (!vacuumSymbolTrades(vacuumLhState.selected).some((t) => t._open)) return;
+    drawVacuumTradeOverlay(rt);
+  }, 1000);
+}
+
+async function fetchVacuumSymbolClosed(symbol) {
+  if (!symbol) return;
+  const seq = ++vacuumLhState._symbolClosedSeq;
+  try {
+    const pairs = await Promise.all(
+      ["pyl", "vps5"].map(async (variant) => {
+        const q = new URLSearchParams({
+          status: "closed",
+          limit: "2000",
+          variant,
+          symbol,
+        });
+        const res = await fetch(`/api/paper/trades?${q}`);
+        if (!res.ok) return [variant, []];
+        const body = await res.json();
+        return [variant, body.rows || []];
+      }),
+    );
+    if (seq !== vacuumLhState._symbolClosedSeq) return;
+    const bag = {};
+    for (const [variant, rows] of pairs) bag[variant] = rows;
+    vacuumLhState.symbolClosed[symbol] = bag;
+    if (vacuumLhState.selected === symbol && vacuumLhState.chart?._lastBars?.length) {
+      drawVacuumTradeOverlay(vacuumLhState.chart);
+    }
+  } catch (_err) {
+    /* ignore */
   }
-  return markers;
 }
 
 function vacuumMoney(n) {
@@ -1219,6 +1333,7 @@ function onVacuumPaper(data) {
   const opens = (data.open_trades || []).filter((t) => t.variant === "pyl" || t.variant === "vps5");
   if (vacuumLhState._lastOpenCount != null && opens.length < vacuumLhState._lastOpenCount) {
     void fetchVacuumDeskClosed(true);
+    if (vacuumLhState.selected) void fetchVacuumSymbolClosed(vacuumLhState.selected);
   }
   vacuumLhState._lastOpenCount = opens.length;
   if (vacuumLhState.mode !== "scan") renderVacuumDesk();

@@ -44,12 +44,14 @@ def snapshot_from_db() -> dict[str, Any]:
         conn.close()
 
 
-def trades(status: str, limit: int, variant: str | None = None) -> list[dict[str, Any]]:
+def trades(
+    status: str, limit: int, variant: str | None = None, symbol: str | None = None
+) -> list[dict[str, Any]]:
     conn = _connect()
     if conn is None:
         return []
     try:
-        return list_trades(conn, status, limit, variant)
+        return list_trades(conn, status, limit, variant, symbol)
     finally:
         conn.close()
 

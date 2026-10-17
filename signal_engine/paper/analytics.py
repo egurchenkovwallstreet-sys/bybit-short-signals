@@ -355,20 +355,26 @@ def _candidate_stats(conn: sqlite3.Connection) -> dict[str, Any]:
 
 
 def list_trades(
-    conn: sqlite3.Connection, status: str = "closed", limit: int = 300, variant: str | None = None
+    conn: sqlite3.Connection,
+    status: str = "closed",
+    limit: int = 300,
+    variant: str | None = None,
+    symbol: str | None = None,
 ) -> list[dict[str, Any]]:
     conn.row_factory = sqlite3.Row
     order = "closed_at" if status == "closed" else "opened_at"
+    clauses = ["status = ?"]
+    args: list[Any] = [status]
     if variant:
-        rows = conn.execute(
-            f"SELECT * FROM paper_trades WHERE status = ? AND variant = ? ORDER BY {order} DESC LIMIT ?",
-            (status, variant, limit),
-        )
-    else:
-        rows = conn.execute(
-            f"SELECT * FROM paper_trades WHERE status = ? ORDER BY {order} DESC LIMIT ?",
-            (status, limit),
-        )
+        clauses.append("variant = ?")
+        args.append(variant)
+    if symbol:
+        clauses.append("symbol = ?")
+        args.append(symbol)
+    rows = conn.execute(
+        f"SELECT * FROM paper_trades WHERE {' AND '.join(clauses)} ORDER BY {order} DESC LIMIT ?",
+        (*args, limit),
+    )
     out = []
     for row in rows:
         item = dict(row)
