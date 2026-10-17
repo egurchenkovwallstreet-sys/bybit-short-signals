@@ -782,6 +782,7 @@ function vacuumLhCardHtml(row) {
     <strong>${row.symbol}</strong>
     <span class="quiet">${Number(row.last_price).toFixed(4)}</span>
     <span class="quiet">${vacuumTurnoverText(row)}</span>
+    <span class="quiet">${vacuumHourRangeText(row)}</span>
     <span class="quiet peaks-line">LH: ${peaks || "—"}</span>
     <span class="quiet troughs-line">HL: ${troughs || "—"}</span>
   </article>`;
@@ -808,6 +809,12 @@ function vacuumTurnoverText(row) {
   return `оборот ${Math.round(n / 1000)} тыс`;
 }
 
+function vacuumHourRangeText(row) {
+  const n = Number(row.hour_range_pct);
+  if (!Number.isFinite(n)) return "час —";
+  return `час ${n.toFixed(1)}%`;
+}
+
 function renderVacuumLhBoard() {
   const desk = document.getElementById("vacuum-desk");
   const list = document.getElementById(VAC_CHART.listWrap);
@@ -826,7 +833,7 @@ function renderVacuumLhBoard() {
   }
   const tfLabel = labelTf(vacuumLhState.lhInterval);
   if (!vacuumLhState.signals.length) {
-    root.innerHTML = `<p class="quiet pump-strategy-empty">На ${tfLabel}: нет монет с оборотом от 1 млн. Список обновляется каждые ~45 с.</p>`;
+    root.innerHTML = `<p class="quiet pump-strategy-empty">На ${tfLabel}: нет монет с оборотом от 1 млн и размахом за час от 3%. Список обновляется каждые ~45 с.</p>`;
     return;
   }
   const buckets = { down: [], mixed: [], up: [] };

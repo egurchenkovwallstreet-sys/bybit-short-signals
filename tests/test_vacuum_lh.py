@@ -14,6 +14,7 @@ from signal_engine.vacuum_lh import (
     all_anchor_peaks,
     apply_peak_confluence,
     classify_lh_hl_structure,
+    hour_range_pct,
     structure_trend_on_interval,
     VACUUM_LH_STRUCTURE_INTERVAL,
     confluence_index,
@@ -221,8 +222,12 @@ class VacuumLhPeaksTest(unittest.TestCase):
         for _ in range(6):
             bars.append(_valley_bar(t, 35.0))
             t += H
+        minutes = [
+            Bar(scan_now - (12 - i) * 60_000, 200.0, 207.0, 199.0, 200.0, 1.0) for i in range(12)
+        ]
         state = SymbolState(
             "XUSDT",
+            bars_1m=minutes,
             bars_htf={"60": bars},
             last_price=200.0,
             turnover_24h_usdt=1_100_000.0,
@@ -233,6 +238,44 @@ class VacuumLhPeaksTest(unittest.TestCase):
         self.assertGreater(row["last_price"], max(p["price"] for p in row["all_peaks"] or row["peaks"] or [{"price": 0}]))
         state.turnover_24h_usdt = 500_000.0
         self.assertIsNone(scan_symbol(state, scan_now))
+
+
+class VacuumHourRangeTest(unittest.TestCase):
+    def _minutes(self, now_ms: int, high: float, low: float, n: int = 12) -> list[Bar]:
+        return [
+            Bar(now_ms - (n - i) * 60_000, 100.0, high, low, 100.0, 1.0) for i in range(n)
+        ]
+
+    def test_three_percent_passes(self) -> None:
+        now = NOW
+        state = SymbolState("X", bars_1m=self._minutes(now, 103.0, 100.0), last_price=100.0)
+        self.assertAlmostEqual(hour_range_pct(state, now, 100.0), 3.0)
+        state.turnover_24h_usdt = 1_100_000.0
+        state.bars_htf["60"] = [_valley_bar(now - i * H, 90.0) for i in range(30, 0, -1)]
+        self.assertIsNotNone(scan_symbol(state, now))
+
+    def test_below_three_percent_rejected(self) -> None:
+        now = NOW
+        state = SymbolState(
+            "X",
+            bars_1m=self._minutes(now, 102.9, 100.0),
+            last_price=100.0,
+            turnover_24h_usdt=1_100_000.0,
+            bars_htf={"60": [_valley_bar(now - i * H, 90.0) for i in range(30, 0, -1)]},
+        )
+        self.assertAlmostEqual(hour_range_pct(state, now, 100.0), 2.9)
+        self.assertIsNone(scan_symbol(state, now))
+
+    def test_no_hour_bars_rejected(self) -> None:
+        now = NOW
+        state = SymbolState(
+            "X",
+            last_price=100.0,
+            turnover_24h_usdt=1_100_000.0,
+            bars_htf={"60": [_valley_bar(now - i * H, 90.0) for i in range(30, 0, -1)]},
+        )
+        self.assertIsNone(hour_range_pct(state, now, 100.0))
+        self.assertIsNone(scan_symbol(state, now))
 
 
 if __name__ == "__main__":

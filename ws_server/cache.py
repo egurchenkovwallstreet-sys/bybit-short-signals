@@ -206,6 +206,9 @@ class MarketCache:
             turnover = signal.get("turnover_24h_usdt")
             if turnover is not None and float(turnover) < config.VACUUM_LH_MIN_TURNOVER_24H_USDT:
                 continue
+            hour_pct = signal.get("hour_range_pct")
+            if hour_pct is not None and float(hour_pct) < config.VACUUM_LH_HOUR_RANGE_PCT:
+                continue
             item = dict(signal)
             live = self.mark_price.get(symbol)
             if live is not None:

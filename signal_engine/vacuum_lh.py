@@ -27,6 +27,46 @@ def _meets_turnover(state: SymbolState) -> bool:
     return turnover >= config.VACUUM_LH_MIN_TURNOVER_24H_USDT
 
 
+def _range_pct(bars: list[Bar], last_price: float) -> float | None:
+    if last_price <= 0 or not bars:
+        return None
+    high = max(float(b.high) for b in bars)
+    low = min(float(b.low) for b in bars)
+    if high <= 0 or low <= 0 or high < low:
+        return None
+    return (high - low) / last_price * 100.0
+
+
+def hour_range_pct(state: SymbolState, now_ms: int, last_price: float | None = None) -> float | None:
+    """Размах цены за последние 60 мин, % от текущей цены. Нет окна — None."""
+    price = float(last_price if last_price is not None else (state.last_price or 0))
+    if price <= 0:
+        return None
+    start = int(now_ms) - 3_600_000
+    minutes = [
+        b
+        for b in (state.bars_1m or [])
+        if start - 60_000 <= int(b.timestamp) <= int(now_ms)
+    ]
+    if len(minutes) >= config.VACUUM_LH_HOUR_MIN_1M_BARS:
+        return _range_pct(minutes, price)
+    fives = [
+        b
+        for b in (state.bars_htf.get("5") or [])
+        if start - 300_000 <= int(b.timestamp) <= int(now_ms)
+    ]
+    if len(fives) >= config.VACUUM_LH_HOUR_MIN_5M_BARS:
+        return _range_pct(fives, price)
+    return None
+
+
+def _meets_hour_range(state: SymbolState, now_ms: int, last_price: float) -> tuple[bool, float | None]:
+    pct = hour_range_pct(state, now_ms, last_price)
+    if pct is None:
+        return False, None
+    return pct + 1e-12 >= config.VACUUM_LH_HOUR_RANGE_PCT, pct
+
+
 def _bars_for_interval(state: SymbolState, interval: str) -> list[Bar]:
     if interval == "1":
         return state.bars_1m
@@ -344,6 +384,9 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
     last = state.last_price
     if last is None or last <= 0:
         return None
+    hour_ok, hour_pct = _meets_hour_range(state, now_ms, float(last))
+    if not hour_ok:
+        return None
     bars = _bars_for_interval(state, lh_interval)
     if len(bars) < _min_bars(lh_interval):
         return None
@@ -377,6 +420,7 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
         ),
         "nearest_peak_price": nearest,
         "gap_to_nearest_pct": round(gap_pct, 2),
+        "hour_range_pct": round(float(hour_pct or 0.0), 2),
         "updated_at": now_ms,
     }
 
