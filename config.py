@@ -266,7 +266,7 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
-PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf")
+PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "vps")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -322,6 +322,11 @@ PAPER_PYL_TRAIL_GAP_ROE = _env_float("PAPER_PYL_TRAIL_GAP_ROE", 5.0)
 PAPER_VAC_VARIANT = "vac"
 PAPER_VAC_SWING_WING = _env_int("PAPER_VAC_SWING_WING", 1)
 PAPER_VAC_LOOKBACK_BARS = _env_int("PAPER_VAC_LOOKBACK_BARS", 240)
+
+# Пылесос LH (vps): 15m pivot, −10% ROE и трейл пик − 10 п.п. с входа; одна сделка до нового сигнала.
+PAPER_VPS_VARIANT = "vps"
+PAPER_VPS_INITIAL_STOP_ROE = _env_float("PAPER_VPS_INITIAL_STOP_ROE", -10.0)
+PAPER_VPS_TRAIL_GAP_ROE = _env_float("PAPER_VPS_TRAIL_GAP_ROE", 10.0)
 
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)
@@ -395,6 +400,8 @@ def paper_stop_style(variant: str) -> str:
         return "impulse"
     if variant in (PAPER_PYL_VARIANT, PAPER_VAC_VARIANT):
         return "pyl"
+    if variant == PAPER_VPS_VARIANT:
+        return "vps"
     return "default"
 
 

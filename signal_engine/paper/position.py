@@ -380,6 +380,47 @@ def pyl_trail_stop(
     return min(min(stops), liq)
 
 
+def vps_trail_stop_short(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    """Пылесос LH: −10% ROE с входа; стоп = min(−10%, пик ROE − 10 п.п.)."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    liq = liquidation_price(entry, lev)
+    floor = net_roe_stop_price(
+        entry, margin, config.PAPER_VPS_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    trail_roe = peak - config.PAPER_VPS_TRAIL_GAP_ROE
+    trail = price_for_roe(entry, trail_roe, lev)
+    return min(min(trail, floor), liq)
+
+
+def vps_trail_stop_long(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+) -> float:
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = long_roe_pct(entry, best_price, lev)
+    liq = long_liquidation_price(entry, lev)
+    floor = net_roe_stop_price_long(
+        entry, margin, config.PAPER_VPS_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    trail_roe = peak - config.PAPER_VPS_TRAIL_GAP_ROE
+    trail = price_for_long_roe(entry, trail_roe, lev)
+    return max(max(trail, floor), liq)
+
+
 def trail_stop(
     entry: float,
     best_price: float,
@@ -624,6 +665,28 @@ class Position:
             if self.gross_pnl(last) < 0:
                 self.loss_cap_armed = True
             self.stop_price = stop
+            return
+        if self.stop_style == "vps":
+            if self.side == "long":
+                trail = vps_trail_stop_long(
+                    self.entry_price,
+                    self.best_price,
+                    self.leverage,
+                    margin=self.margin,
+                    entry_fee=self.entry_fee,
+                    funding_paid=self.funding_paid,
+                )
+                self.stop_price = max(self.liq_price, trail)
+            else:
+                trail = vps_trail_stop_short(
+                    self.entry_price,
+                    self.best_price,
+                    self.leverage,
+                    margin=self.margin,
+                    entry_fee=self.entry_fee,
+                    funding_paid=self.funding_paid,
+                )
+                self.stop_price = min(self.liq_price, trail)
             return
         if self.side == "long":
             trail = trail_stop_long(

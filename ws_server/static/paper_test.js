@@ -34,7 +34,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", vac: "#e9c46a", i5: "#9b5de5", i15: "#f15bb5" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", vac: "#e9c46a", vps: "#2a9d8f", i5: "#9b5de5", i15: "#f15bb5" };
   const PLUS_VARIANTS = { t20p: true, p10p: true, mlnp: true };
   const MINI_VARIANTS = { mt1: true, mt2: true };
   const MINI_CHART_VARIANTS = { mt2c: true };
@@ -42,6 +42,7 @@
   const DPS_VARIANTS = { dps: true };
   const PYL_VARIANTS = { pyl: true };
   const VAC_VARIANTS = { vac: true };
+  const VPS_VARIANTS = { vps: true };
   const SCAN5_VARIANTS = { pyl: true, vac: true };
   const IMPULSE_VARIANTS = { i5: true, i15: true };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
@@ -106,6 +107,10 @@
     if (p.kind === "sc10" || (p.side && (p.kind || "").startsWith("sc10"))) {
       return `Скальп 10: ${p.side === "short" ? "шорт" : "лонг"} пробой 1м`;
     }
+    if (p.kind === "vps") {
+      const dir = p.side === "long" ? "лонг HL" : p.side === "short" ? "шорт LH" : "15m pivot";
+      return `Пылесос: ${dir}`;
+    }
     if (p.growth_pct === undefined) return "—";
     return `${KIND[p.kind] || p.kind}: +${num(p.growth_pct, 1)}% за ${dur(p.duration_min)} (окно ${TRIGGER[p.trigger] || p.trigger || "?"})`;
   }
@@ -119,6 +124,7 @@
     if (paper.variant === "c3") return paper.data.c3_check_labels || {};
     if (PYL_VARIANTS[paper.variant]) return paper.data.pyl_check_labels || {};
     if (VAC_VARIANTS[paper.variant]) return paper.data.vac_check_labels || {};
+    if (VPS_VARIANTS[paper.variant]) return paper.data.vps_check_labels || {};
     if (DPS_VARIANTS[paper.variant]) return paper.data.dps_check_labels || {};
     if (GRAF_VARIANTS[paper.variant]) return paper.data.graf_check_labels || {};
     if (MINI_CHART_VARIANTS[paper.variant]) return paper.data.mini_chart_check_labels || {};
@@ -137,6 +143,7 @@
     if (paper.variant === "c3") return paper.data.c3_mandatory || [];
     if (PYL_VARIANTS[paper.variant]) return paper.data.pyl_mandatory || [];
     if (VAC_VARIANTS[paper.variant]) return paper.data.vac_mandatory || [];
+    if (VPS_VARIANTS[paper.variant]) return paper.data.vps_mandatory || [];
     if (DPS_VARIANTS[paper.variant]) return paper.data.dps_mandatory || [];
     if (GRAF_VARIANTS[paper.variant]) return paper.data.graf_mandatory || [];
     if (MINI_CHART_VARIANTS[paper.variant]) return paper.data.mini_chart_mandatory || [];
@@ -172,6 +179,7 @@
     if (paper.variant === "c3") return ev.c3 || { checks: {}, passed_count: undefined, failed: [] };
     if (PYL_VARIANTS[paper.variant]) return ev.pyl || { checks: {}, passed_count: undefined, failed: [] };
     if (VAC_VARIANTS[paper.variant]) return ev.vac || { checks: {}, passed_count: undefined, failed: [] };
+    if (VPS_VARIANTS[paper.variant]) return ev.vps || { checks: {}, passed_count: undefined, failed: [] };
     if (DPS_VARIANTS[paper.variant]) return ev.dps || { checks: {}, passed_count: undefined, failed: [] };
     if (GRAF_VARIANTS[paper.variant]) return ev.graf || { checks: {}, passed_count: undefined, failed: [] };
     if (MINI_CHART_VARIANTS[paper.variant]) return ev.mini_chart || { checks: {}, passed_count: undefined, failed: [] };
@@ -184,7 +192,7 @@
     if (paper.variant === "css") return rows.filter((r) => r.episode === "css");
     if (paper.variant === "css2") return rows.filter((r) => r.episode === "css2");
     if (paper.variant === "lt20") return rows.filter((r) => r.episode === "growth");
-    if (paper.variant === "sc10" || IMPULSE_VARIANTS[paper.variant] || SCAN5_VARIANTS[paper.variant]) return [];
+    if (paper.variant === "sc10" || IMPULSE_VARIANTS[paper.variant] || SCAN5_VARIANTS[paper.variant] || VPS_VARIANTS[paper.variant]) return [];
     return rows.filter((r) => r.episode !== "css" && r.episode !== "css2" && r.episode !== "sc10" && r.episode !== "growth");
   }
   function vlabel(v) {
@@ -334,6 +342,7 @@
       tr.addEventListener("click", () => {
         if (paper.variant === tr.dataset.variant) return;
         paper.variant = tr.dataset.variant;
+        if (VPS_VARIANTS[paper.variant]) paper.interval = "15";
         if (paper.selected && (paper.selected.type === "open" || paper.selected.type === "closed")) {
           paper.selected = null;
           paper.chartKey = "";
@@ -686,6 +695,53 @@
     if (section) section.hidden = paper.variant === "sc10" || !!IMPULSE_VARIANTS[paper.variant];
     const table = document.getElementById("paper-cand-table");
     if (!table) return;
+    if (VPS_VARIANTS[paper.variant]) {
+      if (section) section.hidden = false;
+      const candNote = document.querySelector("#paper-cand-section .quiet");
+      if (candNote) {
+        candNote.textContent =
+          "15m: новый pivot. Шорт — максимум ниже двух прошлых max; лонг — минимум выше двух прошлых min. Одна сделка на монету до следующего сигнала. Стоп −10% ROE, трейл пик − 10 п.п. с входа.";
+      }
+      const rows = (paper.data && paper.data.vps_watch) || [];
+      const total = mandatory().length;
+      if (!rows.length) {
+        table.innerHTML =
+          '<tbody><tr><td class="quiet">Нет сигналов: ждём новый pivot 15m (LH/HL vs две прошлые точки).</td></tr></tbody>';
+        return;
+      }
+      table.innerHTML = `<thead><tr>
+      <th>Монета</th><th>Условия</th><th>Не хватает</th><th>Сторона</th><th>Pivot</th><th>Готово</th><th>Сила</th>
+    </tr></thead><tbody>${rows
+        .map((r) => {
+          const ev = (r.eval && r.eval.vps) || {};
+          const m = ev.metrics || {};
+          const failed = (r.failed || []).map((k) => labels()[k] || k);
+          const side = r.side || m.side;
+          return `<tr class="clickable" data-vps-symbol="${esc(r.symbol)}">
+          <td><b>${esc(r.symbol)}</b></td>
+          <td>${checkDots(ev)} ${r.passed_count}/${total}</td>
+          <td>${esc(failed.join(", ") || "—")}</td>
+          <td>${side === "long" ? "лонг" : side === "short" ? "шорт" : "—"}</td>
+          <td>${m.pivot_time_ms ? `${time(m.pivot_time_ms)} · ${price(m.pivot_price)}` : "—"}</td>
+          <td>${r.ready ? "да" : "нет"}</td>
+          <td class="grade-${r.grade || "C"}">${r.grade || "—"} · ${num(r.score, 1)}</td>
+        </tr>`;
+        })
+        .join("")}</tbody>`;
+      table.querySelectorAll("tr[data-vps-symbol]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          const sym = tr.dataset.vpsSymbol;
+          const row = rows.find((x) => x.symbol === sym);
+          if (!row) return;
+          paper.selected = { type: "vps_watch", symbol: sym, row };
+          paper.interval = "15";
+          paper.chartKey = "";
+          render();
+          document.getElementById("paper-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+      return;
+    }
     if (VAC_VARIANTS[paper.variant]) {
       if (section) section.hidden = false;
       const rows = (paper.data && paper.data.vac_watch) || [];
@@ -935,6 +991,10 @@
       const r = (paper.history || []).find((x) => x.id === sel.id);
       return r ? { kind: "hist", row: r, symbol: r.symbol, ev: r.last_eval } : null;
     }
+    if (sel.type === "vps_watch") {
+      const r = sel.row;
+      return r ? { kind: "vps_watch", row: r, symbol: sel.symbol, ev: (r.eval && r.eval.vps) || {} } : null;
+    }
     return null;
   }
 
@@ -960,6 +1020,25 @@
     const p = m.pump || {};
     const pylOnly = PYL_VARIANTS[paper.variant] || (p.kind === "pyl" && paper.variant === "pyl");
     const vacOnly = VAC_VARIANTS[paper.variant] || (p.kind === "vac" && paper.variant === "vac");
+    const vpsOnly = VPS_VARIANTS[paper.variant] || (p.kind === "vps" && paper.variant === "vps");
+    if (vpsOnly) {
+      let html = `<h4>Условия: выполнено ${passedText(ev)} · ${esc(vlabel(paper.variant))}</h4><ul class="paper-check-list">`;
+      html += mandatory()
+        .map((key) => {
+          const c = ev.checks[key] || {};
+          return `<li class="${c.ok ? "ok" : "fail"}">${c.ok ? "✓" : "✗"} ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
+        })
+        .join("");
+      html += "</ul>";
+      if (m.pivot_time_ms) {
+        html += kv([
+          ["Сторона", m.side === "long" ? "лонг" : m.side === "short" ? "шорт" : "—"],
+          ["Pivot 15m", `${time(m.pivot_time_ms)} · ${price(m.pivot_price)}`],
+          ["Стоп / трейл", "−10% ROE, дальше пик − 10 п.п. ROE"],
+        ]);
+      }
+      return html;
+    }
     if (vacOnly) {
       let html = `<h4>Условия: выполнено ${passedText(ev)} · ${esc(vlabel(paper.variant))}</h4><ul class="paper-check-list">`;
       html += mandatory()
@@ -1138,14 +1217,22 @@
     }
     panel.hidden = false;
     const title = document.getElementById("paper-detail-title");
-    const what = item.kind === "trade" ? (item.live ? "Открытая сделка" : "Закрытая сделка") : "Кандидат";
+    const what =
+      item.kind === "trade"
+        ? item.live
+          ? "Открытая сделка"
+          : "Закрытая сделка"
+        : item.kind === "vps_watch"
+          ? "Сигнал Пылесос"
+          : "Кандидат";
     title.textContent = `${item.symbol} — ${what}${item.kind === "trade" && item.row.variant ? ` (${vlabel(item.row.variant)})` : ""}`;
     const info = document.getElementById("paper-detail-info");
     const scroll = info.scrollTop;
-    info.innerHTML = (item.kind === "trade" ? tradeHtml(item) : candHtml(item)) + evalHtml(item.ev);
+    info.innerHTML =
+      (item.kind === "trade" ? tradeHtml(item) : item.kind === "vps_watch" ? "" : candHtml(item)) + evalHtml(item.ev);
     info.scrollTop = scroll;
     renderTfRow();
-    const key = `${item.symbol}|${paper.interval}|${item.kind}|${paper.selected.id}`;
+    const key = `${item.symbol}|${paper.interval}|${item.kind}|${paper.selected.id ?? paper.selected.symbol ?? ""}`;
     if (paper.chartKey !== key) {
       paper.chartKey = key;
       loadChart(item);
@@ -1248,6 +1335,13 @@
       if (r.shadow_exit_price) add(r.shadow_exit_price, "#ff9f43", "тень: выход", 0);
     } else if (item.kind === "cand" && r.shadow) {
       add(r.shadow.entry_price, "#5dade2", "тень: вход", 0);
+    }
+    const vpsEv = item.ev || {};
+    const vpsM = vpsEv.metrics || {};
+    if (VPS_VARIANTS[paper.variant] || vpsM.kind === "vps") {
+      (vpsM.peaks || []).slice(-5).forEach((p, i) => add(p.price, "#e76f51", `LH${i + 1}`, 3));
+      (vpsM.troughs || []).slice(-5).forEach((p, i) => add(p.price, "#2a9d8f", `HL${i + 1}`, 3));
+      if (vpsM.pivot_price) add(vpsM.pivot_price, "#f6d365", "pivot", 0);
     }
     const step = { "5": 300, "15": 900, "60": 3600, "240": 14400 }[paper.interval] || 900;
     paper.series.setMarkers(
