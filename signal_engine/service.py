@@ -14,6 +14,7 @@ import time
 import config
 from collector.publisher import RedisPublisher, open_redis
 from signal_engine.engine import Engine
+from signal_engine.paper.pivot_clock import batch_has_closed_bar
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.store import SignalStore
 
@@ -47,23 +48,27 @@ class SignalService:
             config.REDIS_CHANNEL_SIGNALS,
         )
         next_scan = 0.0
-        kline_task = (
-            asyncio.create_task(self._paper_kline_loop()) if self.engine.paper is not None else None
-        )
+        self._confirm_burst = False
+        side_tasks: list[asyncio.Task] = []
+        if self.engine.paper is not None:
+            side_tasks.append(asyncio.create_task(self._paper_kline_loop()))
+            side_tasks.append(asyncio.create_task(self._five_min_tail_loop()))
+            side_tasks.append(asyncio.create_task(self._pivot_confirm_loop()))
         try:
             while True:
                 message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
                 if message and message.get("type") == "message":
                     self._ingest_raw(message.get("data"))
                 now = time.monotonic()
-                if now >= next_scan:
+                if now >= next_scan and not self._confirm_burst:
                     for item in self.engine.scan(int(time.time() * 1000)):
                         self._publisher.publish(item)
                     next_scan = now + config.MARKET_SCAN_INTERVAL_SEC
         finally:
-            if kline_task is not None:
-                kline_task.cancel()
-                await asyncio.gather(kline_task, return_exceptions=True)
+            for task in side_tasks:
+                task.cancel()
+            if side_tasks:
+                await asyncio.gather(*side_tasks, return_exceptions=True)
             if self.engine.paper is not None:
                 self.engine.paper.close()
             if self.engine.pump_lab is not None:
@@ -109,6 +114,9 @@ class SignalService:
                 paper_syms = set(paper.kline_wanted())
                 five_syms = self._five_min_symbols()
                 for symbol in sorted(paper_syms | five_syms):
+                    if self._confirm_burst:
+                        await asyncio.sleep(0.2)
+                        break
                     fetched = paper.kline_at.get(symbol, 0.0)
                     if time.time() - fetched < config.PAPER_KLINE_REFRESH_SEC:
                         continue
@@ -129,6 +137,116 @@ class SignalService:
                 await asyncio.sleep(5)
         finally:
             await rest.close()
+
+    async def _five_min_tail_loop(self) -> None:
+        """Короткий хвост 5м по монетам порога, чтобы первая свеча подтверждения была видна заранее."""
+        from collector.rest_client import BybitRest
+
+        rest = BybitRest()
+        await rest.open()
+        try:
+            while True:
+                if self._confirm_burst:
+                    await asyncio.sleep(0.2)
+                    continue
+                symbols = sorted(self._five_min_symbols())
+                if not symbols:
+                    await asyncio.sleep(2)
+                    continue
+                for symbol in symbols:
+                    if self._confirm_burst:
+                        break
+                    try:
+                        message = await rest.fetch_klines(symbol, "5", config.PAPER_PIVOT_CONFIRM_FETCH_LIMIT)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        log.exception("Хвост 5м %s не получен", symbol)
+                        continue
+                    if message:
+                        self.engine.ingest(message)
+                await asyncio.sleep(0.5)
+        finally:
+            await rest.close()
+
+    async def _pivot_confirm_loop(self) -> None:
+        """В момент закрытия 5м добирает свечи списка ожидания и сразу сканирует."""
+        from collector.rest_client import BybitRest
+
+        paper = self.engine.paper
+        assert paper is not None
+        rest = BybitRest()
+        await rest.open()
+        limit = config.PAPER_PIVOT_CONFIRM_FETCH_LIMIT
+        parallel = max(1, config.PAPER_PIVOT_CONFIRM_PARALLEL)
+        try:
+            while True:
+                await self._sleep_until_five_min_close(0.6)
+                symbols = paper.confirm_fetch_symbols()
+                if not symbols:
+                    continue
+                started = time.time()
+                close_ms = int(started) // 300 * 300 * 1000
+                self._confirm_burst = True
+                try:
+                    pending = list(symbols)
+                    for pause in (0.0, 1.4, 2.2):
+                        if pause:
+                            await asyncio.sleep(pause)
+                        if not pending or time.time() - started > 8:
+                            break
+                        fetched = await self._fetch_five_min_tail(rest, pending, limit, parallel)
+                        still: list[str] = []
+                        ready = 0
+                        now_ms = int(time.time() * 1000)
+                        for symbol in pending:
+                            message = fetched.get(symbol)
+                            candles = ((message or {}).get("data") or {}).get("candles") or []
+                            if message and batch_has_closed_bar(candles, close_ms, now_ms):
+                                self.engine.ingest(message)
+                                ready += 1
+                            else:
+                                still.append(symbol)
+                        pending = still
+                        if ready:
+                            for item in self.engine.scan(now_ms):
+                                if self._publisher is not None:
+                                    self._publisher.publish(item)
+                    lag_ms = int((time.time() - (close_ms / 1000)) * 1000)
+                    log.info(
+                        "Пивот 5м: проверка %s монет, осталось без закрытой свечи %s, %d мс после закрытия",
+                        len(symbols),
+                        len(pending),
+                        lag_ms,
+                    )
+                finally:
+                    self._confirm_burst = False
+        finally:
+            await rest.close()
+
+    async def _sleep_until_five_min_close(self, after_sec: float) -> None:
+        now = time.time()
+        into = now % 300
+        if into <= after_sec + 1.0:
+            await asyncio.sleep(max(0.0, after_sec - into))
+            return
+        await asyncio.sleep(300 - into + after_sec)
+
+    async def _fetch_five_min_tail(self, rest, symbols: list[str], limit: int, parallel: int) -> dict:
+        sem = asyncio.Semaphore(parallel)
+
+        async def one(symbol: str):
+            async with sem:
+                try:
+                    return symbol, await rest.fetch_klines(symbol, "5", limit, locked=False)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    log.exception("Подтверждение 5м %s не получено", symbol)
+                    return symbol, None
+
+        pairs = await asyncio.gather(*(one(symbol) for symbol in symbols))
+        return {symbol: message for symbol, message in pairs}
 
     def _ingest_raw(self, raw: object) -> None:
         if isinstance(raw, bytes):

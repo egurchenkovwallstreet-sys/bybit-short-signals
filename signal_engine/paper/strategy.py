@@ -46,6 +46,7 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
+from signal_engine.paper.pivot_clock import just_confirmed, symbols_waiting_second_bar
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
 from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
@@ -249,6 +250,7 @@ class PaperStrategy:
         self._vps_used_signals: dict[tuple[str, str], str] = {}
         self._vps15_watch: list[dict] = []
         self._vps5_watch: list[dict] = []
+        self._confirm_arm: set[str] = set()
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -568,6 +570,8 @@ class PaperStrategy:
         if config.PAPER_SC10_VARIANT in VARIANTS:
             self._evaluate_sc10(states, now_ms)
         self._evaluate_impulse(states, now_ms)
+        if config.PAPER_PYL_VARIANT in VARIANTS or config.PAPER_VPS5_VARIANT in VARIANTS:
+            self._refresh_five_min_arm(states, now_ms)
         if config.PAPER_PYL_VARIANT in VARIANTS:
             self._evaluate_pyl(states, now_ms)
         if config.PAPER_VAC_VARIANT in VARIANTS:
@@ -778,6 +782,8 @@ class PaperStrategy:
     def _close_trade(self, trade: OpenTrade, reason: str, state: SymbolState, now_ms: int) -> None:
         pos = trade.pos
         variant = trade.variant
+        if reason == "opposite_pivot" and state.last_price:
+            pos.last_price = float(state.last_price)
         result = pos.close_result(reason)
         balance_before_close = self.balances[variant]
         self.balances[variant] += result["pnl_usd"]
@@ -1857,6 +1863,26 @@ class PaperStrategy:
             len(impulse_mandatory(ev.minutes)),
         )
 
+    def confirm_fetch_symbols(self) -> list[str]:
+        """Монеты, которым в момент закрытия 5м нужна свежая свеча: ожидание второй или открытая сделка."""
+        return sorted(self._confirm_arm)
+
+    def _refresh_five_min_arm(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        armed = symbols_waiting_second_bar(states, now_ms, config.PAPER_PYL_INTERVAL)
+        for (variant, symbol) in self.trades:
+            if variant in (config.PAPER_PYL_VARIANT, config.PAPER_VPS5_VARIANT):
+                armed.add(symbol)
+        self._confirm_arm = armed
+
+    def _five_min_just_confirmed(self, entry: dict, now_ms: int) -> bool:
+        if not entry.get("passed"):
+            return False
+        metrics = entry.get("metrics") or {}
+        pivot_time = metrics.get("pivot_time_ms")
+        if not pivot_time:
+            return False
+        return just_confirmed(int(pivot_time), now_ms, config.PAPER_PYL_INTERVAL)
+
     def _evaluate_pyl(self, states: dict[str, SymbolState], now_ms: int) -> None:
         variant = config.PAPER_PYL_VARIANT
         if variant not in VARIANTS:
@@ -1874,6 +1900,7 @@ class PaperStrategy:
             ev_clean = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
             pc = int(ev_clean.get("passed_count") or 0)
             side = ev_clean.get("side")
+            fresh = self._five_min_just_confirmed(ev_clean, now_ms)
             if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
                 watch.append(
                     {
@@ -1883,21 +1910,21 @@ class PaperStrategy:
                         "eval": {"pyl": ev_clean},
                         "grade": ev_clean.get("grade"),
                         "score": ev_clean.get("score"),
-                        "ready": bool(ev_clean.get("passed")),
+                        "ready": fresh,
                         "side": side,
                     }
                 )
             open_key = (variant, symbol)
             if open_key in self.trades:
                 trade = self.trades[open_key]
-                if ev_clean.get("passed") and side and side != trade.pos.side:
+                if fresh and side and side != trade.pos.side:
                     self._close_trade(trade, "opposite_pivot", state, now_ms)
                     balance = self.balances[variant]
                     margin = balance * config.PAPER_MARGIN_PCT / 100.0
                     if margin > 0 and balance - self.used_margin(variant) >= margin:
                         self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms)
                 continue
-            if not ev_clean.get("passed"):
+            if not fresh:
                 continue
             balance = self.balances[variant]
             margin = balance * config.PAPER_MARGIN_PCT / 100.0
@@ -2130,18 +2157,22 @@ class PaperStrategy:
                         }
                     )
                 open_key = (variant, symbol)
+                fresh = self._five_min_just_confirmed(ev_data, now_ms) if like_pyl else False
                 if open_key in self.trades:
                     if like_pyl:
                         trade = self.trades[open_key]
                         side = ev_data.get("side") or m.get("side")
-                        if ev_data.get("passed") and side and side != trade.pos.side:
+                        if fresh and side and side != trade.pos.side:
                             self._close_trade(trade, "opposite_pivot", state, now_ms)
                             balance = self.balances[variant]
                             margin = balance * config.PAPER_MARGIN_PCT / 100.0
                             if margin > 0 and balance - self.used_margin(variant) >= margin:
                                 self._open_vps_trade(variant, symbol, state, ev_data, margin, now_ms)
                     continue
-                if not ev_data.get("passed"):
+                if like_pyl:
+                    if not fresh:
+                        continue
+                elif not ev_data.get("passed"):
                     continue
                 signal_key = str(m.get("signal_key") or "")
                 if signal_key and self._vps_used_signals.get((variant, symbol)) == signal_key:

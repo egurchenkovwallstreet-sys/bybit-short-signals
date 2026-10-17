@@ -309,10 +309,14 @@ PAPER_DPS_MIN_TURNOVER = _env_float("PAPER_DPS_MIN_TURNOVER", 10_000_000.0)
 PAPER_DPS_COOLDOWN_SEC = _env_int("PAPER_DPS_COOLDOWN_SEC", 90 * 60)
 PAPER_DPS_MAX_OPEN = _env_int("PAPER_DPS_MAX_OPEN", 3)
 
-# БАБЛОСОС $$$ (pyl): M5 pivot как LH-скан; стоп ±5% ROE от high/low свечи pivot; flip по opposite pivot.
+# БАБЛОСОС $$$ (pyl): M5 pivot как LH-скан; стоп ±5% ROE от high/low свечи pivot.
+# Вход и закрытие по противоположному pivot — не позже 10 с после закрытия второй свечи.
 PAPER_PYL_VARIANT = "pyl"
 PAPER_PYL_INTERVAL = "5"
 PAPER_PYL_STOP_ROE = _env_float("PAPER_PYL_STOP_ROE", 5.0)
+PAPER_PIVOT_CONFIRM_SLACK_MS = _env_int("PAPER_PIVOT_CONFIRM_SLACK_MS", 10_000)
+PAPER_PIVOT_CONFIRM_FETCH_LIMIT = _env_int("PAPER_PIVOT_CONFIRM_FETCH_LIMIT", 8)
+PAPER_PIVOT_CONFIRM_PARALLEL = _env_int("PAPER_PIVOT_CONFIRM_PARALLEL", 8)
 # vac — прежний трейл pyl (не путать с bab):
 PAPER_PYL_INITIAL_STOP_ROE = _env_float("PAPER_PYL_INITIAL_STOP_ROE", -10.0)
 PAPER_PYL_LOSS_CAP_ROE = _env_float("PAPER_PYL_LOSS_CAP_ROE", -10.0)

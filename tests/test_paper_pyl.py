@@ -7,7 +7,14 @@ import unittest
 
 import config
 from signal_engine.paper.lh_scan_pivot import signal_from_pivot_diff
-from signal_engine.paper.position import bab_pivot_stop_price, price_for_roe
+from signal_engine.paper.pivot_clock import (
+    batch_has_closed_bar,
+    first_bar_waiting,
+    just_confirmed,
+    second_bar_close_ms,
+    symbols_waiting_second_bar,
+)
+from signal_engine.paper.position import Position, bab_pivot_stop_price, price_for_roe
 from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
 from signal_engine.paper.vac_lh_detect import (
     detect_entry_signal,
@@ -108,6 +115,56 @@ class FiveMinStoreAndEntryTest(unittest.TestCase):
 
     def test_collector_fetches_5m(self) -> None:
         self.assertIn("5", config.KLINE_INTERVALS)
+
+
+class PivotConfirmClockTest(unittest.TestCase):
+    def test_window_is_ten_seconds_after_second_bar(self) -> None:
+        pivot = T0
+        close_at = second_bar_close_ms(pivot, "5")
+        self.assertEqual(close_at, pivot + 3 * STEP)
+        self.assertTrue(just_confirmed(pivot, close_at, "5"))
+        self.assertTrue(just_confirmed(pivot, close_at + 9_000, "5"))
+        self.assertFalse(just_confirmed(pivot, close_at + 11_000, "5"))
+        self.assertFalse(just_confirmed(pivot, close_at - 1, "5"))
+        self.assertTrue(first_bar_waiting(pivot, close_at - 1_000, "5"))
+        self.assertFalse(first_bar_waiting(pivot, close_at, "5"))
+
+    def test_waiting_symbol_is_armed_after_first_bar(self) -> None:
+        bars: list[Bar] = []
+        for i in range(50):
+            bars.append(Bar(T0 + i * STEP, 10.0, 10.2, 9.8, 10.0, 1.0))
+        peak_ts = T0 + 50 * STEP
+        bars.append(Bar(peak_ts, 10.0, 15.0, 9.9, 12.0, 1.0))
+        bars.append(Bar(peak_ts + STEP, 10.0, 10.3, 9.7, 10.0, 1.0))
+        now_ms = peak_ts + 2 * STEP + 1_000
+        state = SymbolState("XUSDT", last_price=10.0, turnover_24h_usdt=2_000_000.0)
+        state.bars_htf["5"] = bars
+        armed = symbols_waiting_second_bar({"XUSDT": state}, now_ms, "5")
+        self.assertIn("XUSDT", armed)
+        self.assertFalse(just_confirmed(peak_ts, now_ms, "5"))
+        self.assertTrue(just_confirmed(peak_ts, second_bar_close_ms(peak_ts, "5") + 500, "5"))
+
+    def test_closed_bar_ready_when_next_candle_exists(self) -> None:
+        close_ms = T0 + 3 * STEP
+        candles = [{"timestamp": close_ms - STEP}, {"timestamp": close_ms}]
+        self.assertTrue(batch_has_closed_bar(candles, close_ms, close_ms + 700))
+        self.assertFalse(batch_has_closed_bar([{"timestamp": close_ms - 2 * STEP}], close_ms, close_ms + 700))
+
+    def test_opposite_close_uses_market_not_stop(self) -> None:
+        pos = Position(
+            symbol="XUSDT",
+            opened_at=T0,
+            entry_price=100.0,
+            margin=50.0,
+            side="long",
+            stop_style="bab",
+            stop_price=90.0,
+            last_price=101.5,
+        )
+        market = pos.close_result("opposite_pivot")
+        stopped = pos.close_result("trailing_stop")
+        self.assertAlmostEqual(market["exit_price"], 101.5)
+        self.assertAlmostEqual(stopped["exit_price"], 90.0)
 
 
 if __name__ == "__main__":

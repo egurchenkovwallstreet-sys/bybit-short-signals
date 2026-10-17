@@ -149,14 +149,16 @@ class BybitRest:
         payload = await self._call("publicGetV5MarketOrderbook", params)
         return orderbook_from_rest(_result(payload))
 
-    async def fetch_klines(self, symbol: str, interval: str, limit: int | None = None) -> dict[str, Any] | None:
+    async def fetch_klines(
+        self, symbol: str, interval: str, limit: int | None = None, *, locked: bool = True
+    ) -> dict[str, Any] | None:
         params = {
             "category": config.BYBIT_CATEGORY,
             "symbol": symbol,
             "interval": interval,
             "limit": limit or config.KLINE_FETCH_LIMIT,
         }
-        payload = await self._call("publicGetV5MarketKline", params)
+        payload = await self._call("publicGetV5MarketKline", params, locked=locked)
         rows = _result(payload).get("list") or []
         return kline_message(symbol, interval, rows)
 
@@ -263,9 +265,11 @@ class BybitRest:
             {"interval": interval, "points": merged},
         )
 
-    async def _call(self, method_name: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def _call(self, method_name: str, params: dict[str, Any], *, locked: bool = True) -> dict[str, Any]:
         if self._exchange is None:
             raise RuntimeError("REST-клиент не открыт")
         method = getattr(self._exchange, method_name)
+        if not locked:
+            return await method(params)
         async with self._lock:
             return await method(params)
