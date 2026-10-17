@@ -1521,6 +1521,38 @@ function vacuumTimeToX(runtime, ms) {
   return step ? step.x0 + (target - step.sec0) * step.px : xAt(lo);
 }
 
+function vacuumMarkOnScreen(x, hostW) {
+  if (x == null || Number.isNaN(x)) return false;
+  if (hostW > 0 && (x < -8 || x > hostW + 8)) return false;
+  return true;
+}
+
+function vacuumClosedTradeMarks(runtime, trade, hostW) {
+  const entry = Number(trade.entry_price);
+  const long = vacuumTradeSide(trade) === "long";
+  const sideText = long ? "лонг" : "шорт";
+  const parts = [];
+  const xIn = vacuumTimeToX(runtime, trade.opened_at);
+  const yIn = runtime.series.priceToCoordinate(entry);
+  if (vacuumMarkOnScreen(xIn, hostW) && yIn != null && !Number.isNaN(yIn)) {
+    const sigShift = long ? "translate(-50%, 6px)" : "translate(-50%, calc(-100% - 6px))";
+    parts.push(
+      `<div class="vacuum-trade-signal ${long ? "long" : "short"}" style="left:${Math.round(xIn)}px;top:${Math.round(yIn)}px;transform:${sigShift}">${sideText}</div>`,
+    );
+  }
+  const exitPx = Number(trade.exit_price || trade.last_price);
+  const xOut = trade.closed_at ? vacuumTimeToX(runtime, trade.closed_at) : null;
+  const yOut = exitPx > 0 ? runtime.series.priceToCoordinate(exitPx) : null;
+  if (vacuumMarkOnScreen(xOut, hostW) && yOut != null && !Number.isNaN(yOut)) {
+    const money = vacuumTradePnl(trade, exitPx);
+    const plus = (Number.isFinite(money.roe) ? money.roe : Number(money.pnl)) >= 0;
+    parts.push(
+      `<div class="vacuum-trade-exit ${plus ? "plus" : "minus"}" style="left:${Math.round(xOut)}px;top:${Math.round(yOut)}px;transform:translate(-50%, calc(-100% - 6px))">выход</div>`,
+    );
+  }
+  return parts.join("");
+}
+
 function vacuumFmtSigned(n, digits, suffix) {
   if (!Number.isFinite(n)) return "—";
   const sign = n >= 0 ? "+" : "−";
@@ -1549,6 +1581,11 @@ function drawVacuumTradeOverlay(runtime) {
   for (const trade of trades) {
     const entry = Number(trade.entry_price);
     if (!(entry > 0) || !trade.opened_at) continue;
+    if (!trade._open) {
+      const closedHtml = vacuumClosedTradeMarks(runtime, trade, hostW);
+      if (closedHtml) parts.push(closedHtml);
+      continue;
+    }
     const left = vacuumTimeToX(runtime, trade.opened_at);
     const rightMs = trade._open ? nowMs : Number(trade.closed_at);
     const right = vacuumTimeToX(runtime, rightMs);
