@@ -6,6 +6,7 @@ import config
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import (
     closed_bars,
+    filter_pivots_min_bar_gap,
     pivot_highs_floating_left,
     pivot_lows_floating_left,
 )
@@ -56,6 +57,18 @@ def bars_from_candle_rows(rows: list[dict]) -> list[Bar]:
     return bars
 
 
+def _filtered_pivot_highs(segment: list[Bar], pl: int, pl_max: int, pr: int) -> list[dict]:
+    raw = pivot_highs_floating_left(segment, pl, pl_max, pr)
+    gap = config.VACUUM_LH_PIVOT_MIN_GAP
+    return filter_pivots_min_bar_gap(raw, gap, kind="peak")
+
+
+def _filtered_pivot_lows(segment: list[Bar], pl: int, pl_max: int, pr: int) -> list[dict]:
+    raw = pivot_lows_floating_left(segment, pl, pl_max, pr)
+    gap = config.VACUUM_LH_PIVOT_MIN_GAP
+    return filter_pivots_min_bar_gap(raw, gap, kind="trough")
+
+
 def _lookback_segment(bars: list[Bar], interval: str, now_ms: int) -> list[Bar]:
     lookback_ms = config.VACUUM_LH_LOOKBACK_DAYS * 24 * 3_600_000
     closed = closed_bars(bars, interval, now_ms)
@@ -70,7 +83,7 @@ def all_anchor_peaks(bars: list[Bar], interval: str, now_ms: int) -> list[dict]:
     pl = config.VACUUM_LH_PIVOT_LEFT
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = config.VACUUM_LH_PIVOT_RIGHT
-    raw = pivot_highs_floating_left(segment, pl, pl_max, pr)
+    raw = _filtered_pivot_highs(segment, pl, pl_max, pr)
     raw.sort(key=lambda p: int(p["time"]))
     return project_peaks_to_chart(raw, interval)
 
@@ -82,7 +95,7 @@ def all_anchor_troughs(bars: list[Bar], interval: str, now_ms: int) -> list[dict
     pl = config.VACUUM_LH_PIVOT_LEFT
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = config.VACUUM_LH_PIVOT_RIGHT
-    raw = pivot_lows_floating_left(segment, pl, pl_max, pr)
+    raw = _filtered_pivot_lows(segment, pl, pl_max, pr)
     raw.sort(key=lambda p: int(p["time"]))
     return project_troughs_to_chart(raw, interval)
 
@@ -102,7 +115,7 @@ def last_lower_high_peaks(
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
     segment = _lookback_segment(bars, interval, now_ms)
-    peaks = pivot_highs_floating_left(segment, pl, pl_max, pr)
+    peaks = _filtered_pivot_highs(segment, pl, pl_max, pr)
     if len(peaks) < 2:
         return []
     chain: list[dict] = [peaks[-1]]
@@ -133,7 +146,7 @@ def last_higher_low_troughs(
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = pivot_right if pivot_right is not None else config.VACUUM_LH_PIVOT_RIGHT
     segment = _lookback_segment(bars, interval, now_ms)
-    troughs = pivot_lows_floating_left(segment, pl, pl_max, pr)
+    troughs = _filtered_pivot_lows(segment, pl, pl_max, pr)
     if len(troughs) < 2:
         return []
     chain: list[dict] = [troughs[-1]]

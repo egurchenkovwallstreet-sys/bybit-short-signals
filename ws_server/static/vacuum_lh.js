@@ -776,7 +776,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>: все H/L за <strong>14 д</strong> на свече. Цепочка LH/HL списка: <strong>${lhTf}</strong>.</p>
+    <p>График <strong>${chartTf}</strong>: точки H/L за <strong>14 д</strong> (pivot ≥7 свечей между max и между min). Цепочка списка: <strong>${lhTf}</strong>.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
@@ -832,17 +832,6 @@ function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
       : kind === "trough"
         ? "L"
         : "H";
-    const lines = kind === "trough" ? runtime._vacuumTroughLines : runtime._vacuumPeakLines;
-    lines.push(
-      runtime.series.createPriceLine({
-        price,
-        color: style.color,
-        lineWidth: style.lineWidth,
-        lineStyle: style.lineStyle,
-        axisLabelVisible: true,
-        title: label,
-      }),
-    );
     const tMs = p.time_ms ?? p.time_chart_ms ?? p.time_15m_ms;
     const barTime = BC?.candleTime?.(tMs, iv);
     if (barTime) {

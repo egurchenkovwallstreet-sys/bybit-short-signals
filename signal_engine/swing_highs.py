@@ -150,9 +150,37 @@ def pivot_highs_floating_left(
     right: int = 2,
 ) -> list[dict]:
     return [
-        {"time": p["time"], "price": p["price"], "left_strength": p.get("left_strength", left_min)}
+        {
+            "time": p["time"],
+            "price": p["price"],
+            "left_strength": p.get("left_strength", left_min),
+            "bar_index": int(p["bar_index"]),
+        }
         for p in pivot_highs_floating_left_indexed(bars, left_min, left_max, right)
     ]
+
+
+def filter_pivots_min_bar_gap(pivots: list[dict], min_gap: int, *, kind: str) -> list[dict]:
+    """Оставляет pivot того же типа не ближе min_gap свечей; в кластере — экстремум (max high / min low)."""
+    if min_gap < 1 or not pivots:
+        return list(pivots)
+    ordered = sorted(pivots, key=lambda p: int(p.get("bar_index", 0)))
+    kept: list[dict] = []
+    for p in ordered:
+        bi = int(p.get("bar_index", 0))
+        if not kept:
+            kept.append(p)
+            continue
+        last = kept[-1]
+        if bi - int(last.get("bar_index", 0)) < min_gap:
+            if kind == "peak":
+                if float(p["price"]) > float(last["price"]):
+                    kept[-1] = p
+            elif float(p["price"]) < float(last["price"]):
+                kept[-1] = p
+        else:
+            kept.append(p)
+    return kept
 
 
 def pivot_lows_floating_left_indexed(
@@ -197,7 +225,12 @@ def pivot_lows_floating_left(
     right: int = 2,
 ) -> list[dict]:
     return [
-        {"time": p["time"], "price": p["price"], "left_strength": p.get("left_strength", left_min)}
+        {
+            "time": p["time"],
+            "price": p["price"],
+            "left_strength": p.get("left_strength", left_min),
+            "bar_index": int(p["bar_index"]),
+        }
         for p in pivot_lows_floating_left_indexed(bars, left_min, left_max, right)
     ]
 
