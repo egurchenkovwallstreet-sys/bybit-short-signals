@@ -284,20 +284,31 @@
     requestAnimationFrame(() => paper.equityChart && paper.equityChart.resize());
   }
 
+  function closedTradesVariant() {
+    return paper.variant === "vps" ? "vps15" : paper.variant;
+  }
+
   async function fetchLists(force) {
     const now = Date.now();
-    if (!force && now - paper.lastListFetch < 30000 && paper.closedVariant === paper.variant) return;
-    paper.lastListFetch = now;
     const variant = paper.variant;
+    const apiVariant = closedTradesVariant();
+    const closedExpected = (vstats(variant).trades || {}).closed || 0;
+    const haveClosed =
+      paper.closedVariant === variant && Array.isArray(paper.closed) && paper.closed.length > 0;
+    const staleEmpty = paper.closedVariant === variant && closedExpected > 0 && !paper.closed.length;
+    if (!force && !staleEmpty && haveClosed && now - paper.lastListFetch < 30000) return;
     try {
-      const [closed, hist] = await Promise.all([
-        fetch(`/api/paper/trades?status=closed&limit=500&variant=${encodeURIComponent(variant)}`).then((r) => r.json()),
+      const [closedRes, hist] = await Promise.all([
+        fetch(`/api/paper/trades?status=closed&limit=500&variant=${encodeURIComponent(apiVariant)}`),
         fetch("/api/paper/candidates?limit=500").then((r) => r.json()),
       ]);
       if (variant !== paper.variant) return;
+      if (!closedRes.ok) return;
+      const closed = await closedRes.json();
       paper.closed = closed.rows || [];
       paper.closedVariant = variant;
       paper.history = hist.rows || [];
+      paper.lastListFetch = now;
     } catch (_err) {
       /* ignore */
     }
