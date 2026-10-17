@@ -161,7 +161,7 @@ def pivot_highs_floating_left(
 
 
 def _pivot_strength_rank(p: dict, kind: str) -> tuple[int, float]:
-    """Сначала left_strength 7–20, затем экстремум цены."""
+    """Сначала left_strength 15–30, затем экстремум цены."""
     ls = int(p.get("left_strength") or 0)
     price = float(p["price"])
     if kind == "peak":
@@ -170,7 +170,7 @@ def _pivot_strength_rank(p: dict, kind: str) -> tuple[int, float]:
 
 
 def filter_pivots_min_bar_gap(pivots: list[dict], min_gap: int, *, kind: str) -> list[dict]:
-    """Pivot одного типа не ближе min_gap свечей; в кластере — сильнее left (7–20), затем экстремум."""
+    """Pivot одного типа не ближе min_gap свечей; в кластере — сильнее left (15–30), затем экстремум."""
     if min_gap < 1 or not pivots:
         return list(pivots)
     ordered = sorted(pivots, key=lambda p: int(p.get("bar_index", 0)))

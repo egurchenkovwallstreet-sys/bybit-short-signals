@@ -80,14 +80,14 @@ function vacuumPivotMatchCount(p) {
 
 function vacuumLeftStrength(p) {
   const ls = Number(p?.left_strength);
-  if (ls >= 7 && ls <= 20) return ls;
-  return 7;
+  if (ls >= 15 && ls <= 30) return ls;
+  return 15;
 }
 
 function vacuumPivotLineStyle(p, fallbackColor, kind) {
   const n = vacuumPivotMatchCount(p);
   const ls = vacuumLeftStrength(p);
-  const amp = Math.min(1, Math.max(0, (ls - 7) / 13));
+  const amp = Math.min(1, Math.max(0, (ls - 15) / 15));
   const strong = kind === "trough" ? TROUGH_CONFLUENCE_STRONG : PEAK_CONFLUENCE_STRONG;
   const mid = kind === "trough" ? TROUGH_CONFLUENCE_COLOR : PEAK_CONFLUENCE_COLOR;
   if (n >= 3) {
@@ -128,7 +128,7 @@ function formatVacuumInfoPivot(p, prefix, lhTf) {
       ? ` · <span class="vacuum-lh-peak-tag">${p.tf_matches.map(labelTf).join(", ")}</span>`
       : "";
   const str =
-    p.left_strength >= 8
+    p.left_strength >= 16
       ? ` <span class="vacuum-lh-peak-tag" title="Свечей слева не перебили">L${p.left_strength}</span>`
       : "";
   return `<li class="${cls}">${prefix}${p.index}: <strong>${p.price}</strong>${str}${n >= 2 ? ` <span class="vacuum-lh-peak-tag">×${n} TF</span>` : ""} (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})${tfNote}</li>`;
@@ -787,7 +787,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>: точки H/L за <strong>14 д</strong> (разнос ≥7 свечей, сила pivot <strong>L7–L20</strong>). Цепочка списка: <strong>${lhTf}</strong>.</p>
+    <p>График <strong>${chartTf}</strong>: точки H/L за <strong>14 д</strong> (разнос <strong>15–30</strong> свечей, сила <strong>L15–L30</strong>). Цепочка списка: <strong>${lhTf}</strong>.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
@@ -877,7 +877,7 @@ function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
         color: kind === "trough" ? `rgba(76,201,240,${0.45 + a * 0.45})` : `rgba(233,196,106,${0.45 + a * 0.45})`,
       };
     }
-    const lsTag = ls >= 8 ? `L${ls}` : "";
+    const lsTag = ls >= 16 ? `L${ls}` : "";
     const label = inChain
       ? n >= 2
         ? `${prefix}${p.index || i + 1}·${n}TF${lsTag ? ` ${lsTag}` : ""}`
@@ -890,7 +890,7 @@ function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
       time: barTime,
       position,
       color: style.color,
-      shape: n >= 2 || ls >= 14 ? "square" : "circle",
+      shape: n >= 2 || ls >= 22 ? "square" : "circle",
       text: label,
       _rank: rank,
     });

@@ -27,6 +27,8 @@ from signal_engine.vacuum_lh import (
 
 H = 3_600_000
 NOW = 1_700_000_000_000
+# Под pivot 15–30 и min gap 15 на 1H
+_PIVOT_PAD_BARS = 20
 
 
 def _peak_bar(ts: int, peak: float) -> Bar:
@@ -46,12 +48,12 @@ class VacuumLhPeaksTest(unittest.TestCase):
         peak_prices = [100.0, 90.0, 80.0, 70.0]
         bars: list[Bar] = []
         t = NOW - 50 * H
-        for _ in range(20):
+        for _ in range(_PIVOT_PAD_BARS):
             bars.append(_valley_bar(t, 50.0))
             t += H
         for peak in peak_prices:
             floor = min(40.0, peak - 20.0)
-            for _ in range(8):
+            for _ in range(_PIVOT_PAD_BARS):
                 bars.append(_valley_bar(t, floor))
                 t += H
             bars.append(_peak_bar(t, peak))
@@ -64,9 +66,7 @@ class VacuumLhPeaksTest(unittest.TestCase):
             bars.append(_valley_bar(t, 35.0))
             t += H
         anchors = all_anchor_peaks(bars, "60", scan_now)
-        chain = last_lower_high_peaks(
-            bars, "60", scan_now, count=5, pivot_left=1, pivot_right=1
-        )
+        chain = last_lower_high_peaks(bars, "60", scan_now, count=5)
         self.assertGreaterEqual(len(anchors), len(chain))
 
     def test_pivot_min_gap_seven_bars(self) -> None:
@@ -75,19 +75,18 @@ class VacuumLhPeaksTest(unittest.TestCase):
             {"bar_index": 3, "price": 11.0, "time": 3, "left_strength": 7},
             {"bar_index": 10, "price": 9.0, "time": 10, "left_strength": 12},
         ]
-        out = filter_pivots_min_bar_gap(pivots, 7, kind="peak")
-        self.assertEqual(len(out), 2)
-        self.assertEqual(out[0]["bar_index"], 3)
-        self.assertEqual(out[1]["bar_index"], 10)
+        out = filter_pivots_min_bar_gap(pivots, 15, kind="peak")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["bar_index"], 10)
 
     def test_pivot_gap_prefers_left_strength(self) -> None:
         pivots = [
-            {"bar_index": 0, "price": 12.0, "left_strength": 8},
-            {"bar_index": 4, "price": 11.0, "left_strength": 18},
+            {"bar_index": 0, "price": 12.0, "left_strength": 16},
+            {"bar_index": 10, "price": 11.0, "left_strength": 28},
         ]
-        out = filter_pivots_min_bar_gap(pivots, 7, kind="peak")
+        out = filter_pivots_min_bar_gap(pivots, 15, kind="peak")
         self.assertEqual(len(out), 1)
-        self.assertEqual(out[0]["left_strength"], 18)
+        self.assertEqual(out[0]["left_strength"], 28)
 
     def test_floating_left_strength_up_to_twenty(self) -> None:
         lows = [10.0] * 7 + [20.0, 9.0, 8.0]
@@ -116,17 +115,20 @@ class VacuumLhPeaksTest(unittest.TestCase):
         # Убывающие вершины: 100 → 95 → 90 → 88 → 85 (между — провалы для pivot wing=1)
         peak_prices = [100.0, 95.0, 90.0, 88.0, 85.0]
         bars: list[Bar] = []
-        t = NOW - 30 * H
-        for peak in peak_prices:
-            bars.append(_valley_bar(t, peak - 5))
+        t = NOW - 200 * H
+        for _ in range(_PIVOT_PAD_BARS):
+            bars.append(_valley_bar(t, 70.0))
             t += H
+        for peak in peak_prices:
+            for _ in range(_PIVOT_PAD_BARS):
+                bars.append(_valley_bar(t, peak - 25))
+                t += H
             bars.append(_peak_bar(t, peak))
             t += H
-            bars.append(_valley_bar(t, peak - 4))
-            t += H
-        peaks = last_lower_high_peaks(
-            bars, "60", NOW + H, count=5, pivot_left=1, pivot_right=1
-        )
+            for _ in range(3):
+                bars.append(_valley_bar(t, peak - 20))
+                t += H
+        peaks = last_lower_high_peaks(bars, "60", t + H, count=5)
         self.assertGreaterEqual(len(peaks), 2)
         prices = [p["price"] for p in peaks]
         for i in range(1, len(prices)):
@@ -147,17 +149,20 @@ class VacuumLhPeaksTest(unittest.TestCase):
     def test_higher_lows_chain(self) -> None:
         trough_prices = [80.0, 85.0, 90.0, 92.0]
         bars: list[Bar] = []
-        t = NOW - 30 * H
-        for trough in trough_prices:
-            bars.append(_peak_bar(t, trough + 15))
+        t = NOW - 200 * H
+        for _ in range(_PIVOT_PAD_BARS):
+            bars.append(_peak_bar(t, 120.0))
             t += H
+        for trough in trough_prices:
+            for _ in range(_PIVOT_PAD_BARS):
+                bars.append(_peak_bar(t, trough + 30))
+                t += H
             bars.append(_trough_bar(t, trough))
             t += H
-            bars.append(_peak_bar(t, trough + 12))
-            t += H
-        troughs = last_higher_low_troughs(
-            bars, "60", NOW + H, count=4, pivot_left=1, pivot_right=1
-        )
+            for _ in range(3):
+                bars.append(_peak_bar(t, trough + 25))
+                t += H
+        troughs = last_higher_low_troughs(bars, "60", t + H, count=4)
         self.assertGreaterEqual(len(troughs), 2)
         prices = [p["price"] for p in troughs]
         for i in range(1, len(prices)):
@@ -199,12 +204,12 @@ class VacuumLhPeaksTest(unittest.TestCase):
         peak_prices = [100.0, 90.0, 80.0, 70.0]
         bars: list[Bar] = []
         t = NOW - 50 * H
-        for _ in range(20):
+        for _ in range(_PIVOT_PAD_BARS):
             bars.append(_valley_bar(t, 50.0))
             t += H
         for peak in peak_prices:
             floor = min(40.0, peak - 20.0)
-            for _ in range(8):
+            for _ in range(_PIVOT_PAD_BARS):
                 bars.append(_valley_bar(t, floor))
                 t += H
             bars.append(_peak_bar(t, peak))
