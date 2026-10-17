@@ -86,9 +86,17 @@ def side_for_new_trough(troughs: list[dict], new_key: tuple[int, float]) -> str 
     return None
 
 
-def detect_entry_signal(prev: dict | None, cur: dict) -> dict | None:
-    if not prev or not cur:
-        return None
+def _pack_signal(t_ms: int, side: str, key: tuple[int, float], price: float) -> dict:
+    return {
+        "side": side,
+        "signal_key": f"{side}:{key[0]}:{key[1]}",
+        "pivot_time_ms": t_ms,
+        "pivot_price": price,
+        "pivot_kind": "peak" if side == "short" else "trough",
+    }
+
+
+def _signal_from_diff(prev: dict, cur: dict) -> dict | None:
     new_peaks = _keys(cur.get("peaks") or []) - _keys(prev.get("peaks") or [])
     new_troughs = _keys(cur.get("troughs") or []) - _keys(prev.get("troughs") or [])
     if not new_peaks and not new_troughs:
@@ -106,13 +114,39 @@ def detect_entry_signal(prev: dict | None, cur: dict) -> dict | None:
         return None
     events.sort(key=lambda x: x[0])
     t_ms, side, key, price = events[-1]
-    return {
-        "side": side,
-        "signal_key": f"{side}:{key[0]}:{key[1]}",
-        "pivot_time_ms": t_ms,
-        "pivot_price": price,
-        "pivot_kind": "peak" if side == "short" else "trough",
-    }
+    return _pack_signal(t_ms, side, key, price)
+
+
+def latest_qualifying_signal(cur: dict) -> dict | None:
+    """Последний pivot на TF: шорт/лонг vs предыдущий (если diff пропустили — рестарт, первый тик)."""
+    events: list[tuple[int, str, tuple[int, float], float]] = []
+    peaks = _ordered(cur.get("peaks") or [])
+    if len(peaks) >= 2:
+        prev_p, last_p = peaks[-2], peaks[-1]
+        if float(last_p["price"]) < float(prev_p["price"]):
+            key = (int(last_p["time_ms"]), round(float(last_p["price"]), 8))
+            events.append((key[0], "short", key, float(last_p["price"])))
+    troughs = _ordered(cur.get("troughs") or [])
+    if len(troughs) >= 2:
+        prev_t, last_t = troughs[-2], troughs[-1]
+        if float(last_t["price"]) > float(prev_t["price"]):
+            key = (int(last_t["time_ms"]), round(float(last_t["price"]), 8))
+            events.append((key[0], "long", key, float(last_t["price"])))
+    if not events:
+        return None
+    events.sort(key=lambda x: x[0])
+    t_ms, side, key, price = events[-1]
+    return _pack_signal(t_ms, side, key, price)
+
+
+def detect_entry_signal(prev: dict | None, cur: dict) -> dict | None:
+    if not cur:
+        return None
+    prev_norm = prev or {"peaks": [], "troughs": []}
+    sig = _signal_from_diff(prev_norm, cur)
+    if sig:
+        return sig
+    return latest_qualifying_signal(cur)
 
 
 def evaluate_vps(

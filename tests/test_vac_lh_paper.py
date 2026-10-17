@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import unittest
 
-from signal_engine.paper.vac_lh_detect import detect_entry_signal, side_for_new_peak, side_for_new_trough
+from signal_engine.paper.vac_lh_detect import (
+    detect_entry_signal,
+    latest_qualifying_signal,
+    side_for_new_peak,
+    side_for_new_trough,
+)
 
 
 class VacLhPaperDetectTest(unittest.TestCase):
@@ -22,6 +27,20 @@ class VacLhPaperDetectTest(unittest.TestCase):
             {"time_ms": 2, "price": 6.0},
         ]
         self.assertEqual(side_for_new_trough(troughs, (2, 6.0)), "long")
+
+    def test_latest_qualifying_without_prev(self) -> None:
+        cur = {
+            "peaks": [
+                {"time_ms": 1, "price": 10.0},
+                {"time_ms": 2, "price": 9.0},
+            ],
+            "troughs": [],
+        }
+        sig = latest_qualifying_signal(cur)
+        self.assertIsNotNone(sig)
+        assert sig is not None
+        self.assertEqual(sig["side"], "short")
+        self.assertIsNotNone(detect_entry_signal(None, cur))
 
     def test_detect_from_snap_diff(self) -> None:
         prev = {"peaks": [{"time_ms": 1, "price": 10.0}], "troughs": []}
