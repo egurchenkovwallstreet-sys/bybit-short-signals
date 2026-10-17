@@ -714,7 +714,7 @@
       const candNote = document.querySelector("#paper-cand-section .quiet");
       if (candNote) {
         candNote.textContent =
-          `${vpsChartInterval(paper.variant)}m: pivot-max → шорт, pivot-min → лонг. Вход в окне 3 свечи после подтверждения pivot (догон после рестарта). Одна сделка на сигнал. Стоп −10% ROE, трейл − 10 п.п.`;
+          `${vpsChartInterval(paper.variant)}m: pivot-max → шорт, pivot-min → лонг. Вход только на 1-й незакрытой свече после 2 свечей подтверждения pivot. Одна сделка на сигнал. Стоп −10% ROE, трейл − 10 п.п.`;
       }
       const tf = vpsChartInterval(paper.variant);
       const rows = vpsWatchRows();

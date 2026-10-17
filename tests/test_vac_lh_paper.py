@@ -1,4 +1,4 @@
-"""Paper Пылесос: max → шорт, min → лонг; окно 3 свечи после подтверждения pivot."""
+"""Paper Пылесос: max → шорт, min → лонг; вход — 1-я незакрытая свеча после 2 подтверждений."""
 
 from __future__ import annotations
 
@@ -7,9 +7,14 @@ import unittest
 from signal_engine.paper.vac_lh_detect import (
     detect_entry_signal,
     entry_open_until_ms,
+    entry_window_start_ms,
     latest_qualifying_signal,
     pivot_in_entry_window,
 )
+
+
+def _in_window_now(pivot_time_ms: int) -> int:
+    return entry_window_start_ms(pivot_time_ms, "5") + 1
 
 
 class VacLhPaperDetectTest(unittest.TestCase):
@@ -18,12 +23,11 @@ class VacLhPaperDetectTest(unittest.TestCase):
         cur = {
             "peaks": [
                 {"time_ms": 1, "price": 8.0},
-                {"time_ms": 2, "price": 10.0},
+                {"time_ms": 1_000_000, "price": 10.0},
             ],
             "troughs": [],
         }
-        now_ms = entry_open_until_ms(2, "5") - 1
-        sig = detect_entry_signal(prev, cur, "5", now_ms)
+        sig = detect_entry_signal(prev, cur, "5", _in_window_now(1_000_000))
         self.assertIsNotNone(sig)
         assert sig is not None
         self.assertEqual(sig["side"], "short")
@@ -34,11 +38,10 @@ class VacLhPaperDetectTest(unittest.TestCase):
             "peaks": [],
             "troughs": [
                 {"time_ms": 1, "price": 6.0},
-                {"time_ms": 2, "price": 5.0},
+                {"time_ms": 1_000_000, "price": 5.0},
             ],
         }
-        now_ms = entry_open_until_ms(2, "5") - 1
-        sig = detect_entry_signal(prev, cur, "5", now_ms)
+        sig = detect_entry_signal(prev, cur, "5", _in_window_now(1_000_000))
         assert sig is not None
         self.assertEqual(sig["side"], "long")
 
@@ -47,33 +50,36 @@ class VacLhPaperDetectTest(unittest.TestCase):
             "peaks": [{"time_ms": 1_000_000, "price": 10.0}],
             "troughs": [{"time_ms": 1_300_000, "price": 5.0}],
         }
-        now_ms = entry_open_until_ms(1_300_000, "5") - 1
-        sig = latest_qualifying_signal(cur, "5", now_ms)
+        sig = latest_qualifying_signal(cur, "5", _in_window_now(1_300_000))
         assert sig is not None
         self.assertEqual(sig["side"], "long")
 
-    def test_stale_pivot_outside_window_no_signal(self) -> None:
-        cur = {
-            "peaks": [{"time_ms": 1_000_000, "price": 10.0}],
-            "troughs": [],
-        }
-        now_ms = entry_open_until_ms(1_000_000, "5") + 1
-        self.assertFalse(pivot_in_entry_window(1_000_000, "5", now_ms))
-        sig = latest_qualifying_signal(cur, "5", now_ms)
-        self.assertIsNone(sig)
+    def test_before_entry_candle_no_signal(self) -> None:
+        pivot = 1_000_000
+        cur = {"peaks": [{"time_ms": pivot, "price": 10.0}], "troughs": []}
+        now_ms = entry_window_start_ms(pivot, "5") - 1
+        self.assertFalse(pivot_in_entry_window(pivot, "5", now_ms))
+        self.assertIsNone(latest_qualifying_signal(cur, "5", now_ms))
+
+    def test_stale_pivot_after_entry_candle_no_signal(self) -> None:
+        pivot = 1_000_000
+        cur = {"peaks": [{"time_ms": pivot, "price": 10.0}], "troughs": []}
+        now_ms = entry_open_until_ms(pivot, "5") + 1
+        self.assertFalse(pivot_in_entry_window(pivot, "5", now_ms))
+        self.assertIsNone(latest_qualifying_signal(cur, "5", now_ms))
 
     def test_catch_up_after_restart_in_window(self) -> None:
+        pivot = 1_000_000
         cur = {
             "peaks": [
                 {"time_ms": 100, "price": 9.0},
-                {"time_ms": 1_000_000, "price": 10.0},
+                {"time_ms": pivot, "price": 10.0},
             ],
             "troughs": [],
         }
-        now_ms = entry_open_until_ms(1_000_000, "5") - 60_000
-        sig = detect_entry_signal(None, cur, "5", now_ms)
+        sig = detect_entry_signal(None, cur, "5", _in_window_now(pivot))
         assert sig is not None
-        self.assertEqual(sig["pivot_time_ms"], 1_000_000)
+        self.assertEqual(sig["pivot_time_ms"], pivot)
         self.assertEqual(sig["side"], "short")
 
 

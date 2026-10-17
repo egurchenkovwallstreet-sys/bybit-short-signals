@@ -331,8 +331,6 @@ PAPER_VPS15_INTERVAL = "15"
 PAPER_VPS5_INTERVAL = "5"
 PAPER_VPS_INITIAL_STOP_ROE = _env_float("PAPER_VPS_INITIAL_STOP_ROE", -10.0)
 PAPER_VPS_TRAIL_GAP_ROE = _env_float("PAPER_VPS_TRAIL_GAP_ROE", 10.0)
-# С момента подтверждения pivot (PIVOT_RIGHT закрытых свечей) — пока не закроется N-я свеча после сигнала.
-PAPER_VPS_ENTRY_CANDLES = _env_int("PAPER_VPS_ENTRY_CANDLES", 3)
 
 PAPER_V5_MIN_PASSED = _env_int("PAPER_V5_MIN_PASSED", 5)
 PAPER_DT_MIN_PASSED = _env_int("PAPER_DT_MIN_PASSED", 3)

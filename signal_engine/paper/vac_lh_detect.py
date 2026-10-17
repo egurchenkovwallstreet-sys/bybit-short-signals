@@ -1,4 +1,4 @@
-"""Paper Пылесос 15 / 5: новый pivot-high → шорт, pivot-low → лонг; окно входа — 3 свечи после подтверждения."""
+"""Paper Пылесос 15 / 5: max→шорт, min→лонг; вход только на 1-й незакрытой свече после PIVOT_RIGHT подтверждения."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ VPS_CHECK_LABELS = {
     "turnover_ok": "Оборот 24ч ≥ порога сканера LH",
     "new_pivot": "Новый подтверждённый pivot (max или min)",
     "structure_vs_prev": "Шорт — уровень сверху (max); лонг — уровень снизу (min)",
-    "entry_window": "Не позже 3-й свечи после подтверждения pivot",
+    "entry_window": "Только 1-я незакрытая свеча после 2 свечей подтверждения pivot",
 }
 
 
@@ -59,16 +59,23 @@ def _keys(points: list[dict]) -> frozenset[tuple[int, float]]:
     return frozenset(out)
 
 
-def entry_open_until_ms(pivot_time_ms: int, interval: str) -> int:
+def entry_window_start_ms(pivot_time_ms: int, interval: str) -> int:
+    """Начало первой свечи после закрытия PIVOT_RIGHT свечей подтверждения."""
     pr = int(config.VACUUM_LH_PIVOT_RIGHT)
-    n = int(config.PAPER_VPS_ENTRY_CANDLES)
     step = _INTERVAL_MS.get(interval, 300_000)
-    signal_start = int(pivot_time_ms) + pr * step
-    return signal_start + n * step
+    return int(pivot_time_ms) + (pr + 1) * step
+
+
+def entry_open_until_ms(pivot_time_ms: int, interval: str) -> int:
+    """Конец той же свечи (закрытие) — дальше вход запрещён."""
+    pr = int(config.VACUUM_LH_PIVOT_RIGHT)
+    step = _INTERVAL_MS.get(interval, 300_000)
+    return int(pivot_time_ms) + (pr + 2) * step
 
 
 def pivot_in_entry_window(pivot_time_ms: int, interval: str, now_ms: int) -> bool:
-    return int(now_ms) < entry_open_until_ms(pivot_time_ms, interval)
+    t = int(now_ms)
+    return entry_window_start_ms(pivot_time_ms, interval) <= t < entry_open_until_ms(pivot_time_ms, interval)
 
 
 def _pack_signal(t_ms: int, side: str, key: tuple[int, float], price: float, interval: str) -> dict:
@@ -78,6 +85,7 @@ def _pack_signal(t_ms: int, side: str, key: tuple[int, float], price: float, int
         "pivot_time_ms": t_ms,
         "pivot_price": price,
         "pivot_kind": "peak" if side == "short" else "trough",
+        "entry_from_ms": entry_window_start_ms(t_ms, interval),
         "entry_until_ms": entry_open_until_ms(t_ms, interval),
     }
 
@@ -164,7 +172,7 @@ def evaluate_vps(
             window_ok,
             window_ok,
             "в окне входа",
-            "окно закрыто (3 свечи после pivot)",
+            "вне 1-й свечи после подтверждения pivot",
         ),
     }
     failed = [k for k in VPS_MANDATORY if not checks[k]["ok"]]
