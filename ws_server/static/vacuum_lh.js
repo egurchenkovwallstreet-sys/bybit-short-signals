@@ -1406,7 +1406,16 @@ function vacuumSymbolTrades(symbol) {
 }
 
 function vacuumTradeSide(trade) {
-  return trade.side || trade.entry?.side || (trade.entry?.metrics || {}).side || "short";
+  const entry = trade.entry || trade.entry_json || {};
+  const metrics = entry.metrics || {};
+  const side = trade.side || entry.side || metrics.side || metrics.pump?.side;
+  return side === "long" || side === "short" ? side : "";
+}
+
+function vacuumSideLabel(side) {
+  if (side === "long") return '<span class="vacuum-side-tag long" aria-label="лонг">▲ лонг</span>';
+  if (side === "short") return '<span class="vacuum-side-tag short" aria-label="шорт">▼ шорт</span>';
+  return "—";
 }
 
 function vacuumChartLivePrice(runtime, symbol) {
@@ -1522,13 +1531,15 @@ function vacuumTradePlus(money) {
 }
 
 function vacuumEntryArrow(runtime, trade, hostW) {
+  const side = vacuumTradeSide(trade);
+  if (side !== "long" && side !== "short") return "";
   const entry = Number(trade.entry_price);
-  const long = vacuumTradeSide(trade) === "long";
+  const long = side === "long";
   const x = vacuumTimeToX(runtime, trade.opened_at);
   const y = runtime.series.priceToCoordinate(entry);
   if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
   const shift = long ? "translate(-50%, 2px)" : "translate(-50%, calc(-100% - 2px))";
-  return `<div class="vacuum-trade-arrow ${long ? "long" : "short"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}">${long ? "▲" : "▼"}</div>`;
+  return `<div class="vacuum-trade-arrow ${long ? "long" : "short"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}" title="${long ? "Лонг" : "Шорт"}">${long ? "▲" : "▼"}</div>`;
 }
 
 function vacuumExitMark(runtime, trade, hostW) {
@@ -1739,10 +1750,6 @@ function vacuumDeskVariant() {
   return vacuumLhState.mode === "vps5" ? "vps5" : "pyl";
 }
 
-function vacuumTradeSide(trade) {
-  return trade.side || ((trade.entry || {}).metrics || {}).side || "";
-}
-
 function vacuumRateText(stats) {
   if (!stats.n || stats.winRate == null) return "—";
   return `${stats.winRate.toFixed(1)}%`;
@@ -1902,7 +1909,7 @@ function renderVacuumDesk() {
           .map(
             (t) => `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
           <td><b>${t.symbol}</b></td>
-          <td>${t.side === "long" ? "лонг" : "шорт"}</td>
+          <td>${vacuumSideLabel(vacuumTradeSide(t))}</td>
           <td>${t.entry_price}</td>
           <td>${t.last_price}</td>
           <td>${t.stop_price}</td>
@@ -1920,10 +1927,10 @@ function renderVacuumDesk() {
           .slice(0, 40)
           .map((r) => {
             const ev = (r.eval && (r.eval.pyl || r.eval.vps5)) || {};
-            const side = r.side || (ev.metrics || {}).side;
+            const side = r.side || (ev.metrics || {}).side || ev.side;
             return `<tr class="clickable" data-vac-desk-symbol="${r.symbol}">
           <td><b>${r.symbol}</b></td>
-          <td>${side === "long" ? "лонг" : side === "short" ? "шорт" : "—"}</td>
+          <td>${vacuumSideLabel(side)}</td>
           <td>${r.ready ? "да" : "нет"}</td>
         </tr>`;
           })
@@ -1937,14 +1944,14 @@ function renderVacuumDesk() {
       ? `<thead><tr><th>Закрыта</th><th>Монета</th><th>Сторона</th><th>Вход</th><th>Выход</th><th>ROE</th><th>P&L</th><th>Время</th><th>Причина</th></tr></thead><tbody>${closed
           .slice(0, 200)
           .map((t) => {
-            const side = t.side || ((t.entry || {}).metrics || {}).side;
+            const side = vacuumTradeSide(t);
             const mins = t.closed_at && t.opened_at ? (Number(t.closed_at) - Number(t.opened_at)) / 60000 : null;
             const roe = Number(t.roe_pct);
             const roeText = Number.isFinite(roe) ? `${roe >= 0 ? "+" : ""}${roe.toFixed(1)}%` : "—";
             return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
           <td>${vacuumTimeMsk(t.closed_at)}</td>
           <td><b>${t.symbol}</b></td>
-          <td>${side === "long" ? "лонг" : side === "short" ? "шорт" : "—"}</td>
+          <td>${vacuumSideLabel(side)}</td>
           <td>${t.entry_price ?? "—"}</td>
           <td>${t.exit_price ?? "—"}</td>
           ${vacuumPnlTd(roe, roeText)}
