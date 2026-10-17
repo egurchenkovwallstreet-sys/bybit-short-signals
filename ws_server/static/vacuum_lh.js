@@ -332,6 +332,19 @@ function getVacuumTroughs() {
   return row.all_troughs || row.troughs || [];
 }
 
+/** На графике — только цепочка LH/HL списка (до 5), не все pivot за 14 д. */
+function getVacuumChartPeaks() {
+  const chain = getVacuumChainPeaks();
+  if (chain.length) return chain;
+  return getVacuumPeaks().slice(-5);
+}
+
+function getVacuumChartTroughs() {
+  const chain = getVacuumChainTroughs();
+  if (chain.length) return chain;
+  return getVacuumTroughs().slice(-5);
+}
+
 function requestVacuumChartAnchors(interval) {
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(
@@ -384,7 +397,7 @@ function drawVacuumCandles(candles, resetScale) {
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
   BC.drawCandles(vacuumLhState.chart, candles, interval, resetScale, VAC_CHART.chart, live);
   ensureVacuumLhMarkerHooks(vacuumLhState.chart);
-  drawVacuumLhOverlays(vacuumLhState.chart, getVacuumPeaks(), getVacuumTroughs(), interval);
+  drawVacuumLhOverlays(vacuumLhState.chart, getVacuumChartPeaks(), getVacuumChartTroughs(), interval);
   requestAnimationFrame(resizeVacuumChartNow);
   setVacuumChartPlaceholder("");
   return true;
@@ -669,8 +682,8 @@ function onVacuumLhSnapshot(board, detail) {
     if (vacuumLhState.chart?._lastBars?.length) {
       drawVacuumLhOverlays(
         vacuumLhState.chart,
-        getVacuumPeaks(),
-        getVacuumTroughs(),
+        getVacuumChartPeaks(),
+        getVacuumChartTroughs(),
         vacuumLhState.chartInterval,
       );
     }
@@ -722,8 +735,8 @@ function onVacuumLhDetail(symbol, data) {
   if (vacuumLhState.chart?._lastBars?.length) {
     drawVacuumLhOverlays(
       vacuumLhState.chart,
-      getVacuumPeaks(),
-      getVacuumTroughs(),
+      getVacuumChartPeaks(),
+      getVacuumChartTroughs(),
       vacuumLhState.chartInterval,
     );
   }
@@ -787,7 +800,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>: точки H/L за <strong>14 д</strong> (разнос <strong>15–30</strong> свечей, сила <strong>L15–L30</strong>). Цепочка списка: <strong>${lhTf}</strong>.</p>
+    <p>График <strong>${chartTf}</strong>: маркеры — <strong>цепочка LH/HL</strong> списка (${lhTf}), pivot L15–L30, разнос ≥30 св. Скан: разнос 15–30.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
@@ -814,7 +827,7 @@ function scheduleVacuumLhMarkerRedraw() {
   rt._vacMarkerRedrawTimer = setTimeout(() => {
     rt._vacMarkerRedrawTimer = 0;
     if (!rt._lastBars?.length) return;
-    drawVacuumLhOverlays(rt, getVacuumPeaks(), getVacuumTroughs(), vacuumLhState.chartInterval);
+    drawVacuumLhOverlays(rt, getVacuumChartPeaks(), getVacuumChartTroughs(), vacuumLhState.chartInterval);
   }, 40);
 }
 
