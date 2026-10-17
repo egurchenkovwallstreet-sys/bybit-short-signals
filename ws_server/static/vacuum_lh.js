@@ -76,6 +76,11 @@ const vacuumLhState = {
   bufferSymbol: null,
   bufferLoading: false,
   _loadSeq: 0,
+  _warmThrottleAt: 0,
+  _warmDefer: 0,
+  _closedFetchAt: 0,
+  _analyticsKey: "",
+  _analyticsHtml: "",
 };
 
 const VAC_CHART = {
@@ -94,6 +99,15 @@ const PEAK_CONFLUENCE_COLOR = "#ffe566";
 const PEAK_CONFLUENCE_STRONG = "#ffffff";
 const TROUGH_CONFLUENCE_COLOR = "#7df9ff";
 const TROUGH_CONFLUENCE_STRONG = "#e0ffff";
+
+function vacuumUiActive() {
+  const view = document.getElementById("view-vacuum-lh");
+  return !!(view && !view.hidden);
+}
+
+function vacuumDeskVisible() {
+  return vacuumLhState.mode !== "scan" && !vacuumLhState.selected;
+}
 
 function vacuumPivotMatchCount(p) {
   const n = Number(p?.tf_match_count);
@@ -297,6 +311,12 @@ function initVacuumLhTab() {
   }
   applyVacuumInterval(vacuumLhState.lhInterval);
   renderVacuumLhBoard();
+  if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
+    patchVacuumLivePrice();
+    drawVacuumTradeOverlay(vacuumLhState.chart);
+  } else if (vacuumDeskVisible()) {
+    renderVacuumDesk();
+  }
 }
 
 function chartTfButtonsHtml(activeCode) {
@@ -738,6 +758,25 @@ function vacuumEnqueue(symbol, interval, rank) {
   vacuumLhState._vq.push({ key, symbol, interval, rank });
 }
 
+function scheduleVacuumSeriesWarmThrottled(minMs = 12_000) {
+  if (!vacuumUiActive()) return;
+  const now = Date.now();
+  const last = vacuumLhState._warmThrottleAt || 0;
+  if (now - last < minMs) {
+    if (!vacuumLhState._warmDefer) {
+      const wait = minMs - (now - last);
+      vacuumLhState._warmDefer = setTimeout(() => {
+        vacuumLhState._warmDefer = 0;
+        vacuumLhState._warmThrottleAt = Date.now();
+        scheduleVacuumSeriesWarm();
+      }, wait);
+    }
+    return;
+  }
+  vacuumLhState._warmThrottleAt = now;
+  scheduleVacuumSeriesWarm();
+}
+
 function scheduleVacuumSeriesWarm() {
   const seen = new Set();
   const selected = vacuumLhState.selected;
@@ -791,20 +830,23 @@ function ensureVacuumBuffers() {
 }
 
 function scheduleVacuumTradeCharts() {
+  if (!vacuumUiActive()) return;
   if (vacuumLhState._warmSoon) return;
   vacuumLhState._warmSoon = setTimeout(() => {
     vacuumLhState._warmSoon = 0;
-    scheduleVacuumSeriesWarm();
+    scheduleVacuumSeriesWarmThrottled();
   }, 400);
 }
 
 function ensureVacuumTradeWarm() {
+  if (!vacuumUiActive()) return;
   if (vacuumLhState._warmTimer) return;
-  void fetchVacuumDeskClosed(false).then(() => scheduleVacuumSeriesWarm());
+  void fetchVacuumDeskClosed(false).then(() => scheduleVacuumSeriesWarmThrottled(0));
   vacuumLhState._warmTimer = setInterval(() => {
-    scheduleVacuumSeriesWarm();
+    if (!vacuumUiActive()) return;
+    scheduleVacuumSeriesWarmThrottled();
     void refreshVacuumVisibleChart();
-  }, 5000);
+  }, 15_000);
 }
 
 async function refreshVacuumVisibleChart() {
@@ -961,6 +1003,7 @@ function ingestVacuumPayload(data) {
     applyVacuumInterval(vacuumLhState.lhInterval);
     ingestVacuumScanPivots(data);
   }
+  if (!vacuumUiActive()) return;
   setVacuumStatus(
     vacuumLhState.updatedAt
       ? `Обновлено: ${new Date(vacuumLhState.updatedAt).toLocaleTimeString("ru-RU")} · список ${labelTf(vacuumLhState.lhInterval)}`
@@ -1071,13 +1114,14 @@ function mergeVacuumDetail(data) {
 
 function onVacuumLhBoard(data) {
   ingestVacuumPayload(data);
-  if (!vacuumLhState.selected) return;
+  if (!vacuumUiActive() || !vacuumLhState.selected) return;
   patchVacuumLivePrice();
   redrawVacuumOpenChart();
 }
 
 function onVacuumLhSnapshot(board, detail) {
   ingestVacuumPayload(board);
+  if (!vacuumUiActive()) return;
   if (detail?.signal && vacuumLhState.selected === detail.signal.symbol) {
     mergeVacuumDetail(detail);
     renderVacuumLhInfo();
@@ -1167,6 +1211,9 @@ function renderVacuumLhBoard() {
   if (list) list.hidden = deskMode || !!vacuumLhState.selected;
   if (deskMode) {
     renderVacuumDesk();
+    return;
+  }
+  if (vacuumLhState.selected) {
     return;
   }
   const root = document.getElementById("vacuum-lh-columns");
@@ -1755,7 +1802,27 @@ function vacuumRateText(stats) {
   return `${stats.winRate.toFixed(1)}%`;
 }
 
+function vacuumAnalyticsCacheKey() {
+  const opensAll = (vacuumLhState.paper || {}).open_trades || [];
+  const openSig = opensAll
+    .filter((t) => t.variant === "pyl" || t.variant === "vps5")
+    .map((t) => `${t.id}:${t.last_price}:${t.pnl_usd}`)
+    .join("|");
+  const closedSig = ["pyl", "vps5"]
+    .map((v) => {
+      const rows = vacuumLhState.closedMap[v] || [];
+      const tail = rows[0];
+      return `${v}:${rows.length}:${tail?.id || 0}:${tail?.closed_at || 0}`;
+    })
+    .join(";");
+  return `${openSig};${closedSig}`;
+}
+
 function vacuumAnalyticsTable() {
+  const cacheKey = vacuumAnalyticsCacheKey();
+  if (vacuumLhState._analyticsHtml && vacuumLhState._analyticsKey === cacheKey) {
+    return vacuumLhState._analyticsHtml;
+  }
   const opensAll = (vacuumLhState.paper || {}).open_trades || [];
   const cols = [
     ["pyl", "БАБЛОСОС"],
@@ -1805,7 +1872,7 @@ function vacuumAnalyticsTable() {
   });
   const head = cols.map((col) => `<th class="${col.current ? "current" : ""}">${col.label}</th>`).join("");
   const line = (name, key) => `<tr><td>${name}</td>${cols.map((col) => col.cells[key]).join("")}</tr>`;
-  return `<thead><tr><th>Показатель</th>${head}</tr></thead><tbody>
+  const html = `<thead><tr><th>Показатель</th>${head}</tr></thead><tbody>
     ${line("Открыто сейчас", "open")}
     ${line("Плавающий P&L", "openPnl")}
     ${line("Закрыто", "closed")}
@@ -1826,6 +1893,9 @@ function vacuumAnalyticsTable() {
     ${line("Шорты, винрейт", "shortWr")}
     ${line("Шорты, итог", "shortNet")}
   </tbody>`;
+  vacuumLhState._analyticsKey = cacheKey;
+  vacuumLhState._analyticsHtml = html;
+  return html;
 }
 
 function vacuumDeskAccount() {
@@ -1841,21 +1911,28 @@ function vacuumDeskWatch() {
 function onVacuumPaper(data) {
   if (!data) return;
   vacuumLhState.paper = data;
+  vacuumLhState._analyticsKey = "";
+  if (!vacuumUiActive()) return;
   const opens = (data.open_trades || []).filter((t) => t.variant === "pyl" || t.variant === "vps5");
   if (vacuumLhState._lastOpenCount != null && opens.length < vacuumLhState._lastOpenCount) {
     void fetchVacuumDeskClosed(true);
     if (vacuumLhState.selected) void fetchVacuumSymbolClosed(vacuumLhState.selected);
   }
   vacuumLhState._lastOpenCount = opens.length;
-  if (vacuumLhState.mode !== "scan") renderVacuumDesk();
-  if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
+  if (vacuumDeskVisible()) renderVacuumDesk();
+  else if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
     drawVacuumTradeOverlay(vacuumLhState.chart);
+    patchVacuumLivePrice();
   }
   ensureVacuumTradeWarm();
   scheduleVacuumTradeCharts();
 }
 
 async function fetchVacuumDeskClosed(force) {
+  const now = Date.now();
+  if (force && vacuumLhState.closedReady && now - (vacuumLhState._closedFetchAt || 0) < 30_000) {
+    force = false;
+  }
   if (!force && vacuumLhState.closedReady) {
     vacuumLhState.closed = vacuumLhState.closedMap[vacuumDeskVariant()] || [];
     vacuumLhState.closedVariant = vacuumDeskVariant();
@@ -1874,9 +1951,11 @@ async function fetchVacuumDeskClosed(force) {
       vacuumLhState.closedMap[variant] = rows;
     }
     vacuumLhState.closedReady = true;
+    vacuumLhState._closedFetchAt = Date.now();
+    vacuumLhState._analyticsKey = "";
     vacuumLhState.closed = vacuumLhState.closedMap[vacuumDeskVariant()] || [];
     vacuumLhState.closedVariant = vacuumDeskVariant();
-    if (vacuumLhState.mode !== "scan") renderVacuumDesk();
+    if (vacuumDeskVisible()) renderVacuumDesk();
     if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
       drawVacuumTradeOverlay(vacuumLhState.chart);
     }
