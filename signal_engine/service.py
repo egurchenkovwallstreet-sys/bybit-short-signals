@@ -52,7 +52,6 @@ class SignalService:
         side_tasks: list[asyncio.Task] = []
         if self.engine.paper is not None:
             side_tasks.append(asyncio.create_task(self._paper_kline_loop()))
-            side_tasks.append(asyncio.create_task(self._five_min_tail_loop()))
             side_tasks.append(asyncio.create_task(self._pivot_confirm_loop()))
         try:
             while True:
@@ -135,37 +134,6 @@ class SignalService:
                         candles = ((message.get("data") or {}).get("candles") or [])
                         paper.on_klines(symbol, interval, candles)
                 await asyncio.sleep(5)
-        finally:
-            await rest.close()
-
-    async def _five_min_tail_loop(self) -> None:
-        """Короткий хвост 5м по монетам порога, чтобы первая свеча подтверждения была видна заранее."""
-        from collector.rest_client import BybitRest
-
-        rest = BybitRest()
-        await rest.open()
-        try:
-            while True:
-                if self._confirm_burst:
-                    await asyncio.sleep(0.2)
-                    continue
-                symbols = sorted(self._five_min_symbols())
-                if not symbols:
-                    await asyncio.sleep(2)
-                    continue
-                for symbol in symbols:
-                    if self._confirm_burst:
-                        break
-                    try:
-                        message = await rest.fetch_klines(symbol, "5", config.PAPER_PIVOT_CONFIRM_FETCH_LIMIT)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        log.exception("Хвост 5м %s не получен", symbol)
-                        continue
-                    if message:
-                        self.engine.ingest(message)
-                await asyncio.sleep(0.5)
         finally:
             await rest.close()
 

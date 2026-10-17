@@ -358,6 +358,7 @@ async def klines(
     interval: str = "1",
     refresh: bool = False,
     days: int = 0,
+    bars: int = 0,
     tail: bool = False,
     pivots: bool = False,
 ) -> dict[str, Any]:
@@ -365,11 +366,14 @@ async def klines(
         raise HTTPException(status_code=400, detail="Некорректный тикер")
     if interval not in {"1", "5", "15", "30", "60", "240", "D"}:
         raise HTTPException(status_code=400, detail="Некорректный интервал")
-    window_days = days if days > 0 else config.PUMP_SCAN_CHART_FETCH_DAYS
+    bar_cap = max(0, min(int(bars or 0), 1000))
+    window_days = 0 if bar_cap else (days if days > 0 else config.PUMP_SCAN_CHART_FETCH_DAYS)
     hub: Hub = app.state.hub
     key = (symbol, interval)
     min_bars = (
-        config.kline_bars_for_days(interval, window_days)
+        bar_cap
+        if bar_cap
+        else config.kline_bars_for_days(interval, window_days)
         if days > 0
         else max(100, config.KLINE_FETCH_LIMIT // 2)
     )
@@ -409,7 +413,9 @@ async def klines(
         did_full = True
     if did_full or (refresh and not candles):
         rest = await _bybit_rest()
-        if days > 0 or refresh or pivots or tail:
+        if bar_cap:
+            message = await rest.fetch_klines(symbol, interval, limit=bar_cap)
+        elif days > 0 or refresh or pivots or tail:
             message = await rest.fetch_klines_for_days(symbol, interval, window_days)
         else:
             message = await rest.fetch_klines(symbol, interval)
@@ -422,10 +428,12 @@ async def klines(
             candles = cached
     if candles and candles is not cached:
         hub.cache.klines[key] = list(candles)
+    if bar_cap and len(candles) > bar_cap:
+        candles = candles[-bar_cap:]
     oldest_out = int((candles[0] or {}).get("timestamp") or 0) if candles else oldest
-    history_complete = config.kline_history_complete(oldest_out, interval, window_days, now_ms) or (
-        fetched_ok and len(candles) < min_bars
-    )
+    history_complete = bool(bar_cap and len(candles) >= bar_cap) or config.kline_history_complete(
+        oldest_out, interval, window_days, now_ms
+    ) or (fetched_ok and len(candles) < min_bars)
     return _kline_reply(
         symbol,
         interval,

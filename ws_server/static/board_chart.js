@@ -11,9 +11,10 @@ window.boardChart = {
     ["D", "1D"],
   ],
   FETCH_DAYS: 30,
+  FETCH_BARS: 300,
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
-  PREFETCH_CONCURRENCY: 4,
+  PREFETCH_CONCURRENCY: 1,
   PREFETCH_COOLDOWN_MS: 90_000,
   _assetCache: new Map(),
   _prefetchQueue: [],
@@ -1103,7 +1104,7 @@ window.boardChart = {
     if (job.kind === "klines") {
       const candles = bucket.intervals.get(job.interval) || [];
       const at = bucket.intervalAt.get(job.interval) || 0;
-      const need = BC.minBarsForDays(job.interval, BC.FETCH_DAYS);
+      const need = BC.FETCH_BARS || 300;
       if (candles.length >= Math.min(need, 120) && now - at < BC.PREFETCH_COOLDOWN_MS) return;
       if (BC._prefetchQueue.some((j) => j.key === job.key)) return;
     } else if (job.kind === "book") {
@@ -1385,7 +1386,7 @@ window.boardChart = {
     try {
       const q = new URLSearchParams({
         interval,
-        days: String(window.boardChart.FETCH_DAYS),
+        bars: String(window.boardChart.FETCH_BARS || 300),
       });
       if (refresh) q.set("refresh", "1");
       const res = await fetch(`/api/klines/${encodeURIComponent(symbol)}?${q}`);
@@ -1399,7 +1400,7 @@ window.boardChart = {
 
   async ensureCandles(_store, symbol, interval, detail, options) {
     const BC = window.boardChart;
-    const need = BC.minBarsForDays(interval, BC.FETCH_DAYS);
+    const need = BC.FETCH_BARS || 300;
     const bucket = BC.getAssetBucket(symbol);
     let cached = bucket.intervals.get(interval) || [];
     if (detail?.candles?.length && detail.interval === interval) {

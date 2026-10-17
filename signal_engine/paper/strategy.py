@@ -251,6 +251,7 @@ class PaperStrategy:
         self._vps15_watch: list[dict] = []
         self._vps5_watch: list[dict] = []
         self._confirm_arm: set[str] = set()
+        self._confirm_arm_at = 0
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -1868,10 +1869,17 @@ class PaperStrategy:
         return sorted(self._confirm_arm)
 
     def _refresh_five_min_arm(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        opens = {
+            symbol
+            for variant, symbol in self.trades
+            if variant in (config.PAPER_PYL_VARIANT, config.PAPER_VPS5_VARIANT)
+        }
+        if self._confirm_arm and now_ms < self._confirm_arm_at + 30_000:
+            self._confirm_arm |= opens
+            return
+        self._confirm_arm_at = now_ms
         armed = symbols_waiting_second_bar(states, now_ms, config.PAPER_PYL_INTERVAL)
-        for (variant, symbol) in self.trades:
-            if variant in (config.PAPER_PYL_VARIANT, config.PAPER_VPS5_VARIANT):
-                armed.add(symbol)
+        armed |= opens
         self._confirm_arm = armed
 
     def _five_min_just_confirmed(self, entry: dict, now_ms: int) -> bool:

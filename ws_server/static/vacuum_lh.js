@@ -38,8 +38,8 @@ const VACUUM_CHART_TF = [
 
 const VACUUM_BUFFER_TF = VACUUM_CHART_TF.map(([c]) => c);
 const VACUUM_MIN_BARS = 8;
-const VACUUM_SERIES_DAYS = 14;
-const VACUUM_LOAD_CONCURRENCY = 3;
+const VACUUM_SERIES_BARS = 300;
+const VACUUM_LOAD_CONCURRENCY = 2;
 
 const VACUUM_DESK = [
   ["scan", "Сканер"],
@@ -596,9 +596,8 @@ function drawVacuumCandles(candles, resetScale) {
   return true;
 }
 
-function vacuumNeedBars(interval) {
-  const minutes = window.boardChart?.INTERVAL_MINUTES?.[interval] || 60;
-  return Math.max(VACUUM_MIN_BARS, Math.ceil((VACUUM_SERIES_DAYS * 24 * 60) / minutes));
+function vacuumNeedBars(_interval) {
+  return VACUUM_SERIES_BARS;
 }
 
 function vacuumTailFresh(candles, interval) {
@@ -707,7 +706,7 @@ function vacuumApplySeries(symbol, interval, payload) {
 async function vacuumFetchSeries(symbol, interval, tail) {
   const q = new URLSearchParams({
     interval,
-    days: String(VACUUM_SERIES_DAYS),
+    bars: String(VACUUM_SERIES_BARS),
     pivots: "1",
   });
   if (tail) q.set("tail", "1");
@@ -757,17 +756,7 @@ function scheduleVacuumSeriesWarm() {
   for (const symbol of opens) {
     if (!symbol || seen.has(symbol)) continue;
     seen.add(symbol);
-    tfOrder.forEach((interval, index) => vacuumEnqueue(symbol, interval, rank + index * 0.01));
-    rank += 1;
-  }
-  const closed = ["pyl", "vps5"].flatMap((variant) =>
-    (vacuumLhState.closedMap[variant] || []).map((trade) => trade.symbol),
-  );
-  rank = 5000;
-  for (const symbol of closed) {
-    if (!symbol || seen.has(symbol)) continue;
-    seen.add(symbol);
-    tfOrder.forEach((interval, index) => vacuumEnqueue(symbol, interval, rank + index * 0.01));
+    vacuumEnqueue(symbol, "5", rank);
     rank += 1;
   }
   vacuumDrain();

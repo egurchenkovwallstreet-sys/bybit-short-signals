@@ -16,7 +16,7 @@ const EXTRAS = [
   ["round_level", "Круглый уровень"],
 ];
 
-const CHART_FETCH_DAYS = 30;
+const CHART_FETCH_BARS = 300;
 const DETAIL_CHART_WINDOW_HOURS = 48;
 
 const INTERVALS = [
@@ -664,12 +664,12 @@ function candleTimeForChart(raw, interval) {
 
 async function ensureCandles(symbol, interval, detail) {
   let candles = detail.candles || [];
-  const needBars = window.boardChart.minBarsForDays(interval, CHART_FETCH_DAYS);
+  const needBars = CHART_FETCH_BARS;
   const needFetch = candles.length < needBars;
   try {
     const q = new URLSearchParams({
       interval,
-      days: String(CHART_FETCH_DAYS),
+      bars: String(CHART_FETCH_BARS),
     });
     if (needFetch) q.set("refresh", "1");
     const url = `/api/klines/${encodeURIComponent(symbol)}?${q}`;
