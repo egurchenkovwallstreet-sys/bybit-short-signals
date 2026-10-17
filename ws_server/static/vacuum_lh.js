@@ -45,13 +45,26 @@ const VACUUM_DESK = [
   ["scan", "Сканер"],
   ["pyl", "БАБЛОСОС"],
   ["vps5", "Пылесос 5"],
+  ["vps15", "Пылесос 15"],
 ];
+
+const VACUUM_TRADE_VARIANTS = ["pyl", "vps5", "vps15"];
+
+function vacuumIsDeskMode(mode = vacuumLhState.mode) {
+  return mode === "pyl" || mode === "vps5" || mode === "vps15";
+}
+
+function vacuumDeskChartInterval(mode = vacuumLhState.mode) {
+  if (mode === "vps15") return "15";
+  if (mode === "pyl" || mode === "vps5") return "5";
+  return vacuumLhState.lhInterval;
+}
 
 const vacuumLhState = {
   mode: "scan",
   paper: null,
   closed: [],
-  closedMap: { pyl: [], vps5: [] },
+  closedMap: { pyl: [], vps5: [], vps15: [] },
   symbolClosed: {},
   series: new Map(),
   scanPivots: {},
@@ -346,8 +359,8 @@ function setVacuumMode(mode) {
   if (!VACUUM_DESK.some(([id]) => id === mode)) return;
   const prevInterval = vacuumLhState.chartInterval;
   vacuumLhState.mode = mode;
-  if (mode === "pyl" || mode === "vps5") {
-    vacuumLhState.chartInterval = "5";
+  if (vacuumIsDeskMode(mode)) {
+    vacuumLhState.chartInterval = vacuumDeskChartInterval(mode);
     void ensureVacuumPaper().then(() => {
       void fetchVacuumDeskClosed(true);
       renderVacuumDesk();
@@ -788,14 +801,15 @@ function scheduleVacuumSeriesWarm() {
     }
     seen.add(selected);
   }
-  const opens = ((vacuumLhState.paper || {}).open_trades || [])
-    .filter((trade) => trade.variant === "pyl" || trade.variant === "vps5")
-    .map((trade) => trade.symbol);
+  const opens = ((vacuumLhState.paper || {}).open_trades || []).filter((trade) =>
+    VACUUM_TRADE_VARIANTS.includes(trade.variant),
+  );
   let rank = 10;
-  for (const symbol of opens) {
+  for (const trade of opens) {
+    const symbol = trade.symbol;
     if (!symbol || seen.has(symbol)) continue;
     seen.add(symbol);
-    vacuumEnqueue(symbol, "5", rank);
+    vacuumEnqueue(symbol, trade.variant === "vps15" ? "15" : "5", rank);
     rank += 1;
   }
   vacuumDrain();
@@ -1029,8 +1043,9 @@ async function toggleVacuumLhSymbol(symbol) {
   }
   vacuumLhState.selected = symbol;
   vacuumLhState.detail = null;
-  vacuumLhState.chartInterval =
-    vacuumLhState.mode === "pyl" || vacuumLhState.mode === "vps5" ? "5" : vacuumLhState.lhInterval;
+  vacuumLhState.chartInterval = vacuumIsDeskMode()
+    ? vacuumDeskChartInterval()
+    : vacuumLhState.lhInterval;
   openVacuumLhChart();
   renderVacuumLhBoard();
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
@@ -1258,10 +1273,17 @@ function renderVacuumLhInfo() {
     return;
   }
   const row = vacuumLhState.detail?.signal || findVacuumRow(sym) || {};
-  const peaks = row.peaks || [];
-  const troughs = row.troughs || [];
-  const lhTf = labelTf(vacuumLhState.lhInterval);
+  const detail = vacuumLhState.detail;
   const chartTf = labelTf(vacuumLhState.chartInterval);
+  const peaks =
+    detail && String(detail.interval) === String(vacuumLhState.chartInterval) && detail.peaks?.length
+      ? detail.peaks
+      : row.peaks || [];
+  const troughs =
+    detail && String(detail.interval) === String(vacuumLhState.chartInterval) && detail.troughs?.length
+      ? detail.troughs
+      : row.troughs || [];
+  const lhTf = chartTf;
   const peakList = peaks
     .map((p) => formatVacuumInfoPivot(p, "LH", lhTf))
     .join("");
@@ -1426,7 +1448,7 @@ function resizeVacuumLhChart() {
 }
 
 function vacuumChartTradeVariants() {
-  return vacuumLhState.mode === "scan" ? ["pyl", "vps5"] : [vacuumDeskVariant()];
+  return vacuumLhState.mode === "scan" ? VACUUM_TRADE_VARIANTS : [vacuumDeskVariant()];
 }
 
 function vacuumClosedForSymbol(symbol) {
@@ -1679,7 +1701,7 @@ async function fetchVacuumSymbolClosed(symbol) {
   const seq = ++vacuumLhState._symbolClosedSeq;
   try {
     const pairs = await Promise.all(
-      ["pyl", "vps5"].map(async (variant) => {
+      VACUUM_TRADE_VARIANTS.map(async (variant) => {
         const q = new URLSearchParams({
           status: "closed",
           limit: "2000",
@@ -1794,7 +1816,9 @@ function vacuumClosedStats(rows) {
 }
 
 function vacuumDeskVariant() {
-  return vacuumLhState.mode === "vps5" ? "vps5" : "pyl";
+  if (vacuumLhState.mode === "vps5") return "vps5";
+  if (vacuumLhState.mode === "vps15") return "vps15";
+  return "pyl";
 }
 
 function vacuumRateText(stats) {
@@ -1805,10 +1829,10 @@ function vacuumRateText(stats) {
 function vacuumAnalyticsCacheKey() {
   const opensAll = (vacuumLhState.paper || {}).open_trades || [];
   const openSig = opensAll
-    .filter((t) => t.variant === "pyl" || t.variant === "vps5")
+    .filter((t) => VACUUM_TRADE_VARIANTS.includes(t.variant))
     .map((t) => `${t.id}:${t.last_price}:${t.pnl_usd}`)
     .join("|");
-  const closedSig = ["pyl", "vps5"]
+  const closedSig = VACUUM_TRADE_VARIANTS
     .map((v) => {
       const rows = vacuumLhState.closedMap[v] || [];
       const tail = rows[0];
@@ -1827,6 +1851,7 @@ function vacuumAnalyticsTable() {
   const cols = [
     ["pyl", "БАБЛОСОС"],
     ["vps5", "Пылесос 5"],
+    ["vps15", "Пылесос 15"],
   ].map(([variant, label]) => {
     const rows = vacuumLhState.closedMap[variant] || [];
     const stats = vacuumClosedStats(rows);
@@ -1905,7 +1930,9 @@ function vacuumDeskAccount() {
 
 function vacuumDeskWatch() {
   const data = vacuumLhState.paper || {};
-  return vacuumLhState.mode === "vps5" ? data.vps5_watch || [] : data.pyl_watch || [];
+  if (vacuumLhState.mode === "vps5") return data.vps5_watch || [];
+  if (vacuumLhState.mode === "vps15") return data.vps15_watch || [];
+  return data.pyl_watch || [];
 }
 
 function onVacuumPaper(data) {
@@ -1913,7 +1940,7 @@ function onVacuumPaper(data) {
   vacuumLhState.paper = data;
   vacuumLhState._analyticsKey = "";
   if (!vacuumUiActive()) return;
-  const opens = (data.open_trades || []).filter((t) => t.variant === "pyl" || t.variant === "vps5");
+  const opens = (data.open_trades || []).filter((t) => VACUUM_TRADE_VARIANTS.includes(t.variant));
   if (vacuumLhState._lastOpenCount != null && opens.length < vacuumLhState._lastOpenCount) {
     void fetchVacuumDeskClosed(true);
     if (vacuumLhState.selected) void fetchVacuumSymbolClosed(vacuumLhState.selected);
@@ -1940,7 +1967,7 @@ async function fetchVacuumDeskClosed(force) {
   }
   try {
     const pairs = await Promise.all(
-      ["pyl", "vps5"].map(async (variant) => {
+      VACUUM_TRADE_VARIANTS.map(async (variant) => {
         const res = await fetch(`/api/paper/trades?status=closed&limit=2000&variant=${encodeURIComponent(variant)}`);
         if (!res.ok) return [variant, []];
         const body = await res.json();
@@ -1969,14 +1996,22 @@ function renderVacuumDesk() {
   const acc = vacuumDeskAccount();
   const summary = document.getElementById("vacuum-desk-summary");
   if (summary) {
+    const deskLabel =
+      vacuumLhState.mode === "vps5"
+        ? "Пылесос 5"
+        : vacuumLhState.mode === "vps15"
+          ? "Пылесос 15"
+          : "БАБЛОСОС";
     const rule =
       vacuumLhState.mode === "vps5"
-        ? "Вход как у баблососа, только с подтверждением 15м/30м. Закрытие на каждой 5м: любой новый противоположный пивот. Стоп сразу −15%, с +3% пол +0.5%, с +7% трейл пик − 20."
-        : "Вход: 5м своей 15м, слабее предыдущей, без пробоя 30м, 10 секунд. Закрытие на каждой 5м: любой новый противоположный пивот. Стоп ±5% от свечи экстремума.";
+        ? "Вход на 3-й 5m после пивота + 15м/30м. Закрытие на каждой 5м: любой новый противоположный пивот. Стоп −15%, с +3% +0.5%, с +7% трейл пик − 20."
+        : vacuumLhState.mode === "vps15"
+          ? "15m pivot L15–L30. Вход 10 с после 2-й 15m справа. Закрытие по противоположному pivot в 10 с. Стоп −15%, с +3% +0.5%, с +7% трейл пик − 20."
+          : "Вход на 3-й 5m после пивота + 15м/30м. Закрытие на каждой 5м: любой противоположный пивот. Стоп ±5% от свечи экстремума.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>
-      <div class="paper-card"><span class="label">Правило</span><div class="value">${vacuumLhState.mode === "vps5" ? "Пылесос 5" : "БАБЛОСОС"}</div><div class="sub">${rule}</div></div>`;
+      <div class="paper-card"><span class="label">Правило</span><div class="value">${deskLabel}</div><div class="sub">${rule}</div></div>`;
   }
   const statsTable = document.getElementById("vacuum-desk-stats");
   if (statsTable) statsTable.innerHTML = vacuumAnalyticsTable();
@@ -2005,7 +2040,8 @@ function renderVacuumDesk() {
       ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Готово</th></tr></thead><tbody>${watch
           .slice(0, 40)
           .map((r) => {
-            const ev = (r.eval && (r.eval.pyl || r.eval.vps5)) || {};
+            const vk = vacuumDeskVariant();
+            const ev = (r.eval && r.eval[vk]) || {};
             const side = r.side || (ev.metrics || {}).side || ev.side;
             return `<tr class="clickable" data-vac-desk-symbol="${r.symbol}">
           <td><b>${r.symbol}</b></td>
@@ -2014,7 +2050,7 @@ function renderVacuumDesk() {
         </tr>`;
           })
           .join("")}</tbody>`
-      : `<tbody><tr><td class="quiet">Ждём новый экстремум на 5 мин</td></tr></tbody>`;
+      : `<tbody><tr><td class="quiet">Ждём новый экстремум на ${vacuumLhState.mode === "vps15" ? "15" : "5"} мин</td></tr></tbody>`;
   }
   const closed = vacuumLhState.closed || [];
   const closedTable = document.getElementById("vacuum-desk-closed");
