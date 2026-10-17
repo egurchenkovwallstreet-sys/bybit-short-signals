@@ -48,11 +48,11 @@ from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, eval
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.m5_htf import opposite_appeared, symbols_waiting_htf_second_bar
 from signal_engine.paper.pivot_clock import just_confirmed, symbols_waiting_second_bar
-from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
+from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_htf_pivot_entry, evaluate_pyl
 from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
 from signal_engine.paper.vac_detect import VAC_CHECK_LABELS, VAC_MANDATORY, evaluate_vac
-from signal_engine.paper.vac_lh_detect import VPS_CHECK_LABELS, VPS_MANDATORY, evaluate_vps
+from signal_engine.paper.vac_lh_detect import VPS_CHECK_LABELS, VPS_MANDATORY
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
     CSS_MANDATORY,
@@ -2159,25 +2159,20 @@ class PaperStrategy:
 
     def _evaluate_vps_variants(self, states: dict[str, SymbolState], now_ms: int) -> None:
         specs = [
-            (config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "_vps15_watch", False),
-            (config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "_vps5_watch", True),
+            (config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "_vps15_watch"),
+            (config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "_vps5_watch"),
         ]
-        for variant, interval, watch_attr, like_pyl in specs:
+        for variant, interval, watch_attr in specs:
             if variant not in VARIANTS:
                 continue
             watch: list[dict] = []
             for symbol, state in states.items():
                 prev = self._vps_prev_snap.get((variant, symbol))
-                if like_pyl:
-                    ev_data = evaluate_pyl(state, now_ms, prev)
-                    ev_data = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
-                    m = ev_data.setdefault("metrics", {})
-                    m["kind"] = variant
-                    pump = m.setdefault("pump", {})
-                    pump["kind"] = variant
-                else:
-                    ev_data = evaluate_vps(state, now_ms, prev, interval, kind=variant)
-                    m = ev_data.get("metrics") or {}
+                ev_data = evaluate_htf_pivot_entry(
+                    state, now_ms, prev, interval, kind=variant, variant=variant
+                )
+                ev_data = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
+                m = ev_data.get("metrics") or {}
                 snap = snapshot_pivot_levels(state, interval, now_ms)
                 if snap is not None:
                     self._vps_prev_snap[(variant, symbol)] = snap
@@ -2203,8 +2198,10 @@ class PaperStrategy:
                     side = ev_data.get("side") or m.get("side")
                     confirmed_exit = bool(fresh and side and side != closed_side)
                     raw_exit = (
-                        opposite_appeared(state, now_ms, closed_side, trade.pos.opened_at, interval)
-                        if like_pyl
+                        opposite_appeared(
+                            state, now_ms, closed_side, trade.pos.opened_at, interval
+                        )
+                        if interval == "5"
                         else None
                     )
                     if raw_exit or confirmed_exit:

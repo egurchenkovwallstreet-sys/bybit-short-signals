@@ -1,7 +1,8 @@
-"""БАБЛОСОС / Пылесос 5: вход только от TZ-pivot на 5m (L15–L30, 2 справа, как LH/HL на графике).
+"""TZ-pivot (L15–L30, 2 справа) + фильтр старшего ТФ для входа БАБЛОСОС / Пылесос 5 / Пылесос 15.
 
-Поверх pivot — фильтр 15m/30m (qualify_m5_pivot): экстремум своей 15m, слабее предыдущей 15m,
-без пробоя предыдущей 30m, две 5m справа не обновляют. Вход — 10 секунд после второй справа.
+5m: экстремум своей 15m, слабее предыдущей 15m, без пробоя 30m.
+15m: экстремум своего 1H, слабее предыдущего 1H, без пробоя 4H.
+Вход — 10 секунд после закрытия второй свечи справа.
 """
 
 from __future__ import annotations
@@ -16,6 +17,15 @@ from signal_engine.vacuum_lh import _meets_turnover
 M5 = 300_000
 M15 = 900_000
 M30 = 1_800_000
+M60 = 3_600_000
+M240 = 14_400_000
+
+_BAR_STEP = {"5": M5, "15": M15}
+# (floor step, bars in current HTF bucket, prior floor step, bars in prior HTF bucket)
+_HTF_BUCKETS: dict[str, tuple[int, int, int, int]] = {
+    "5": (M15, 3, M30, 6),
+    "15": (M60, 4, M240, 16),
+}
 
 
 def _floor(ts: int, step: int) -> int:
@@ -26,63 +36,70 @@ def _index(bars: list[Bar]) -> dict[int, Bar]:
     return {int(b.timestamp): b for b in bars}
 
 
-def _span(index: dict[int, Bar], start: int, count: int) -> list[Bar] | None:
+def _span(index: dict[int, Bar], start: int, count: int, step: int) -> list[Bar] | None:
     out: list[Bar] = []
     for i in range(count):
-        bar = index.get(start + i * M5)
+        bar = index.get(start + i * step)
         if bar is None:
             return None
         out.append(bar)
     return out
 
 
-def qualify_m5_pivot(index: dict[int, Bar], pivot_ts: int, side: str) -> str:
-    """Почему свеча годится или нет. 'ok' — можно входить на закрытии второй справа."""
+def qualify_htf_pivot(index: dict[int, Bar], pivot_ts: int, side: str, interval: str = "5") -> str:
+    """'ok' — TZ-pivot прошёл фильтр старшего ТФ для interval (5 или 15)."""
     bar = index.get(int(pivot_ts))
-    if bar is None or side not in ("short", "long"):
+    step = _BAR_STEP.get(interval)
+    bucket = _HTF_BUCKETS.get(interval)
+    if bar is None or side not in ("short", "long") or step is None or bucket is None:
         return "no_bar"
-    open15 = _floor(pivot_ts, M15)
-    cur = _span(index, open15, 3)
-    prev = _span(index, open15 - M15, 3)
+    cur_floor, cur_n, prior_floor, prior_n = bucket
+    open_cur = _floor(pivot_ts, cur_floor)
+    cur = _span(index, open_cur, cur_n, step)
+    prev = _span(index, open_cur - cur_floor, cur_n, step)
     if cur is None or prev is None:
-        return "missing_15m"
+        return "missing_15m" if interval == "5" else "missing_1h"
     if side == "short":
         price = float(bar.high)
         if price < max(float(b.high) for b in cur):
-            return "not_15m_extreme"
+            return "not_15m_extreme" if interval == "5" else "not_1h_extreme"
         holders = [b for b in cur if float(b.high) == price]
         if int(holders[-1].timestamp) != int(pivot_ts):
-            return "not_15m_extreme"
+            return "not_15m_extreme" if interval == "5" else "not_1h_extreme"
         if price >= max(float(b.high) for b in prev):
-            return "not_weaker_15m"
-        prior = _span(index, _floor(pivot_ts, M30) - M30, 6)
+            return "not_weaker_15m" if interval == "5" else "not_weaker_1h"
+        prior = _span(index, _floor(pivot_ts, prior_floor) - prior_floor, prior_n, step)
         if prior is None:
-            return "missing_30m"
+            return "missing_30m" if interval == "5" else "missing_4h"
         if price > max(float(b.high) for b in prior):
-            return "break_30m"
-        for step in (1, 2):
-            right = index.get(int(pivot_ts) + step * M5)
+            return "break_30m" if interval == "5" else "break_4h"
+        for n in (1, 2):
+            right = index.get(int(pivot_ts) + n * step)
             if right is None or float(right.high) >= price:
                 return "right_broken"
     else:
         price = float(bar.low)
         if price > min(float(b.low) for b in cur):
-            return "not_15m_extreme"
+            return "not_15m_extreme" if interval == "5" else "not_1h_extreme"
         holders = [b for b in cur if float(b.low) == price]
         if int(holders[-1].timestamp) != int(pivot_ts):
-            return "not_15m_extreme"
+            return "not_15m_extreme" if interval == "5" else "not_1h_extreme"
         if price <= min(float(b.low) for b in prev):
-            return "not_weaker_15m"
-        prior = _span(index, _floor(pivot_ts, M30) - M30, 6)
+            return "not_weaker_15m" if interval == "5" else "not_weaker_1h"
+        prior = _span(index, _floor(pivot_ts, prior_floor) - prior_floor, prior_n, step)
         if prior is None:
-            return "missing_30m"
+            return "missing_30m" if interval == "5" else "missing_4h"
         if price < min(float(b.low) for b in prior):
-            return "break_30m"
-        for step in (1, 2):
-            right = index.get(int(pivot_ts) + step * M5)
+            return "break_30m" if interval == "5" else "break_4h"
+        for n in (1, 2):
+            right = index.get(int(pivot_ts) + n * step)
             if right is None or float(right.low) <= price:
                 return "right_broken"
     return "ok"
+
+
+def qualify_m5_pivot(index: dict[int, Bar], pivot_ts: int, side: str) -> str:
+    return qualify_htf_pivot(index, pivot_ts, side, "5")
 
 
 def _pack(bar: Bar, side: str) -> dict:
@@ -112,31 +129,34 @@ def _tz_pivot_times_ms(snap: dict) -> list[int]:
     return sorted(times, reverse=True)
 
 
-def _setup_from_tz_pivots(state: SymbolState, now_ms: int) -> dict | None:
-    """Pivot L15–L30 + 2 справа (как на графике) и фильтр 15м/30м для входа."""
-    snap = snapshot_pivot_levels(state, "5", now_ms)
+def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dict | None:
+    """Pivot L15–L30 + 2 справа (как на графике) и фильтр старшего ТФ."""
+    step = _BAR_STEP.get(interval)
+    if step is None:
+        return None
+    snap = snapshot_pivot_levels(state, interval, now_ms)
     if not snap:
         return None
-    bars = closed_bars(state.bars_htf.get("5") or [], "5", now_ms)
+    bars = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
     if len(bars) < 12:
         return None
     index = _index(bars)
     events: list[tuple[int, str]] = []
     for p in snap.get("peaks") or []:
         ts = int(p["time_ms"])
-        if ts + 3 * M5 > int(now_ms):
+        if ts + 3 * step > int(now_ms):
             continue
-        if index.get(ts + M5) is None or index.get(ts + 2 * M5) is None:
+        if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue
-        if qualify_m5_pivot(index, ts, "short") == "ok":
+        if qualify_htf_pivot(index, ts, "short", interval) == "ok":
             events.append((ts, "short"))
     for p in snap.get("troughs") or []:
         ts = int(p["time_ms"])
-        if ts + 3 * M5 > int(now_ms):
+        if ts + 3 * step > int(now_ms):
             continue
-        if index.get(ts + M5) is None or index.get(ts + 2 * M5) is None:
+        if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue
-        if qualify_m5_pivot(index, ts, "long") == "ok":
+        if qualify_htf_pivot(index, ts, "long", interval) == "ok":
             events.append((ts, "long"))
     if not events:
         return None
@@ -148,36 +168,44 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int) -> dict | None:
     return _pack(bar, side)
 
 
-def newest_pivot_reason(state: SymbolState, now_ms: int) -> str:
-    """Причина по TZ-pivot (L15–L30), у которого уже две свечи справа."""
-    snap = snapshot_pivot_levels(state, "5", now_ms)
+def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") -> str:
+    """Причина по TZ-pivot, у которого уже две свечи справа."""
+    step = _BAR_STEP.get(interval)
+    if step is None:
+        return "no_bar"
+    snap = snapshot_pivot_levels(state, interval, now_ms)
     if not snap:
         return "no_bar"
-    bars = closed_bars(state.bars_htf.get("5") or [], "5", now_ms)
+    bars = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
     if len(bars) < 12:
         return "no_bar"
     index = _index(bars)
     fallback = "no_bar"
+    not_ext = "not_15m_extreme" if interval == "5" else "not_1h_extreme"
     for ts in _tz_pivot_times_ms(snap):
-        if ts + 3 * M5 > int(now_ms):
+        if ts + 3 * step > int(now_ms):
             continue
-        if index.get(ts + M5) is None or index.get(ts + 2 * M5) is None:
+        if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue
-        reasons = [qualify_m5_pivot(index, ts, side) for side in ("short", "long")]
+        reasons = [qualify_htf_pivot(index, ts, side, interval) for side in ("short", "long")]
         if "ok" in reasons:
             return "ok"
         for reason in reasons:
-            if reason != "not_15m_extreme":
+            if reason not in (not_ext,):
                 return reason
-        fallback = "not_15m_extreme"
+        fallback = not_ext
     return fallback
 
 
-def m5_htf_setup(state: SymbolState, now_ms: int) -> dict | None:
-    """Самый свежий TZ-pivot 5m (как LH/HL на графике) + подтверждение 15м/30м."""
+def htf_pivot_setup(state: SymbolState, now_ms: int, interval: str) -> dict | None:
+    """Самый свежий TZ-pivot на interval + подтверждение старшего ТФ."""
     if not _meets_turnover(state):
         return None
-    return _setup_from_tz_pivots(state, now_ms)
+    return _setup_from_tz_pivots(state, now_ms, interval)
+
+
+def m5_htf_setup(state: SymbolState, now_ms: int) -> dict | None:
+    return htf_pivot_setup(state, now_ms, "5")
 
 
 def htf_second_bar_pending(state: SymbolState, now_ms: int) -> bool:
@@ -195,7 +223,7 @@ def htf_second_bar_pending(state: SymbolState, now_ms: int) -> bool:
     if bar is None or right is None:
         return False
     open15 = _floor(pivot_ts, M15)
-    prev = _span(index, open15 - M15, 3)
+    prev = _span(index, open15 - M15, 3, M5)
     if prev is None:
         return False
     cur: list[Bar] = []
@@ -229,11 +257,7 @@ def opposite_appeared(
     opened_at_ms: int,
     interval: str = "5",
 ) -> dict | None:
-    """Противоположный L15–L30, вторая свеча которого закрылась уже после входа.
-
-    Проверка выхода не привязана к 10 секундам: пивот остаётся поводом закрыть,
-    пока сделка открыта. Подтверждение 15м/30м для выхода не нужно.
-    """
+    """Противоположный L15–L30, вторая свеча которого закрылась уже после входа."""
     if open_side not in ("long", "short"):
         return None
     want = "short" if open_side == "long" else "long"

@@ -22,13 +22,9 @@ from signal_engine.paper.m5_htf import (
     opposite_appeared,
     qualify_m5_pivot,
 )
-from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
+from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_htf_pivot_entry, evaluate_pyl
 from signal_engine.swing_highs import closed_bars
-from signal_engine.paper.vac_lh_detect import (
-    detect_entry_signal,
-    entry_open_until_ms,
-    evaluate_vps,
-)
+from signal_engine.paper.vac_lh_detect import detect_entry_signal, entry_open_until_ms
 from signal_engine.state import Bar, SymbolState
 
 STEP = 300_000
@@ -133,9 +129,8 @@ class FiveMinStoreAndEntryTest(unittest.TestCase):
             late = entry_open_until_ms(peak_ts, "5") + 10 * STEP
             window_sig = detect_entry_signal(None, pyl["metrics"], "5", late)
             self.assertIsNone(window_sig)
-            vps15_style = evaluate_vps(state, late, None, "5", kind="vps5")
-            self.assertFalse(vps15_style["passed"])
-            self.assertIn("entry_window", vps15_style["failed"])
+            vps5_late = evaluate_htf_pivot_entry(state, late, None, "5", kind="vps5")
+            self.assertTrue(vps5_late["passed"], vps5_late.get("failed"))
             pyl_late = evaluate_pyl(state, late, None)
             self.assertTrue(pyl_late["passed"], pyl_late.get("failed"))
 
