@@ -1898,7 +1898,7 @@ function renderVacuumDesk() {
   if (summary) {
     const rule =
       vacuumLhState.mode === "vps5"
-        ? "Тот же вход, что у баблососа: экстремум 15м, вход на 3-й свече 5м. Стоп −10%, трейл пик − 10 пунктов."
+        ? "Тот же вход, что у баблососа: экстремум 15м, вход на 3-й свече 5м. Стоп сразу −15%, с +3% пол +0.5%, с +7% трейл пик − 20."
         : "5м экстремум своей 15м и слабее предыдущей, без пробоя 30м. Вход на 3-й свече, 10 секунд. Стоп ±5% от свечи экстремума.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>

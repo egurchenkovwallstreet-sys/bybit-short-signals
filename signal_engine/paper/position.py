@@ -403,16 +403,21 @@ def vps_trail_stop_short(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
-    """Пылесос LH: −10% ROE с входа; стоп = min(−10%, пик ROE − 10 п.п.)."""
+    """Пылесос 5/15: сразу −15% net, с +3% пол +0.5% net, с +7% не хуже +5% и трейл пик − 20 п.п."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
-    liq = liquidation_price(entry, lev)
-    floor = net_roe_stop_price(
+    initial = net_roe_stop_price(
         entry, margin, config.PAPER_VPS_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
     )
-    trail_roe = peak - config.PAPER_VPS_TRAIL_GAP_ROE
-    trail = price_for_roe(entry, trail_roe, lev)
-    return min(min(trail, floor), liq)
+    if peak < config.PAPER_BE_ARM_ROE:
+        return initial
+    lock_net = net_roe_stop_price(
+        entry, margin, config.PAPER_BE_LOCK_NET_ROE, lev, entry_fee, funding_paid
+    )
+    if peak < config.PAPER_LOCK_ARM_ROE:
+        return lock_net
+    lock_roe = max(config.PAPER_LOCK_MIN_ROE, peak - config.PAPER_TRAIL_GAP_ROE)
+    return min(price_for_roe(entry, lock_roe, lev), lock_net)
 
 
 def vps_trail_stop_long(
@@ -424,15 +429,21 @@ def vps_trail_stop_long(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
+    """Лонг Пылесоса: сразу −15% net, дальше те же ступени, что у шорта."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = long_roe_pct(entry, best_price, lev)
-    liq = long_liquidation_price(entry, lev)
-    floor = net_roe_stop_price_long(
+    initial = net_roe_stop_price_long(
         entry, margin, config.PAPER_VPS_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
     )
-    trail_roe = peak - config.PAPER_VPS_TRAIL_GAP_ROE
-    trail = price_for_long_roe(entry, trail_roe, lev)
-    return max(max(trail, floor), liq)
+    if peak < config.PAPER_BE_ARM_ROE:
+        return initial
+    lock_net = net_roe_stop_price_long(
+        entry, margin, config.PAPER_BE_LOCK_NET_ROE, lev, entry_fee, funding_paid
+    )
+    if peak < config.PAPER_LOCK_ARM_ROE:
+        return lock_net
+    lock_roe = max(config.PAPER_LOCK_MIN_ROE, peak - config.PAPER_TRAIL_GAP_ROE)
+    return max(price_for_long_roe(entry, lock_roe, lev), lock_net)
 
 
 def trail_stop(
