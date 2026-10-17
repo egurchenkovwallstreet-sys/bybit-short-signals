@@ -93,8 +93,8 @@ WS_TOPIC_TICKER = "tickers.{symbol}"
 OI_INTERVALS = ("5min", "15min", "30min", "1h", "4h", "1d")
 
 # Коды интервалов свечей Bybit v5: 1, 5, 15, 60, 240, D.
-# REST-круг коллектора: без 5m/30m — движку достаточно 1/15/60/240/D.
-KLINE_INTERVALS = ("1", "15", "30", "60", "240", "D")
+# 5m нужны баблососу и пылесосу 5 (pivot и вход).
+KLINE_INTERVALS = ("1", "5", "15", "30", "60", "240", "D")
 
 # Ссылка на график. Открывается только Bybit, решение о входе — вручную.
 BYBIT_TRADE_URL = "https://www.bybit.com/trade/usdt/{symbol}"

@@ -2093,21 +2093,29 @@ class PaperStrategy:
 
     def _evaluate_vps_variants(self, states: dict[str, SymbolState], now_ms: int) -> None:
         specs = [
-            (config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "_vps15_watch"),
-            (config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "_vps5_watch"),
+            (config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "_vps15_watch", False),
+            (config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "_vps5_watch", True),
         ]
-        for variant, interval, watch_attr in specs:
+        for variant, interval, watch_attr, like_pyl in specs:
             if variant not in VARIANTS:
                 continue
             watch: list[dict] = []
             for symbol, state in states.items():
                 prev = self._vps_prev_snap.get((variant, symbol))
-                ev_data = evaluate_vps(state, now_ms, prev, interval, kind=variant)
+                if like_pyl:
+                    ev_data = evaluate_pyl(state, now_ms, prev)
+                    ev_data = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
+                    m = ev_data.setdefault("metrics", {})
+                    m["kind"] = variant
+                    pump = m.setdefault("pump", {})
+                    pump["kind"] = variant
+                else:
+                    ev_data = evaluate_vps(state, now_ms, prev, interval, kind=variant)
+                    m = ev_data.get("metrics") or {}
                 snap = snapshot_pivot_levels(state, interval, now_ms)
                 if snap is not None:
                     self._vps_prev_snap[(variant, symbol)] = snap
                 pc = int(ev_data.get("passed_count") or 0)
-                m = ev_data.get("metrics") or {}
                 if pc > 0 or m.get("peaks") or m.get("troughs"):
                     watch.append(
                         {
@@ -2118,10 +2126,20 @@ class PaperStrategy:
                             "grade": ev_data.get("grade"),
                             "score": ev_data.get("score"),
                             "ready": bool(ev_data.get("passed")),
-                            "side": m.get("side"),
+                            "side": ev_data.get("side") or m.get("side"),
                         }
                     )
-                if (variant, symbol) in self.trades:
+                open_key = (variant, symbol)
+                if open_key in self.trades:
+                    if like_pyl:
+                        trade = self.trades[open_key]
+                        side = ev_data.get("side") or m.get("side")
+                        if ev_data.get("passed") and side and side != trade.pos.side:
+                            self._close_trade(trade, "opposite_pivot", state, now_ms)
+                            balance = self.balances[variant]
+                            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                            if margin > 0 and balance - self.used_margin(variant) >= margin:
+                                self._open_vps_trade(variant, symbol, state, ev_data, margin, now_ms)
                     continue
                 if not ev_data.get("passed"):
                     continue

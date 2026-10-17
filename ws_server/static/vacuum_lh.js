@@ -1079,8 +1079,8 @@ function renderVacuumDesk() {
   if (summary) {
     const rule =
       vacuumLhState.mode === "vps5"
-        ? "5 мин: максимум → шорт, минимум → лонг. Вход на 1-й незакрытой после 2 подтверждений. Стоп −10%, трейл пик − 10 пунктов."
-        : "5 мин: максимум → шорт, минимум → лонг. Стоп ±5% от свечи экстремума, выход стоп или переворот.";
+        ? "5 мин: максимум → шорт, минимум → лонг. Вход сразу после подтверждения, как у баблососа. Стоп −10%, трейл пик − 10 пунктов."
+        : "5 мин: максимум → шорт, минимум → лонг. Вход сразу после подтверждения. Стоп ±5% от свечи экстремума, выход стоп или переворот.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>

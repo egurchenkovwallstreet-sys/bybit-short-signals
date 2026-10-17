@@ -83,8 +83,21 @@ class SignalService:
             self.engine.store.close()
             self.engine.watches.close()
 
+    def _five_min_symbols(self) -> set[str]:
+        """Монеты с оборотом порога LH — им обязательно нужны 5м для баблососа / пылесоса 5."""
+        floor = config.VACUUM_LH_MIN_TURNOVER_24H_USDT
+        out: set[str] = set()
+        for symbol, state in self.engine.symbols.items():
+            if not state.last_price:
+                continue
+            turn = state.turnover_24h_usdt
+            if turn is None or float(turn) < floor:
+                continue
+            out.add(symbol)
+        return out
+
     async def _paper_kline_loop(self) -> None:
-        """Свечи 5m/15m/30m/1H/4H с глубиной под EMA — только для кандидатов теста."""
+        """Свечи теста + 5м в состояние движка для баблососа и пылесоса 5."""
         from collector.rest_client import BybitRest
 
         paper = self.engine.paper
@@ -93,11 +106,14 @@ class SignalService:
         await rest.open()
         try:
             while True:
-                for symbol in paper.kline_wanted():
+                paper_syms = set(paper.kline_wanted())
+                five_syms = self._five_min_symbols()
+                for symbol in sorted(paper_syms | five_syms):
                     fetched = paper.kline_at.get(symbol, 0.0)
                     if time.time() - fetched < config.PAPER_KLINE_REFRESH_SEC:
                         continue
-                    for interval in (*config.PAPER_EMA_INTERVALS, "5"):
+                    intervals = (*config.PAPER_EMA_INTERVALS, "5") if symbol in paper_syms else ("5",)
+                    for interval in intervals:
                         try:
                             message = await rest.fetch_klines(symbol, interval, config.PAPER_KLINE_LIMIT)
                         except asyncio.CancelledError:
@@ -105,7 +121,10 @@ class SignalService:
                         except Exception:
                             log.exception("Тест: свечи %s %s не получены", symbol, interval)
                             continue
-                        candles = ((message or {}).get("data") or {}).get("candles") or []
+                        if not message:
+                            continue
+                        self.engine.ingest(message)
+                        candles = ((message.get("data") or {}).get("candles") or [])
                         paper.on_klines(symbol, interval, candles)
                 await asyncio.sleep(5)
         finally:

@@ -8,7 +8,32 @@ import unittest
 import config
 from signal_engine.paper.lh_scan_pivot import signal_from_pivot_diff
 from signal_engine.paper.position import bab_pivot_stop_price, price_for_roe
-from signal_engine.paper.pyl_detect import PYL_MANDATORY
+from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
+from signal_engine.paper.vac_lh_detect import (
+    detect_entry_signal,
+    entry_open_until_ms,
+    evaluate_vps,
+)
+from signal_engine.state import Bar, SymbolState
+
+STEP = 300_000
+T0 = 1_700_000_000_000
+
+
+def _state_with_5m_peak() -> tuple[SymbolState, int, int]:
+    bars: list[Bar] = []
+    for i in range(30):
+        ts = T0 + i * STEP
+        bars.append(Bar(ts, 10.0, 10.2, 9.8, 10.0, 1.0))
+    peak_ts = T0 + 30 * STEP
+    bars.append(Bar(peak_ts, 10.0, 15.0, 9.9, 12.0, 1.0))
+    for i in range(31, 80):
+        ts = T0 + i * STEP
+        bars.append(Bar(ts, 10.0, 10.3, 9.7, 10.0, 1.0))
+    now_ms = bars[-1].timestamp + STEP
+    state = SymbolState("XUSDT", last_price=10.0, turnover_24h_usdt=2_000_000.0)
+    state.bars_htf["5"] = bars
+    return state, now_ms, peak_ts
 
 
 class BabStopTest(unittest.TestCase):
@@ -33,8 +58,56 @@ class PylPivotDiffTest(unittest.TestCase):
         assert sig is not None
         self.assertEqual(sig["side"], "short")
 
+    def test_first_snap_none_prev_is_short(self) -> None:
+        cur = {"peaks": [{"time_ms": 1_000_000, "price": 10.0}], "troughs": []}
+        sig = signal_from_pivot_diff(None, cur)
+        assert sig is not None
+        self.assertEqual(sig["side"], "short")
+
     def test_mandatory_count(self) -> None:
         self.assertEqual(len(PYL_MANDATORY), 4)
+
+
+class FiveMinStoreAndEntryTest(unittest.TestCase):
+    def test_engine_stores_5m_klines(self) -> None:
+        state = SymbolState("XUSDT")
+        candles = [
+            {
+                "timestamp": T0 + i * STEP,
+                "open": 1.0,
+                "high": 1.1,
+                "low": 0.9,
+                "close": 1.0,
+                "volume": 2.0,
+            }
+            for i in range(6)
+        ]
+        state.ingest(
+            {
+                "type": "kline",
+                "symbol": "XUSDT",
+                "timestamp": T0,
+                "data": {"interval": "5", "candles": candles},
+            }
+        )
+        self.assertEqual(len(state.bars_htf.get("5") or []), 6)
+
+    def test_vps5_enters_like_pyl_without_window(self) -> None:
+        state, now_ms, peak_ts = _state_with_5m_peak()
+        pyl = evaluate_pyl(state, now_ms, None)
+        self.assertTrue(pyl["passed"], pyl.get("failed"))
+        self.assertEqual(pyl.get("side"), "short")
+        late = entry_open_until_ms(peak_ts, "5") + 10 * STEP
+        window_sig = detect_entry_signal(None, pyl["metrics"], "5", late)
+        self.assertIsNone(window_sig)
+        vps15_style = evaluate_vps(state, late, None, "5", kind="vps5")
+        self.assertFalse(vps15_style["passed"])
+        self.assertIn("entry_window", vps15_style["failed"])
+        pyl_late = evaluate_pyl(state, late, None)
+        self.assertTrue(pyl_late["passed"], pyl_late.get("failed"))
+
+    def test_collector_fetches_5m(self) -> None:
+        self.assertIn("5", config.KLINE_INTERVALS)
 
 
 if __name__ == "__main__":

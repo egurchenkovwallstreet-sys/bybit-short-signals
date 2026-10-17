@@ -50,8 +50,8 @@ def signal_from_pivot_diff(prev: dict | None, cur: dict | None) -> dict | None:
     if not cur:
         return None
     prev_norm = prev or {"peaks": [], "troughs": []}
-    new_peaks = pivot_keys(cur.get("peaks") or []) - pivot_keys(prev.get("peaks") or [])
-    new_troughs = pivot_keys(cur.get("troughs") or []) - pivot_keys(prev.get("troughs") or [])
+    new_peaks = pivot_keys(cur.get("peaks") or []) - pivot_keys(prev_norm.get("peaks") or [])
+    new_troughs = pivot_keys(cur.get("troughs") or []) - pivot_keys(prev_norm.get("troughs") or [])
     if not new_peaks and not new_troughs:
         return None
     events: list[tuple[int, str, tuple[int, float], float]] = []

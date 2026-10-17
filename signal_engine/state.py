@@ -205,7 +205,12 @@ class SymbolState:
             self.bars_1m = _merge_bars(self.bars_1m, incoming, config.BAR_HISTORY_LIMIT)
             self.last_price = self.bars_1m[-1].close
             return
-        stored = set(config.HTF_INTERVALS) | set(config.PUMP_SCAN_EMA_INTERVALS)
+        stored = (
+            set(config.KLINE_INTERVALS)
+            | set(config.HTF_INTERVALS)
+            | set(config.PUMP_SCAN_EMA_INTERVALS)
+        )
+        stored.discard("1")
         if interval in stored:
             limit = config.LEVEL_LOOKBACK_CANDLES if interval in config.HTF_INTERVALS else config.BAR_HISTORY_LIMIT
             current = self.bars_htf.get(interval, [])
