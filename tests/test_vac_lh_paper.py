@@ -1,10 +1,15 @@
-"""Paper Пылесос: max → шорт, min → лонг."""
+"""Paper Пылесос: max → шорт, min → лонг; окно 3 свечи после подтверждения pivot."""
 
 from __future__ import annotations
 
 import unittest
 
-from signal_engine.paper.vac_lh_detect import detect_entry_signal, latest_qualifying_signal
+from signal_engine.paper.vac_lh_detect import (
+    detect_entry_signal,
+    entry_open_until_ms,
+    latest_qualifying_signal,
+    pivot_in_entry_window,
+)
 
 
 class VacLhPaperDetectTest(unittest.TestCase):
@@ -17,7 +22,8 @@ class VacLhPaperDetectTest(unittest.TestCase):
             ],
             "troughs": [],
         }
-        sig = detect_entry_signal(prev, cur)
+        now_ms = entry_open_until_ms(2, "5") - 1
+        sig = detect_entry_signal(prev, cur, "5", now_ms)
         self.assertIsNotNone(sig)
         assert sig is not None
         self.assertEqual(sig["side"], "short")
@@ -31,18 +37,44 @@ class VacLhPaperDetectTest(unittest.TestCase):
                 {"time_ms": 2, "price": 5.0},
             ],
         }
-        sig = detect_entry_signal(prev, cur)
+        now_ms = entry_open_until_ms(2, "5") - 1
+        sig = detect_entry_signal(prev, cur, "5", now_ms)
         assert sig is not None
         self.assertEqual(sig["side"], "long")
 
-    def test_latest_pivot_by_time(self) -> None:
+    def test_latest_pivot_by_time_in_window(self) -> None:
         cur = {
-            "peaks": [{"time_ms": 1, "price": 10.0}],
-            "troughs": [{"time_ms": 2, "price": 5.0}],
+            "peaks": [{"time_ms": 1_000_000, "price": 10.0}],
+            "troughs": [{"time_ms": 1_300_000, "price": 5.0}],
         }
-        sig = latest_qualifying_signal(cur)
+        now_ms = entry_open_until_ms(1_300_000, "5") - 1
+        sig = latest_qualifying_signal(cur, "5", now_ms)
         assert sig is not None
         self.assertEqual(sig["side"], "long")
+
+    def test_stale_pivot_outside_window_no_signal(self) -> None:
+        cur = {
+            "peaks": [{"time_ms": 1_000_000, "price": 10.0}],
+            "troughs": [],
+        }
+        now_ms = entry_open_until_ms(1_000_000, "5") + 1
+        self.assertFalse(pivot_in_entry_window(1_000_000, "5", now_ms))
+        sig = latest_qualifying_signal(cur, "5", now_ms)
+        self.assertIsNone(sig)
+
+    def test_catch_up_after_restart_in_window(self) -> None:
+        cur = {
+            "peaks": [
+                {"time_ms": 100, "price": 9.0},
+                {"time_ms": 1_000_000, "price": 10.0},
+            ],
+            "troughs": [],
+        }
+        now_ms = entry_open_until_ms(1_000_000, "5") - 60_000
+        sig = detect_entry_signal(None, cur, "5", now_ms)
+        assert sig is not None
+        self.assertEqual(sig["pivot_time_ms"], 1_000_000)
+        self.assertEqual(sig["side"], "short")
 
 
 if __name__ == "__main__":
