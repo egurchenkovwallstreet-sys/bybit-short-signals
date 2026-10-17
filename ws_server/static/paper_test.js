@@ -34,7 +34,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", vac: "#e9c46a", vps: "#2a9d8f", i5: "#9b5de5", i15: "#f15bb5" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", vac: "#e9c46a", vps15: "#2a9d8f", vps5: "#48cae4", vps: "#2a9d8f", i5: "#9b5de5", i15: "#f15bb5" };
   const PLUS_VARIANTS = { t20p: true, p10p: true, mlnp: true };
   const MINI_VARIANTS = { mt1: true, mt2: true };
   const MINI_CHART_VARIANTS = { mt2c: true };
@@ -42,7 +42,17 @@
   const DPS_VARIANTS = { dps: true };
   const PYL_VARIANTS = { pyl: true };
   const VAC_VARIANTS = { vac: true };
-  const VPS_VARIANTS = { vps: true };
+  const VPS_VARIANTS = { vps15: true, vps5: true, vps: true };
+  function vpsChartInterval(v) {
+    if (v === "vps5") return "5";
+    return "15";
+  }
+  function vpsWatchRows() {
+    if (!paper.data) return [];
+    if (paper.variant === "vps5") return paper.data.vps5_watch || [];
+    if (paper.variant === "vps15" || paper.variant === "vps") return paper.data.vps15_watch || [];
+    return [];
+  }
   const SCAN5_VARIANTS = { pyl: true, vac: true };
   const IMPULSE_VARIANTS = { i5: true, i15: true };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
@@ -107,9 +117,10 @@
     if (p.kind === "sc10" || (p.side && (p.kind || "").startsWith("sc10"))) {
       return `Скальп 10: ${p.side === "short" ? "шорт" : "лонг"} пробой 1м`;
     }
-    if (p.kind === "vps") {
-      const dir = p.side === "long" ? "лонг HL" : p.side === "short" ? "шорт LH" : "15m pivot";
-      return `Пылесос: ${dir}`;
+    if (p.kind === "vps15" || p.kind === "vps5" || p.kind === "vps") {
+      const tf = p.trigger || (p.kind === "vps5" ? "5" : "15");
+      const dir = p.side === "long" ? "лонг" : p.side === "short" ? "шорт" : "pivot";
+      return `Пылесос ${tf}m: ${dir}`;
     }
     if (p.growth_pct === undefined) return "—";
     return `${KIND[p.kind] || p.kind}: +${num(p.growth_pct, 1)}% за ${dur(p.duration_min)} (окно ${TRIGGER[p.trigger] || p.trigger || "?"})`;
@@ -179,7 +190,10 @@
     if (paper.variant === "c3") return ev.c3 || { checks: {}, passed_count: undefined, failed: [] };
     if (PYL_VARIANTS[paper.variant]) return ev.pyl || { checks: {}, passed_count: undefined, failed: [] };
     if (VAC_VARIANTS[paper.variant]) return ev.vac || { checks: {}, passed_count: undefined, failed: [] };
-    if (VPS_VARIANTS[paper.variant]) return ev.vps || { checks: {}, passed_count: undefined, failed: [] };
+    if (VPS_VARIANTS[paper.variant]) {
+      const v = paper.variant === "vps" ? "vps15" : paper.variant;
+      return ev[v] || { checks: {}, passed_count: undefined, failed: [] };
+    }
     if (DPS_VARIANTS[paper.variant]) return ev.dps || { checks: {}, passed_count: undefined, failed: [] };
     if (GRAF_VARIANTS[paper.variant]) return ev.graf || { checks: {}, passed_count: undefined, failed: [] };
     if (MINI_CHART_VARIANTS[paper.variant]) return ev.mini_chart || { checks: {}, passed_count: undefined, failed: [] };
@@ -342,7 +356,7 @@
       tr.addEventListener("click", () => {
         if (paper.variant === tr.dataset.variant) return;
         paper.variant = tr.dataset.variant;
-        if (VPS_VARIANTS[paper.variant]) paper.interval = "15";
+        if (VPS_VARIANTS[paper.variant]) paper.interval = vpsChartInterval(paper.variant);
         if (paper.selected && (paper.selected.type === "open" || paper.selected.type === "closed")) {
           paper.selected = null;
           paper.chartKey = "";
@@ -700,20 +714,22 @@
       const candNote = document.querySelector("#paper-cand-section .quiet");
       if (candNote) {
         candNote.textContent =
-          "15m: новый pivot. Шорт — максимум ниже двух прошлых max; лонг — минимум выше двух прошлых min. Одна сделка на монету до следующего сигнала. Стоп −10% ROE, трейл пик − 10 п.п. с входа.";
+          `${vpsChartInterval(paper.variant)}m: новый pivot. Шорт — max ниже предыдущего max; лонг — min выше предыдущего min. Одна сделка до нового сигнала. Стоп −10% ROE, трейл пик − 10 п.п.`;
       }
-      const rows = (paper.data && paper.data.vps_watch) || [];
+      const tf = vpsChartInterval(paper.variant);
+      const rows = vpsWatchRows();
       const total = mandatory().length;
       if (!rows.length) {
         table.innerHTML =
-          '<tbody><tr><td class="quiet">Нет сигналов: ждём новый pivot 15m (LH/HL vs две прошлые точки).</td></tr></tbody>';
+          `<tbody><tr><td class="quiet">Нет сигналов: ждём новый pivot ${tf}m (шорт — max ниже прошлого, лонг — min выше прошлого).</td></tr></tbody>`;
         return;
       }
       table.innerHTML = `<thead><tr>
       <th>Монета</th><th>Условия</th><th>Не хватает</th><th>Сторона</th><th>Pivot</th><th>Готово</th><th>Сила</th>
     </tr></thead><tbody>${rows
         .map((r) => {
-          const ev = (r.eval && r.eval.vps) || {};
+          const vk = paper.variant === "vps" ? "vps15" : paper.variant;
+          const ev = (r.eval && r.eval[vk]) || {};
           const m = ev.metrics || {};
           const failed = (r.failed || []).map((k) => labels()[k] || k);
           const side = r.side || m.side;
@@ -734,7 +750,7 @@
           const row = rows.find((x) => x.symbol === sym);
           if (!row) return;
           paper.selected = { type: "vps_watch", symbol: sym, row };
-          paper.interval = "15";
+          paper.interval = vpsChartInterval(paper.variant);
           paper.chartKey = "";
           render();
           document.getElementById("paper-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -993,7 +1009,8 @@
     }
     if (sel.type === "vps_watch") {
       const r = sel.row;
-      return r ? { kind: "vps_watch", row: r, symbol: sel.symbol, ev: (r.eval && r.eval.vps) || {} } : null;
+      const vk = paper.variant === "vps" ? "vps15" : paper.variant;
+      return r ? { kind: "vps_watch", row: r, symbol: sel.symbol, ev: (r.eval && r.eval[vk]) || {} } : null;
     }
     return null;
   }
@@ -1020,7 +1037,10 @@
     const p = m.pump || {};
     const pylOnly = PYL_VARIANTS[paper.variant] || (p.kind === "pyl" && paper.variant === "pyl");
     const vacOnly = VAC_VARIANTS[paper.variant] || (p.kind === "vac" && paper.variant === "vac");
-    const vpsOnly = VPS_VARIANTS[paper.variant] || (p.kind === "vps" && paper.variant === "vps");
+    const vpsOnly =
+      VPS_VARIANTS[paper.variant] ||
+      (p.kind === paper.variant && VPS_VARIANTS[paper.variant]) ||
+      ((p.kind === "vps15" || p.kind === "vps5") && VPS_VARIANTS[paper.variant]);
     if (vpsOnly) {
       let html = `<h4>Условия: выполнено ${passedText(ev)} · ${esc(vlabel(paper.variant))}</h4><ul class="paper-check-list">`;
       html += mandatory()
@@ -1338,7 +1358,7 @@
     }
     const vpsEv = item.ev || {};
     const vpsM = vpsEv.metrics || {};
-    if (VPS_VARIANTS[paper.variant] || vpsM.kind === "vps") {
+    if (VPS_VARIANTS[paper.variant] || vpsM.kind === "vps15" || vpsM.kind === "vps5" || vpsM.kind === "vps") {
       (vpsM.peaks || []).slice(-5).forEach((p, i) => add(p.price, "#e76f51", `LH${i + 1}`, 3));
       (vpsM.troughs || []).slice(-5).forEach((p, i) => add(p.price, "#2a9d8f", `HL${i + 1}`, 3));
       if (vpsM.pivot_price) add(vpsM.pivot_price, "#f6d365", "pivot", 0);

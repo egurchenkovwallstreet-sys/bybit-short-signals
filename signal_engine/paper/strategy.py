@@ -47,8 +47,7 @@ from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, e
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
 from signal_engine.paper.vac_detect import VAC_CHECK_LABELS, VAC_MANDATORY, evaluate_vac
-from signal_engine.paper.vac_lh_detect import VPS_CHECK_LABELS, VPS_MANDATORY, evaluate_vps
-from signal_engine.vacuum_lh_live import snapshot_15m_levels
+from signal_engine.paper.vac_lh_detect import VPS_CHECK_LABELS, VPS_MANDATORY, evaluate_vps, snapshot_pivot_levels
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
     CSS_MANDATORY,
@@ -243,9 +242,10 @@ class PaperStrategy:
         self._pyl_watch: list[dict] = []
         self._vac_used_bars: dict[tuple[str, str], int] = {}
         self._vac_watch: list[dict] = []
-        self._vps_prev_snap: dict[str, dict] = {}
+        self._vps_prev_snap: dict[tuple[str, str], dict] = {}
         self._vps_used_signals: dict[tuple[str, str], str] = {}
-        self._vps_watch: list[dict] = []
+        self._vps15_watch: list[dict] = []
+        self._vps5_watch: list[dict] = []
         self.shadows: dict[int, Shadow] = {}
         self.last_close: dict[tuple[str, str], int] = {}
         self.expired_peaks: dict[str, int] = {}
@@ -343,10 +343,11 @@ class PaperStrategy:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
                 if bar_ts:
                     self._vac_used_bars[(variant, row["symbol"])] = bar_ts
-            if variant == config.PAPER_VPS_VARIANT:
+            if variant in config.PAPER_VPS_VARIANTS or variant == "vps":
+                v = variant if variant in config.PAPER_VPS_VARIANTS else config.PAPER_VPS15_VARIANT
                 sk = str(((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("signal_key") or "")
                 if sk:
-                    self._vps_used_signals[(variant, row["symbol"])] = sk
+                    self._vps_used_signals[(v, row["symbol"])] = sk
         if config.PAPER_CSS_VARIANT not in VARIANTS:
             dropped_css = self.store.expire_kind_watching("css", "Cursor SS снят с теста", now)
             if dropped_css:
@@ -564,8 +565,7 @@ class PaperStrategy:
             self._evaluate_pyl(states, now_ms)
         if config.PAPER_VAC_VARIANT in VARIANTS:
             self._evaluate_vac(states, now_ms)
-        if config.PAPER_VPS_VARIANT in VARIANTS:
-            self._evaluate_vps(states, now_ms)
+        self._evaluate_vps_variants(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:
@@ -2058,46 +2058,50 @@ class PaperStrategy:
             len(VAC_MANDATORY),
         )
 
-    def _evaluate_vps(self, states: dict[str, SymbolState], now_ms: int) -> None:
-        variant = config.PAPER_VPS_VARIANT
-        if variant not in VARIANTS:
-            return
-        watch: list[dict] = []
-        for symbol, state in states.items():
-            prev = self._vps_prev_snap.get(symbol)
-            ev_data = evaluate_vps(state, now_ms, prev)
-            snap = snapshot_15m_levels(state, now_ms)
-            if snap is not None:
-                self._vps_prev_snap[symbol] = snap
-            pc = int(ev_data.get("passed_count") or 0)
-            m = ev_data.get("metrics") or {}
-            if pc > 0 or m.get("peaks") or m.get("troughs"):
-                watch.append(
-                    {
-                        "symbol": symbol,
-                        "passed_count": pc,
-                        "failed": list(ev_data.get("failed") or []),
-                        "eval": {"vps": ev_data},
-                        "grade": ev_data.get("grade"),
-                        "score": ev_data.get("score"),
-                        "ready": bool(ev_data.get("passed")),
-                        "side": m.get("side"),
-                    }
-                )
-            if (variant, symbol) in self.trades:
+    def _evaluate_vps_variants(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        specs = [
+            (config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "_vps15_watch"),
+            (config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "_vps5_watch"),
+        ]
+        for variant, interval, watch_attr in specs:
+            if variant not in VARIANTS:
                 continue
-            if not ev_data.get("passed"):
-                continue
-            signal_key = str(m.get("signal_key") or "")
-            if signal_key and self._vps_used_signals.get((variant, symbol)) == signal_key:
-                continue
-            balance = self.balances[variant]
-            margin = balance * config.PAPER_MARGIN_PCT / 100.0
-            if margin <= 0 or balance - self.used_margin(variant) < margin:
-                continue
-            self._open_vps_trade(variant, symbol, state, ev_data, margin, now_ms)
-        watch.sort(key=lambda r: (-int(r["passed_count"]), r["symbol"]))
-        self._vps_watch = watch[:100]
+            watch: list[dict] = []
+            for symbol, state in states.items():
+                prev = self._vps_prev_snap.get((variant, symbol))
+                ev_data = evaluate_vps(state, now_ms, prev, interval, kind=variant)
+                snap = snapshot_pivot_levels(state, interval, now_ms)
+                if snap is not None:
+                    self._vps_prev_snap[(variant, symbol)] = snap
+                pc = int(ev_data.get("passed_count") or 0)
+                m = ev_data.get("metrics") or {}
+                if pc > 0 or m.get("peaks") or m.get("troughs"):
+                    watch.append(
+                        {
+                            "symbol": symbol,
+                            "passed_count": pc,
+                            "failed": list(ev_data.get("failed") or []),
+                            "eval": {variant: ev_data},
+                            "grade": ev_data.get("grade"),
+                            "score": ev_data.get("score"),
+                            "ready": bool(ev_data.get("passed")),
+                            "side": m.get("side"),
+                        }
+                    )
+                if (variant, symbol) in self.trades:
+                    continue
+                if not ev_data.get("passed"):
+                    continue
+                signal_key = str(m.get("signal_key") or "")
+                if signal_key and self._vps_used_signals.get((variant, symbol)) == signal_key:
+                    continue
+                balance = self.balances[variant]
+                margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                if margin <= 0 or balance - self.used_margin(variant) < margin:
+                    continue
+                self._open_vps_trade(variant, symbol, state, ev_data, margin, now_ms)
+            watch.sort(key=lambda r: (-int(r["passed_count"]), r["symbol"]))
+            setattr(self, watch_attr, watch[:100])
 
     def _open_vps_trade(
         self, variant: str, symbol: str, state: SymbolState, entry: dict, margin: float, now_ms: int
@@ -2120,7 +2124,7 @@ class PaperStrategy:
                 "symbol": symbol,
                 "variant": variant,
                 "candidate_id": None,
-                "kind": "vps",
+                "kind": variant,
                 "status": "open",
                 "opened_at": now_ms,
                 "entry_price": price,
@@ -2147,7 +2151,7 @@ class PaperStrategy:
             id=trade_id,
             variant=variant,
             symbol=symbol,
-            kind="vps",
+            kind=variant,
             pos=pos,
             score=float(entry.get("score") or 0),
             grade=str(entry.get("grade") or "C"),
@@ -2550,7 +2554,8 @@ class PaperStrategy:
             "vac_watch": list(self._vac_watch),
             "vps_check_labels": VPS_CHECK_LABELS,
             "vps_mandatory": list(VPS_MANDATORY),
-            "vps_watch": list(self._vps_watch),
+            "vps15_watch": list(self._vps15_watch),
+            "vps5_watch": list(self._vps5_watch),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
             "analytics": self._analytics,

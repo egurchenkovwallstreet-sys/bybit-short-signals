@@ -1,22 +1,43 @@
-"""Пылесос (paper): 15m новый pivot — шорт ниже двух прошлых максимумов, лонг выше двух минимумов."""
+"""Paper Пылесос 15 / 5: новый pivot — шорт если max ниже прошлого max, лонг если min выше прошлого min."""
 
 from __future__ import annotations
 
 from signal_engine.paper.detect import _check, grade_for
 from signal_engine.state import SymbolState
-from signal_engine.vacuum_lh_live import snapshot_15m_levels
+from signal_engine.vacuum_lh import (
+    _bars_for_interval,
+    _meets_turnover,
+    _min_bars,
+    all_anchor_peaks,
+    all_anchor_troughs,
+)
 
 VPS_MANDATORY = (
     "turnover_ok",
     "new_pivot",
-    "structure_vs_two_prev",
+    "structure_vs_prev",
 )
 
 VPS_CHECK_LABELS = {
     "turnover_ok": "Оборот 24ч ≥ порога сканера LH",
-    "new_pivot": "Новый подтверждённый pivot на 15m",
-    "structure_vs_two_prev": "Шорт: max ниже двух прошлых max; лонг: min выше двух прошлых min",
+    "new_pivot": "Новый подтверждённый pivot",
+    "structure_vs_prev": "Шорт: новый max ниже предыдущего; лонг: новый min выше предыдущего",
 }
+
+
+def snapshot_pivot_levels(state: SymbolState, interval: str, now_ms: int) -> dict | None:
+    if not _meets_turnover(state):
+        return None
+    bars = _bars_for_interval(state, interval)
+    if len(bars) < _min_bars(interval):
+        return None
+    peaks = all_anchor_peaks(bars, interval, now_ms)
+    troughs = all_anchor_troughs(bars, interval, now_ms)
+    return {
+        "interval": interval,
+        "peaks": peaks,
+        "troughs": troughs,
+    }
 
 
 def _keys(points: list[dict]) -> frozenset[tuple[int, float]]:
@@ -41,10 +62,9 @@ def side_for_new_peak(peaks: list[dict], new_key: tuple[int, float]) -> str | No
         ),
         -1,
     )
-    if idx < 2:
+    if idx < 1:
         return None
-    p0, p1, p2 = float(ordered[idx - 2]["price"]), float(ordered[idx - 1]["price"]), float(ordered[idx]["price"])
-    if p2 < p1 and p2 < p0:
+    if float(ordered[idx]["price"]) < float(ordered[idx - 1]["price"]):
         return "short"
     return None
 
@@ -59,10 +79,9 @@ def side_for_new_trough(troughs: list[dict], new_key: tuple[int, float]) -> str 
         ),
         -1,
     )
-    if idx < 2:
+    if idx < 1:
         return None
-    p0, p1, p2 = float(ordered[idx - 2]["price"]), float(ordered[idx - 1]["price"]), float(ordered[idx]["price"])
-    if p2 > p1 and p2 > p0:
+    if float(ordered[idx]["price"]) > float(ordered[idx - 1]["price"]):
         return "long"
     return None
 
@@ -96,8 +115,10 @@ def detect_entry_signal(prev: dict | None, cur: dict) -> dict | None:
     }
 
 
-def evaluate_vps(state: SymbolState, now_ms: int, prev_snap: dict | None) -> dict:
-    snap = snapshot_15m_levels(state, now_ms)
+def evaluate_vps(
+    state: SymbolState, now_ms: int, prev_snap: dict | None, interval: str, *, kind: str
+) -> dict:
+    snap = snapshot_pivot_levels(state, interval, now_ms)
     signal = detect_entry_signal(prev_snap, snap) if snap else None
     turnover_ok = snap is not None
     new_pivot = signal is not None
@@ -106,18 +127,19 @@ def evaluate_vps(state: SymbolState, now_ms: int, prev_snap: dict | None) -> dic
     checks = {
         "turnover_ok": _check(turnover_ok, turnover_ok, "да", "нет данных / оборот"),
         "new_pivot": _check(new_pivot, new_pivot, "новый pivot", "нет"),
-        "structure_vs_two_prev": _check(
+        "structure_vs_prev": _check(
             structure_ok,
             structure_ok,
             signal.get("side") if signal else "—",
-            "не ниже/выше двух прошлых",
+            "нет LH/HL к прошлому",
         ),
     }
     failed = [k for k in VPS_MANDATORY if not checks[k]["ok"]]
     passed = len(VPS_MANDATORY) - len(failed)
     metrics: dict = {
-        "kind": "vps",
-        "pump": {"kind": "vps", "side": signal.get("side") if signal else None},
+        "kind": kind,
+        "interval": interval,
+        "pump": {"kind": kind, "side": signal.get("side") if signal else None, "trigger": interval},
     }
     if signal:
         metrics.update(
