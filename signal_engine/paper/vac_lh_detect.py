@@ -160,19 +160,21 @@ def evaluate_vps(
     )
 
     checks = {
-        "turnover_ok": _check(turnover_ok, turnover_ok, "да", "нет данных / оборот"),
-        "new_pivot": _check(new_pivot, new_pivot, "новый pivot", "нет"),
+        "turnover_ok": _check(
+            turnover_ok,
+            "да" if turnover_ok else "нет",
+            "оборот 24ч ≥ порога сканера LH",
+        ),
+        "new_pivot": _check(new_pivot, "да" if new_pivot else "нет", "новый подтверждённый pivot"),
         "structure_vs_prev": _check(
             structure_ok,
-            structure_ok,
             signal.get("side") if signal else "—",
-            "ждём новый max/min",
+            "max → шорт, min → лонг",
         ),
         "entry_window": _check(
             window_ok,
-            window_ok,
-            "в окне входа",
-            "вне 1-й свечи после подтверждения pivot",
+            "в окне" if window_ok else "вне окна",
+            "1-я незакрытая свеча после 2 подтверждений",
         ),
     }
     failed = [k for k in VPS_MANDATORY if not checks[k]["ok"]]
