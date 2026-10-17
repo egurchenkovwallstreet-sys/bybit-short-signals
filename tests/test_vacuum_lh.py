@@ -200,7 +200,7 @@ class VacuumLhPeaksTest(unittest.TestCase):
         self.assertIn("60", out[0]["tf_matches"])
         self.assertIn("30", out[0]["tf_matches"])
 
-    def test_scan_filters_turnover_and_price(self) -> None:
+    def test_scan_lists_by_turnover_even_if_price_above_peaks(self) -> None:
         peak_prices = [100.0, 90.0, 80.0, 70.0]
         bars: list[Bar] = []
         t = NOW - 50 * H
@@ -224,14 +224,14 @@ class VacuumLhPeaksTest(unittest.TestCase):
         state = SymbolState(
             "XUSDT",
             bars_htf={"60": bars},
-            last_price=65.0,
-            turnover_24h_usdt=500_000.0,
+            last_price=200.0,
+            turnover_24h_usdt=1_100_000.0,
         )
         row = scan_symbol(state, scan_now)
         self.assertIsNotNone(row)
         assert row is not None
-        self.assertLess(row["last_price"], min(p["price"] for p in row["peaks"]))
-        state.turnover_24h_usdt = 100_000.0
+        self.assertGreater(row["last_price"], max(p["price"] for p in row["all_peaks"] or row["peaks"] or [{"price": 0}]))
+        state.turnover_24h_usdt = 500_000.0
         self.assertIsNone(scan_symbol(state, scan_now))
 
 

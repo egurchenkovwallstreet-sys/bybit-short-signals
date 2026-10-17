@@ -267,6 +267,8 @@ PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
 PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "vps15", "vps5")
+# Стол во вкладке «Пылесос»: бумага крутится здесь, в тесте стратегии скрыты.
+PAPER_DESK_VARIANTS = ("pyl", "vps5")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -713,7 +715,7 @@ def chart_tf_to_oi_interval(chart_tf: str) -> str:
 
 
 # --- Пылесос LH: 1H lower highs → проекция на 15m (сканер, не paper vac) -----
-VACUUM_LH_MIN_TURNOVER_24H_USDT = _env_float("VACUUM_LH_MIN_TURNOVER_24H_USDT", 300_000.0)
+VACUUM_LH_MIN_TURNOVER_24H_USDT = _env_float("VACUUM_LH_MIN_TURNOVER_24H_USDT", 1_000_000.0)
 VACUUM_LH_PEAK_COUNT = _env_int("VACUUM_LH_PEAK_COUNT", 5)
 VACUUM_LH_PRICE_BELOW_LAST = _env_int("VACUUM_LH_PRICE_BELOW_LAST", 3)
 # Pivot LH/HL (единое правило для LH-скана, vps, БАБЛОСОС): L15–L30 слева, 2 справа, gap ≥30.

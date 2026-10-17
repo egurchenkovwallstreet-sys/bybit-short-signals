@@ -251,7 +251,10 @@ function connectSocket() {
     renderBoard();
     renderDetail();
     renderStats();
-    if (message.paper_test && window.paperTest) window.paperTest.onSnapshot(message.paper_test);
+    if (message.paper_test) {
+      if (window.paperTest) window.paperTest.onSnapshot(message.paper_test);
+      if (window.vacuumLh?.onPaper) window.vacuumLh.onPaper(message.paper_test);
+    }
     if (window.pumpScan) {
       window.pumpScan.onPumpScanSnapshot(message.pump_scan_board, message.pump_scan_detail);
     }
@@ -273,8 +276,9 @@ function connectSocket() {
   } else if (message.type === "pump_lab_board" && window.pumpLab) {
     setDemo(message.demo);
     window.pumpLab.onPumpLabBoard(message.data);
-  } else if (message.type === "paper_test" && window.paperTest) {
-    window.paperTest.onSnapshot(message.data);
+  } else if (message.type === "paper_test") {
+    if (window.paperTest) window.paperTest.onSnapshot(message.data);
+    if (window.vacuumLh?.onPaper) window.vacuumLh.onPaper(message.data);
   } else if (message.type === "board") {
     setDemo(message.demo);
     state.board = message.data || [];

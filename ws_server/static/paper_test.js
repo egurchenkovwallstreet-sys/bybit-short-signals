@@ -169,8 +169,9 @@
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
+  const DESK_VARIANTS = { pyl: true, vps5: true };
   function variants() {
-    return (paper.data && paper.data.variants) || ["t20", "p10", "t20p", "mlnp", "mt2", "graf"];
+    return (paper.data && paper.data.test_variants) || (paper.data && paper.data.variants) || ["t20", "p10", "t20p", "mlnp", "mt2", "graf"];
   }
   function variantProfit(v) {
     const start = ((paper.data && paper.data.summary) || {}).start_balance || 1000;
@@ -182,7 +183,7 @@
   function tableVariants() {
     const all = variants();
     return all
-      .filter((v) => !TABLE_HIDDEN[v])
+      .filter((v) => !TABLE_HIDDEN[v] && !DESK_VARIANTS[v])
       .slice()
       .sort((a, b) => variantProfit(b) - variantProfit(a) || all.indexOf(a) - all.indexOf(b));
   }
@@ -562,10 +563,15 @@
     localStorage.setItem("paperEquityOn", JSON.stringify(on));
   }
 
+  function equityVariants() {
+    const all = (paper.data && paper.data.variants) || variants();
+    return all.filter((v) => !TABLE_HIDDEN[v]);
+  }
+
   function renderEquityToggles() {
     const row = document.getElementById("paper-equity-toggles");
     if (!row) return;
-    row.innerHTML = tableVariants()
+    row.innerHTML = equityVariants()
       .map((v) => {
         const on = paper.equityOn[v] === true;
         const color = VARIANT_COLORS[v] || "#8e9aab";
@@ -591,12 +597,12 @@
       paper.equityChart = echarts.init(box, null, { renderer: "canvas" });
     }
     const start = Number(((paper.data && paper.data.summary) || {}).start_balance) || 1000;
-    const enabled = tableVariants().filter((v) => paper.equityOn[v] === true);
+    const enabled = equityVariants().filter((v) => paper.equityOn[v] === true);
     let yMin = start;
     let yMax = start;
     let t0 = Infinity;
     let t1 = -Infinity;
-    tableVariants().forEach((v) => {
+    equityVariants().forEach((v) => {
       (vstats(v).equity || []).forEach((row) => {
         const ts = Number(row[0]);
         if (Number.isFinite(ts)) {

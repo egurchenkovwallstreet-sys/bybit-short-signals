@@ -2549,6 +2549,8 @@ class PaperStrategy:
                 "leverage": config.PAPER_LEVERAGE,
             },
             "variants": list(VARIANTS),
+            "test_variants": [v for v in VARIANTS if v not in config.PAPER_DESK_VARIANTS],
+            "desk_variants": list(config.PAPER_DESK_VARIANTS),
             "variant_labels": VARIANT_LABELS,
             "entry_gate_labels": ENTRY_GATE_LABELS,
             "open_trades": [self._trade_view(t, now_ms) for t in trades],

@@ -170,6 +170,26 @@ body {
   align-content: start;
 }
 
+.vacuum-mode-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+}
+.vacuum-mode-row .tf {
+  min-width: 7rem;
+}
+.vacuum-desk {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.vacuum-desk .paper-panel h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+}
+
 .vacuum-lh-toolbar {
   display: flex;
   flex-wrap: wrap;

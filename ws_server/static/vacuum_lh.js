@@ -39,7 +39,17 @@ const VACUUM_CHART_TF = [
 const VACUUM_BUFFER_TF = VACUUM_CHART_TF.map(([c]) => c);
 const VACUUM_MIN_BARS = 8;
 
+const VACUUM_DESK = [
+  ["scan", "Сканер"],
+  ["pyl", "БАБЛОСОС"],
+  ["vps5", "Пылесос 5"],
+];
+
 const vacuumLhState = {
+  mode: "scan",
+  paper: null,
+  closed: [],
+  closedVariant: "",
   lhInterval: "15",
   chartInterval: "15",
   byInterval: {},
@@ -241,16 +251,29 @@ function initVacuumLhTab() {
         void switchVacuumChartTf(tfBtn.dataset.vacTf);
         return;
       }
+      const modeBtn = target.closest("[data-vac-mode]");
+      if (modeBtn?.dataset.vacMode) {
+        event.preventDefault();
+        setVacuumMode(modeBtn.dataset.vacMode);
+        return;
+      }
       const listTf = target.closest("[data-vac-list-tf]");
       if (listTf?.dataset.vacListTf) {
         event.preventDefault();
         setVacuumListTf(listTf.dataset.vacListTf);
         return;
       }
+      const deskRow = target.closest("[data-vac-desk-symbol]");
+      if (deskRow?.dataset.vacDeskSymbol) {
+        event.preventDefault();
+        void toggleVacuumLhSymbol(deskRow.dataset.vacDeskSymbol);
+        return;
+      }
       const card = target.closest(".vacuum-lh-card");
       if (card?.dataset.symbol) toggleVacuumLhSymbol(card.dataset.symbol);
     });
   }
+  renderVacuumModes();
   renderVacuumTfControls();
   if (!vacuumLhState.loaded && !vacuumLhState.loading) {
     void fetchVacuumLhBoard();
@@ -273,14 +296,49 @@ function listTfButtonsHtml() {
   ).join("");
 }
 
+function renderVacuumModes() {
+  const row = document.getElementById("vacuum-mode-row");
+  if (!row) return;
+  row.innerHTML = VACUUM_DESK.map(
+    ([id, label]) =>
+      `<button type="button" class="tf psc-tf${id === vacuumLhState.mode ? " active" : ""}" data-vac-mode="${id}">${label}</button>`,
+  ).join("");
+}
+
+function setVacuumMode(mode) {
+  if (!VACUUM_DESK.some(([id]) => id === mode)) return;
+  vacuumLhState.mode = mode;
+  if (mode === "pyl" || mode === "vps5") {
+    vacuumLhState.chartInterval = "5";
+    void ensureVacuumPaper().then(() => {
+      void fetchVacuumDeskClosed(true);
+      renderVacuumDesk();
+    });
+  }
+  renderVacuumModes();
+  renderVacuumTfControls();
+  renderVacuumLhBoard();
+}
+
+async function ensureVacuumPaper() {
+  if (vacuumLhState.paper) return;
+  try {
+    const res = await fetch("/api/paper/snapshot");
+    if (res.ok) vacuumLhState.paper = await res.json();
+  } catch (_err) {
+    /* ignore */
+  }
+}
+
 function renderVacuumTfControls() {
   const toolbar = document.querySelector(".vacuum-lh-toolbar");
   const listRow = document.getElementById(VAC_CHART.listTfRow);
   const chartRow = document.getElementById(VAC_CHART.chartTfRow);
   const detailOpen = !!vacuumLhState.selected;
-  toolbar?.classList.toggle("vacuum-lh-toolbar-list-only", detailOpen);
-  if (listRow && !detailOpen) {
-    listRow.innerHTML = `<span class="vacuum-tf-label">Список LH</span>${listTfButtonsHtml()}`;
+  const desk = vacuumLhState.mode !== "scan";
+  toolbar?.classList.toggle("vacuum-lh-toolbar-list-only", detailOpen || desk);
+  if (listRow && !detailOpen && !desk) {
+    listRow.innerHTML = `<span class="vacuum-tf-label">Список</span>${listTfButtonsHtml()}`;
   } else if (listRow) {
     listRow.innerHTML = "";
   }
@@ -593,7 +651,8 @@ async function toggleVacuumLhSymbol(symbol) {
   }
   vacuumLhState.selected = symbol;
   vacuumLhState.detail = null;
-  vacuumLhState.chartInterval = vacuumLhState.lhInterval;
+  vacuumLhState.chartInterval =
+    vacuumLhState.mode === "pyl" || vacuumLhState.mode === "vps5" ? "5" : vacuumLhState.lhInterval;
   openVacuumLhChart();
   renderVacuumLhBoard();
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
@@ -607,6 +666,7 @@ function openVacuumLhChart() {
   normalizeVacuumChartDom();
   renderVacuumTfControls();
   document.getElementById(VAC_CHART.listWrap)?.setAttribute("hidden", "");
+  document.getElementById("vacuum-desk")?.setAttribute("hidden", "");
   document.getElementById(VAC_CHART.workspace)?.removeAttribute("hidden");
   setVacuumDetailOpen(true);
   mountVacuumChart();
@@ -621,7 +681,6 @@ function closeVacuumLhChart() {
   setVacuumChartPlaceholder("");
   clearVacuumLhOverlays(vacuumLhState.chart);
   document.getElementById(VAC_CHART.workspace)?.setAttribute("hidden", "");
-  document.getElementById(VAC_CHART.listWrap)?.removeAttribute("hidden");
   setVacuumDetailOpen(false);
   renderVacuumTfControls();
   renderVacuumLhBoard();
@@ -722,7 +781,7 @@ function vacuumLhCardHtml(row) {
   return `<article class="vacuum-lh-card pump-strategy-card${sel}${fresh}" data-symbol="${row.symbol}">
     <strong>${row.symbol}</strong>
     <span class="quiet">${Number(row.last_price).toFixed(4)}</span>
-    <span class="quiet">−${row.gap_to_nearest_pct}% до LH</span>
+    <span class="quiet">${vacuumTurnoverText(row)}</span>
     <span class="quiet peaks-line">LH: ${peaks || "—"}</span>
     <span class="quiet troughs-line">HL: ${troughs || "—"}</span>
   </article>`;
@@ -742,7 +801,23 @@ function onVacuumLhDetail(symbol, data) {
   }
 }
 
+function vacuumTurnoverText(row) {
+  const n = Number(row.turnover_24h_usdt);
+  if (!Number.isFinite(n) || n <= 0) return "оборот —";
+  if (n >= 1_000_000) return `оборот ${(n / 1_000_000).toFixed(1)} млн`;
+  return `оборот ${Math.round(n / 1000)} тыс`;
+}
+
 function renderVacuumLhBoard() {
+  const desk = document.getElementById("vacuum-desk");
+  const list = document.getElementById(VAC_CHART.listWrap);
+  const deskMode = vacuumLhState.mode !== "scan" && !vacuumLhState.selected;
+  if (desk) desk.hidden = !deskMode;
+  if (list) list.hidden = deskMode || !!vacuumLhState.selected;
+  if (deskMode) {
+    renderVacuumDesk();
+    return;
+  }
   const root = document.getElementById("vacuum-lh-columns");
   if (!root) return;
   if (vacuumLhState.loading) {
@@ -751,7 +826,7 @@ function renderVacuumLhBoard() {
   }
   const tfLabel = labelTf(vacuumLhState.lhInterval);
   if (!vacuumLhState.signals.length) {
-    root.innerHTML = `<p class="quiet pump-strategy-empty">На ${tfLabel}: нет монет с ≥3 LH и ценой ниже 3 последних вершин (оборот &gt; $300k). Список обновляется каждые ~45 с.</p>`;
+    root.innerHTML = `<p class="quiet pump-strategy-empty">На ${tfLabel}: нет монет с оборотом от 1 млн. Список обновляется каждые ~45 с.</p>`;
     return;
   }
   const buckets = { down: [], mixed: [], up: [] };
@@ -761,7 +836,7 @@ function renderVacuumLhBoard() {
   }
   const pinSort = (a, b) =>
     Number(b.live_pin_seq || 0) - Number(a.live_pin_seq || 0) ||
-    Number(b.gap_to_nearest_pct) - Number(a.gap_to_nearest_pct) ||
+    Number(b.turnover_24h_usdt || 0) - Number(a.turnover_24h_usdt || 0) ||
     String(a.symbol).localeCompare(String(b.symbol));
   for (const id of ["down", "mixed", "up"]) {
     buckets[id].sort(pinSort);
@@ -800,7 +875,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>: маркеры — <strong>цепочка LH/HL</strong> списка (${lhTf}), pivot L15–L30, разнос ≥30 св. Скан: разнос 15–30.</p>
+    <p>График <strong>${chartTf}</strong>: маркеры экстремумов (слева 15–30, справа 2, разнос ≥30). Список ${lhTf}.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
@@ -949,11 +1024,131 @@ function resizeVacuumLhChart() {
   resizeVacuumChartNow();
 }
 
+function vacuumMoney(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return "—";
+  const sign = x > 0 ? "+" : "";
+  return `${sign}${x.toFixed(2)}`;
+}
+
+function vacuumDeskVariant() {
+  return vacuumLhState.mode === "vps5" ? "vps5" : "pyl";
+}
+
+function vacuumDeskAccount() {
+  const data = vacuumLhState.paper || window.paperTest?.data || {};
+  return (((data.summary || {}).accounts || {})[vacuumDeskVariant()]) || {};
+}
+
+function vacuumDeskWatch() {
+  const data = vacuumLhState.paper || {};
+  return vacuumLhState.mode === "vps5" ? data.vps5_watch || [] : data.pyl_watch || [];
+}
+
+function onVacuumPaper(data) {
+  if (!data) return;
+  vacuumLhState.paper = data;
+  if (vacuumLhState.mode !== "scan") renderVacuumDesk();
+}
+
+async function fetchVacuumDeskClosed(force) {
+  const variant = vacuumDeskVariant();
+  if (!force && vacuumLhState.closedVariant === variant && vacuumLhState.closed.length) return;
+  try {
+    const res = await fetch(`/api/paper/trades?status=closed&limit=200&variant=${encodeURIComponent(variant)}`);
+    if (!res.ok) return;
+    const body = await res.json();
+    vacuumLhState.closed = body.rows || [];
+    vacuumLhState.closedVariant = variant;
+    if (vacuumLhState.mode !== "scan") renderVacuumDesk();
+  } catch (_err) {
+    /* ignore */
+  }
+}
+
+function renderVacuumDesk() {
+  const acc = vacuumDeskAccount();
+  const summary = document.getElementById("vacuum-desk-summary");
+  if (summary) {
+    const rule =
+      vacuumLhState.mode === "vps5"
+        ? "5 мин: максимум → шорт, минимум → лонг. Вход на 1-й незакрытой после 2 подтверждений. Стоп −10%, трейл пик − 10 пунктов."
+        : "5 мин: максимум → шорт, минимум → лонг. Стоп ±5% от свечи экстремума, выход стоп или переворот.";
+    summary.innerHTML = `
+      <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
+      <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>
+      <div class="paper-card"><span class="label">Правило</span><div class="value">${vacuumLhState.mode === "vps5" ? "Пылесос 5" : "БАБЛОСОС"}</div><div class="sub">${rule}</div></div>`;
+  }
+  const opens = ((vacuumLhState.paper || {}).open_trades || []).filter((t) => t.variant === vacuumDeskVariant());
+  const openTable = document.getElementById("vacuum-desk-open");
+  if (openTable) {
+    openTable.innerHTML = opens.length
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th>Цена</th><th>Стоп</th><th>P&L</th></tr></thead><tbody>${opens
+          .map(
+            (t) => `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
+          <td><b>${t.symbol}</b></td>
+          <td>${t.side === "long" ? "лонг" : "шорт"}</td>
+          <td>${t.entry_price}</td>
+          <td>${t.last_price}</td>
+          <td>${t.stop_price}</td>
+          <td>${vacuumMoney(t.pnl_usd)}</td>
+        </tr>`,
+          )
+          .join("")}</tbody>`
+      : `<tbody><tr><td class="quiet">Нет открытых сделок</td></tr></tbody>`;
+  }
+  const watch = vacuumDeskWatch();
+  const watchTable = document.getElementById("vacuum-desk-watch");
+  if (watchTable) {
+    watchTable.innerHTML = watch.length
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Готово</th></tr></thead><tbody>${watch
+          .slice(0, 40)
+          .map((r) => {
+            const ev = (r.eval && (r.eval.pyl || r.eval.vps5)) || {};
+            const side = r.side || (ev.metrics || {}).side;
+            return `<tr class="clickable" data-vac-desk-symbol="${r.symbol}">
+          <td><b>${r.symbol}</b></td>
+          <td>${side === "long" ? "лонг" : side === "short" ? "шорт" : "—"}</td>
+          <td>${r.ready ? "да" : "нет"}</td>
+        </tr>`;
+          })
+          .join("")}</tbody>`
+      : `<tbody><tr><td class="quiet">Ждём новый экстремум на 5 мин</td></tr></tbody>`;
+  }
+  const closed = vacuumLhState.closed || [];
+  const closedTable = document.getElementById("vacuum-desk-closed");
+  if (closedTable) {
+    closedTable.innerHTML = closed.length
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>P&L</th><th>Выход</th></tr></thead><tbody>${closed
+          .slice(0, 80)
+          .map((t) => {
+            const side = t.side || ((t.entry || {}).metrics || {}).side;
+            const reason =
+              t.exit_reason === "trailing_stop"
+                ? "стоп"
+                : t.exit_reason === "liquidation"
+                  ? "ликвидация"
+                  : t.exit_reason === "opposite_pivot"
+                    ? "переворот"
+                    : t.exit_reason || "—";
+            return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
+          <td><b>${t.symbol}</b></td>
+          <td>${side === "long" ? "лонг" : side === "short" ? "шорт" : "—"}</td>
+          <td>${vacuumMoney(t.pnl_usd)}</td>
+          <td>${reason}</td>
+        </tr>`;
+          })
+          .join("")}</tbody>`
+      : `<tbody><tr><td class="quiet">Нет закрытых сделок</td></tr></tbody>`;
+  }
+}
+
 window.vacuumLh = {
   initVacuumLhTab,
   onVacuumLhBoard,
   onVacuumLhSnapshot,
   onVacuumLhDetail,
+  onPaper: onVacuumPaper,
   resizeChart: resizeVacuumLhChart,
   closeChart: closeVacuumLhChart,
 };

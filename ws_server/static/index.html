@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261017vac18">
+  <link rel="stylesheet" href="/static/styles.css?v=20261017vac24">
 </head>
 <body>
   <header class="topbar">
@@ -79,12 +79,28 @@
   </section>
 
   <section id="view-vacuum-lh" class="pump-strategy-view" hidden>
-    <p class="quiet">
-      Оборот 24h &gt; $300k. Pivot: high/low, <strong>2</strong> справа, слева <strong>15–30</strong> (L15…L30), разнос уровней <strong>≥15</strong> св. Скан на <strong>15m</strong>. Колонки — <strong>4H</strong>; список — 15m / 30m / 1H / 4H.
+    <p class="quiet" id="vacuum-lh-intro">
+      Все монеты с оборотом за сутки от 1 млн. Без цепочки вершин. Экстремум: слева 15–30, справа 2, разнос ≥30.
     </p>
+    <div class="vacuum-mode-row" id="vacuum-mode-row"></div>
     <div class="vacuum-lh-toolbar">
       <div class="psc-tf-row" id="vacuum-lh-tf-row"></div>
       <span id="vacuum-lh-status" class="quiet"></span>
+    </div>
+    <div id="vacuum-desk" class="vacuum-desk" hidden>
+      <div id="vacuum-desk-summary" class="paper-cards"></div>
+      <section class="paper-panel">
+        <h3>Открытые</h3>
+        <div class="table-wrap"><table id="vacuum-desk-open" class="paper-table"></table></div>
+      </section>
+      <section class="paper-panel">
+        <h3>Сигналы</h3>
+        <div class="table-wrap"><table id="vacuum-desk-watch" class="paper-table"></table></div>
+      </section>
+      <section class="paper-panel">
+        <h3>Закрытые</h3>
+        <div class="table-wrap paper-scroll"><table id="vacuum-desk-closed" class="paper-table"></table></div>
+      </section>
     </div>
     <div id="vacuum-lh-list-wrap" class="vacuum-lh-list-wrap">
       <div id="vacuum-lh-columns" class="columns pump-columns vacuum-lh-columns"></div>
@@ -162,7 +178,7 @@
 
   <section id="view-paper" class="paper-view" hidden>
     <p class="quiet paper-intro">
-      Бумажные сделки ×10, маржа 5% от баланса, изолированная. Активные счета: Трейл 20 (t20), Пик −10 (p10), Трейл 20+ / Молния+ (копии), Мини тест 2, График. Комиссии и funding учтены.
+      Бумажные сделки ×10, маржа 5% от баланса, изолированная. Активные счета: Трейл 20, Пик −10, Трейл 20+ / Молния+, Мини тест 2, График, Пылесос 15. БАБЛОСОС и Пылесос 5 — во вкладке «Пылесос». Комиссии и funding учтены.
       Ордера на биржу не уходят. У каждого варианта свой счёт $1000.
       Шорт: не 14d; 6–180 мин с пика или поздний шлюз; без мегаобъёма ×80+ и dual-top после 60 мин. Лонг: без шлюза шорта.
     </p>
@@ -258,13 +274,13 @@
 
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
-  <script src="/static/paper_test.js?v=20261017vps20"></script>
+  <script src="/static/paper_test.js?v=20261017vps21"></script>
   <script src="/static/board_chart.js?v=20261017mount"></script>
-  <script src="/static/app.js?v=20261017vac4"></script>
+  <script src="/static/app.js?v=20261017vac5"></script>
   <script src="/static/pump_scan.js?v=20251008v"></script>
   <script src="/static/x2_retrace.js?v=20251008v"></script>
   <script src="/static/pump_strategy.js?v=20251008h"></script>
   <script src="/static/pump_lab.js?v=20261012study"></script>
-  <script src="/static/vacuum_lh.js?v=20261017vac23"></script>
+  <script src="/static/vacuum_lh.js?v=20261017vac24"></script>
 </body>
 </html>

@@ -347,23 +347,20 @@ def scan_symbol(state: SymbolState, now_ms: int, lh_interval: str = "60") -> dic
     bars = _bars_for_interval(state, lh_interval)
     if len(bars) < _min_bars(lh_interval):
         return None
-    need = config.VACUUM_LH_PRICE_BELOW_LAST
-    peaks = last_lower_high_peaks(bars, lh_interval, now_ms)
-    if len(peaks) < need:
-        return None
-    if not price_below_recent_peaks(float(last), peaks):
-        return None
     all_peaks = all_anchor_peaks(bars, lh_interval, now_ms)
     all_troughs = all_anchor_troughs(bars, lh_interval, now_ms)
-    projected = enrich_peaks_confluence(state, now_ms, project_peaks_to_chart(peaks, lh_interval))
+    peaks = last_lower_high_peaks(bars, lh_interval, now_ms)
+    projected = (
+        enrich_peaks_confluence(state, now_ms, project_peaks_to_chart(peaks, lh_interval)) if peaks else []
+    )
     troughs_raw = last_higher_low_troughs(bars, lh_interval, now_ms)
     projected_troughs = (
         enrich_troughs_confluence(state, now_ms, project_troughs_to_chart(troughs_raw, lh_interval))
         if len(troughs_raw) >= 2
         else []
     )
-    nearest = projected[-1]["price"]
-    gap_pct = (nearest - float(last)) / nearest * 100.0 if nearest > 0 else 0.0
+    nearest = projected[-1]["price"] if projected else (all_peaks[-1]["price"] if all_peaks else float(last))
+    gap_pct = (nearest - float(last)) / nearest * 100.0 if nearest and nearest > 0 else 0.0
     return {
         "symbol": state.symbol,
         "last_price": float(last),
@@ -403,7 +400,7 @@ def build_vacuum_lh_board(
     signals.sort(
         key=lambda r: (
             -int(r.get("live_pin_seq") or 0),
-            -float(r["gap_to_nearest_pct"]),
+            -float(r.get("turnover_24h_usdt") or 0),
             r["symbol"],
         ),
     )
