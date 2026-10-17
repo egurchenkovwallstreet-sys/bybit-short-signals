@@ -1517,30 +1517,37 @@ function vacuumMarkOnScreen(x, hostW) {
   return true;
 }
 
-function vacuumClosedTradeMarks(runtime, trade, hostW) {
+function vacuumTradePlus(money) {
+  return (Number.isFinite(money.roe) ? money.roe : Number(money.pnl)) >= 0;
+}
+
+function vacuumEntryArrow(runtime, trade, hostW) {
   const entry = Number(trade.entry_price);
   const long = vacuumTradeSide(trade) === "long";
-  const sideText = long ? "лонг" : "шорт";
-  const parts = [];
-  const xIn = vacuumTimeToX(runtime, trade.opened_at);
-  const yIn = runtime.series.priceToCoordinate(entry);
-  if (vacuumMarkOnScreen(xIn, hostW) && yIn != null && !Number.isNaN(yIn)) {
-    const sigShift = long ? "translate(-50%, 6px)" : "translate(-50%, calc(-100% - 6px))";
-    parts.push(
-      `<div class="vacuum-trade-signal ${long ? "long" : "short"}" style="left:${Math.round(xIn)}px;top:${Math.round(yIn)}px;transform:${sigShift}">${sideText}</div>`,
-    );
-  }
+  const x = vacuumTimeToX(runtime, trade.opened_at);
+  const y = runtime.series.priceToCoordinate(entry);
+  if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
+  const shift = long ? "translate(-50%, 2px)" : "translate(-50%, calc(-100% - 2px))";
+  return `<div class="vacuum-trade-arrow ${long ? "long" : "short"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}">${long ? "▲" : "▼"}</div>`;
+}
+
+function vacuumExitMark(runtime, trade, hostW) {
+  if (!trade.closed_at) return "";
   const exitPx = Number(trade.exit_price || trade.last_price);
-  const xOut = trade.closed_at ? vacuumTimeToX(runtime, trade.closed_at) : null;
-  const yOut = exitPx > 0 ? runtime.series.priceToCoordinate(exitPx) : null;
-  if (vacuumMarkOnScreen(xOut, hostW) && yOut != null && !Number.isNaN(yOut)) {
-    const money = vacuumTradePnl(trade, exitPx);
-    const plus = (Number.isFinite(money.roe) ? money.roe : Number(money.pnl)) >= 0;
-    parts.push(
-      `<div class="vacuum-trade-exit ${plus ? "plus" : "minus"}" style="left:${Math.round(xOut)}px;top:${Math.round(yOut)}px;transform:translate(-50%, calc(-100% - 6px))">выход</div>`,
-    );
-  }
-  return parts.join("");
+  const x = vacuumTimeToX(runtime, trade.closed_at);
+  const y = exitPx > 0 ? runtime.series.priceToCoordinate(exitPx) : null;
+  if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
+  const plus = vacuumTradePlus(vacuumTradePnl(trade, exitPx));
+  return `<div class="vacuum-trade-mark ${plus ? "plus" : "minus"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:translate(-50%,-50%)">${plus ? "✓" : "✕"}</div>`;
+}
+
+function vacuumTradeHudCard(trade, money) {
+  const name = VACUUM_DESK.find(([id]) => id === trade.variant)?.[1] || trade.variant || "";
+  const tone = vacuumTradePlus(money) ? "plus" : "minus";
+  const dollars = Number.isFinite(money.pnl)
+    ? `${money.pnl >= 0 ? "+" : "−"}$${Math.abs(money.pnl).toFixed(2)}`
+    : "—";
+  return `<div class="vacuum-trade-pnl ${tone}"><span class="vacuum-trade-hud-name">${name}</span><br>${vacuumFmtSigned(money.roe, 1, "%")}<br>${dollars}</div>`;
 }
 
 function vacuumFmtSigned(n, digits, suffix) {
@@ -1564,58 +1571,38 @@ function drawVacuumTradeOverlay(runtime) {
     return;
   }
   const hostW = el.clientWidth || 0;
-  const hostH = el.clientHeight || 0;
   const nowMs = Date.now();
   const parts = [];
-  const placed = [];
+  const hud = [];
   for (const trade of trades) {
     const entry = Number(trade.entry_price);
     if (!(entry > 0) || !trade.opened_at) continue;
+    const arrow = vacuumEntryArrow(runtime, trade, hostW);
+    if (arrow) parts.push(arrow);
     if (!trade._open) {
-      const closedHtml = vacuumClosedTradeMarks(runtime, trade, hostW);
-      if (closedHtml) parts.push(closedHtml);
+      const mark = vacuumExitMark(runtime, trade, hostW);
+      if (mark) parts.push(mark);
       continue;
     }
+    const current = vacuumTradeCurrentPrice(trade, live);
+    const money = vacuumTradePnl(trade, current);
+    hud.push(vacuumTradeHudCard(trade, money));
     const left = vacuumTimeToX(runtime, trade.opened_at);
-    const rightMs = trade._open ? nowMs : Number(trade.closed_at);
-    const right = vacuumTimeToX(runtime, rightMs);
-    if (left == null || right == null) continue;
+    const right = vacuumTimeToX(runtime, nowMs);
+    const worst = vacuumTradeWorstPrice(trade);
+    if (left == null || right == null || !(current > 0) || !(worst > 0)) continue;
     const xL = Math.min(left, right);
     const xR = Math.max(left, right);
     if (hostW > 0 && (xR < -8 || xL > hostW + 8)) continue;
-    const current = vacuumTradeCurrentPrice(trade, live);
-    const worst = vacuumTradeWorstPrice(trade);
-    if (!(current > 0) || !(worst > 0)) continue;
     const yTop = runtime.series.priceToCoordinate(Math.max(current, worst));
     const yBot = runtime.series.priceToCoordinate(Math.min(current, worst));
-    const yCur = runtime.series.priceToCoordinate(current);
-    const yEntry = runtime.series.priceToCoordinate(entry);
     if (yTop == null || yBot == null || Number.isNaN(yTop) || Number.isNaN(yBot)) continue;
-    const topPx = Math.min(yTop, yBot);
-    const height = Math.max(2, Math.abs(yBot - yTop));
-    const width = Math.max(2, xR - xL);
-    const money = vacuumTradePnl(trade, current);
-    const plus = (Number.isFinite(money.roe) ? money.roe : money.pnl) >= 0;
-    const tone = plus ? "plus" : "minus";
-    const long = vacuumTradeSide(trade) === "long";
-    const sideText = long ? "лонг" : "шорт";
-    const sigY = yEntry == null || Number.isNaN(yEntry) ? topPx + height / 2 : yEntry;
-    const sigShift = long ? "translate(-50%, 6px)" : "translate(-50%, calc(-100% - 6px))";
-    let labelLeft = xR + 8;
-    let labelTop = yCur == null || Number.isNaN(yCur) ? topPx + height / 2 : yCur;
-    if (hostW > 0 && labelLeft > hostW - 86) labelLeft = Math.max(4, xR - 86);
-    if (hostH > 0) labelTop = Math.max(18, Math.min(hostH - 18, labelTop));
-    for (let n = 0; n < 6; n += 1) {
-      if (!placed.some((p) => Math.abs(p.x - labelLeft) < 84 && Math.abs(p.y - labelTop) < 32)) break;
-      labelTop += 34;
-    }
-    placed.push({ x: labelLeft, y: labelTop });
+    const tone = vacuumTradePlus(money) ? "plus" : "minus";
     parts.push(
-      `<div class="vacuum-trade-box ${tone}" style="left:${Math.round(xL)}px;top:${Math.round(topPx)}px;width:${Math.round(width)}px;height:${Math.round(height)}px"></div>
-      <div class="vacuum-trade-signal ${long ? "long" : "short"}" style="left:${Math.round(left)}px;top:${Math.round(sigY)}px;transform:${sigShift}">${sideText}</div>
-      <div class="vacuum-trade-pnl ${tone}" style="left:${Math.round(labelLeft)}px;top:${Math.round(labelTop)}px;transform:translateY(-50%)">${vacuumFmtSigned(money.roe, 1, "%")}<br>${Number.isFinite(money.pnl) ? `${money.pnl >= 0 ? "+" : "−"}$${Math.abs(money.pnl).toFixed(2)}` : "—"}</div>`,
+      `<div class="vacuum-trade-box ${tone}" style="left:${Math.round(xL)}px;top:${Math.round(Math.min(yTop, yBot))}px;width:${Math.round(Math.max(2, xR - xL))}px;height:${Math.round(Math.max(2, Math.abs(yBot - yTop)))}px"></div>`,
     );
   }
+  if (hud.length) parts.push(`<div class="vacuum-trade-hud">${hud.join("")}</div>`);
   el.innerHTML = parts.join("");
 }
 

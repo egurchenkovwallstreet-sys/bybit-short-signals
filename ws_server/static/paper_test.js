@@ -1399,12 +1399,26 @@
       } else {
         add(r.exit_price, "#ff9f43", "выход", 0);
       }
-      if (r.side === "long") {
-        markers.push({ time: Math.floor(r.opened_at / 1000) + tzOffset, position: "belowBar", color: "#3ddc84", shape: "arrowUp", text: "лонг" });
-      } else {
-        markers.push({ time: Math.floor(r.opened_at / 1000) + tzOffset, position: "aboveBar", color: "#5dade2", shape: "arrowDown", text: "шорт" });
+      const long = r.side === "long";
+      markers.push({
+        time: Math.floor(r.opened_at / 1000) + tzOffset,
+        position: long ? "belowBar" : "aboveBar",
+        color: long ? "#3ddc84" : "#ff5d73",
+        shape: long ? "arrowUp" : "arrowDown",
+        text: "",
+      });
+      if (r.closed_at) {
+        const pnl = Number(r.pnl_usd);
+        const roe = Number(r.roe_pct);
+        const plus = Number.isFinite(pnl) ? pnl >= 0 : roe >= 0;
+        markers.push({
+          time: Math.floor(r.closed_at / 1000) + tzOffset,
+          position: long ? "aboveBar" : "belowBar",
+          color: plus ? "#3ddc84" : "#ff5d73",
+          shape: "circle",
+          text: plus ? "✓" : "✕",
+        });
       }
-      if (r.closed_at) markers.push({ time: Math.floor(r.closed_at / 1000) + tzOffset, position: "belowBar", color: "#ff9f43", shape: "arrowUp", text: "выход" });
     } else if (item.kind === "hist" && r.shadow_entry_price) {
       add(r.shadow_entry_price, "#5dade2", "тень: вход", 0);
       if (r.shadow_exit_price) add(r.shadow_exit_price, "#ff9f43", "тень: выход", 0);
