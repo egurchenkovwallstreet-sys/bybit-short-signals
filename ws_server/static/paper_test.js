@@ -15,6 +15,8 @@
     equityChart: null,
     equityOn: {},
     lastListFetch: 0,
+    lastClosedFetch: 0,
+    closedLoading: false,
     chartKey: "",
   };
 
@@ -288,7 +290,7 @@
     return paper.variant === "vps" ? "vps15" : paper.variant;
   }
 
-  async function fetchLists(force) {
+  async function fetchClosedTrades(force) {
     const now = Date.now();
     const variant = paper.variant;
     const apiVariant = closedTradesVariant();
@@ -296,19 +298,27 @@
     const haveClosed =
       paper.closedVariant === variant && Array.isArray(paper.closed) && paper.closed.length > 0;
     const staleEmpty = paper.closedVariant === variant && closedExpected > 0 && !paper.closed.length;
-    if (!force && !staleEmpty && haveClosed && now - paper.lastListFetch < 30000) return;
+    if (!force && !staleEmpty && haveClosed && now - paper.lastClosedFetch < 30000) return;
     try {
-      const [closedRes, hist] = await Promise.all([
-        fetch(`/api/paper/trades?status=closed&limit=500&variant=${encodeURIComponent(apiVariant)}`),
-        fetch("/api/paper/candidates?limit=500").then((r) => r.json()),
-      ]);
+      const closedRes = await fetch(
+        `/api/paper/trades?status=closed&limit=500&variant=${encodeURIComponent(apiVariant)}`
+      );
       if (variant !== paper.variant) return;
       if (!closedRes.ok) return;
       const closed = await closedRes.json();
       paper.closed = closed.rows || [];
       paper.closedVariant = variant;
+      paper.lastClosedFetch = now;
+    } catch (_err) {
+      /* ignore */
+    }
+  }
+
+  async function fetchLists(force) {
+    await fetchClosedTrades(force);
+    try {
+      const hist = await fetch("/api/paper/candidates?limit=500").then((r) => r.json());
       paper.history = hist.rows || [];
-      paper.lastListFetch = now;
     } catch (_err) {
       /* ignore */
     }
@@ -377,6 +387,8 @@
       tr.addEventListener("click", () => {
         if (paper.variant === tr.dataset.variant) return;
         paper.variant = tr.dataset.variant;
+        paper.closed = [];
+        paper.closedVariant = "";
         if (VPS_VARIANTS[paper.variant]) paper.interval = vpsChartInterval(paper.variant);
         if (paper.selected && (paper.selected.type === "open" || paper.selected.type === "closed")) {
           paper.selected = null;
@@ -886,7 +898,21 @@
   function renderClosed() {
     const table = document.getElementById("paper-closed-table");
     if (!table) return;
-    const rows = paper.closedVariant === paper.variant ? paper.closed || [] : [];
+    const variant = paper.variant;
+    const expected = (vstats(variant).trades || {}).closed || 0;
+    const rows = paper.closedVariant === variant ? paper.closed || [] : [];
+    if (!rows.length && expected > 0 && paper.closedVariant !== variant) {
+      table.innerHTML =
+        '<tbody><tr><td class="quiet">Загрузка закрытых сделок…</td></tr></tbody>';
+      if (!paper.closedLoading) {
+        paper.closedLoading = true;
+        fetchClosedTrades(true).finally(() => {
+          paper.closedLoading = false;
+          renderClosed();
+        });
+      }
+      return;
+    }
     if (!rows.length) {
       table.innerHTML = '<tbody><tr><td class="quiet">Закрытых сделок в этом варианте пока нет.</td></tr></tbody>';
       return;
