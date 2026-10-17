@@ -1173,6 +1173,7 @@ function renderVacuumLhBoard() {
   const desk = document.getElementById("vacuum-desk");
   const list = document.getElementById(VAC_CHART.listWrap);
   const deskMode = vacuumLhState.mode !== "scan" && !vacuumLhState.selected;
+  document.getElementById("view-vacuum-lh")?.classList.toggle("vacuum-desk-open", deskMode);
   if (desk) desk.hidden = !deskMode;
   if (list) list.hidden = deskMode || !!vacuumLhState.selected;
   if (deskMode) {
@@ -1762,6 +1763,88 @@ function vacuumDeskVariant() {
   return vacuumLhState.mode === "vps5" ? "vps5" : "pyl";
 }
 
+function vacuumTradeSide(trade) {
+  return trade.side || ((trade.entry || {}).metrics || {}).side || "";
+}
+
+function vacuumRateText(stats) {
+  if (!stats.n || stats.winRate == null) return "—";
+  return `${stats.winRate.toFixed(1)}%`;
+}
+
+function vacuumAnalyticsTable() {
+  const opensAll = (vacuumLhState.paper || {}).open_trades || [];
+  const cols = [
+    ["pyl", "БАБЛОСОС"],
+    ["vps5", "Пылесос 5"],
+  ].map(([variant, label]) => {
+    const rows = vacuumLhState.closedMap[variant] || [];
+    const stats = vacuumClosedStats(rows);
+    const longs = vacuumClosedStats(rows.filter((t) => vacuumTradeSide(t) === "long"));
+    const shorts = vacuumClosedStats(rows.filter((t) => vacuumTradeSide(t) === "short"));
+    const openRows = opensAll.filter((t) => t.variant === variant);
+    const openPnl = openRows.reduce((sum, t) => sum + (Number(t.pnl_usd) || 0), 0);
+    const current = variant === vacuumDeskVariant();
+    const plain = (html) => `<td class="${current ? "current" : ""}">${html}</td>`;
+    const pnl = (n, text) => {
+      const cls = [vacuumPnlClass(n), current ? "current" : ""].filter(Boolean).join(" ");
+      const body = text == null ? vacuumMoney(n) : text;
+      return `<td class="${cls}">${body}</td>`;
+    };
+    const pf = stats.pf == null ? "—" : stats.pf === Infinity ? "∞" : stats.pf.toFixed(2);
+    return {
+      label,
+      current,
+      cells: {
+        open: plain(String(openRows.length)),
+        openPnl: openRows.length ? pnl(openPnl) : plain("—"),
+        closed: plain(String(stats.n)),
+        split: plain(stats.n ? `${stats.wins} / ${stats.losses}` : "—"),
+        wr: plain(vacuumRateText(stats)),
+        net: stats.n ? pnl(stats.net) : plain("—"),
+        avgWin: stats.wins ? pnl(stats.avgWin) : plain("—"),
+        avgLoss: stats.losses ? pnl(-Math.abs(stats.avgLoss)) : plain("—"),
+        pf: plain(pf),
+        best: stats.n ? pnl(stats.best) : plain("—"),
+        worst: stats.n ? pnl(stats.worst) : plain("—"),
+        roe: stats.n
+          ? pnl(stats.avgRoe, `${stats.avgRoe >= 0 ? "+" : ""}${stats.avgRoe.toFixed(1)}%`)
+          : plain("—"),
+        dur: plain(stats.n ? vacuumDur(stats.avgMin) : "—"),
+        dd: plain(stats.n ? `${stats.dd.toFixed(1)}%` : "—"),
+        fees: stats.n ? pnl(-stats.fees) : plain("—"),
+        longWr: plain(longs.n ? `${vacuumRateText(longs)} · ${longs.n}` : "—"),
+        longNet: longs.n ? pnl(longs.net) : plain("—"),
+        shortWr: plain(shorts.n ? `${vacuumRateText(shorts)} · ${shorts.n}` : "—"),
+        shortNet: shorts.n ? pnl(shorts.net) : plain("—"),
+      },
+    };
+  });
+  const head = cols.map((col) => `<th class="${col.current ? "current" : ""}">${col.label}</th>`).join("");
+  const line = (name, key) => `<tr><td>${name}</td>${cols.map((col) => col.cells[key]).join("")}</tr>`;
+  return `<thead><tr><th>Показатель</th>${head}</tr></thead><tbody>
+    ${line("Открыто сейчас", "open")}
+    ${line("Плавающий P&L", "openPnl")}
+    ${line("Закрыто", "closed")}
+    ${line("В плюсе / в минусе", "split")}
+    ${line("Винрейт", "wr")}
+    ${line("Итог", "net")}
+    ${line("Средний плюс", "avgWin")}
+    ${line("Средний минус", "avgLoss")}
+    ${line("Profit factor", "pf")}
+    ${line("Лучшая сделка", "best")}
+    ${line("Худшая сделка", "worst")}
+    ${line("Средний ROE", "roe")}
+    ${line("Среднее время", "dur")}
+    ${line("Макс. просадка", "dd")}
+    ${line("Комиссии", "fees")}
+    ${line("Лонги, винрейт", "longWr")}
+    ${line("Лонги, итог", "longNet")}
+    ${line("Шорты, винрейт", "shortWr")}
+    ${line("Шорты, итог", "shortNet")}
+  </tbody>`;
+}
+
 function vacuumDeskAccount() {
   const data = vacuumLhState.paper || window.paperTest?.data || {};
   return (((data.summary || {}).accounts || {})[vacuumDeskVariant()]) || {};
@@ -1834,43 +1917,7 @@ function renderVacuumDesk() {
       <div class="paper-card"><span class="label">Правило</span><div class="value">${vacuumLhState.mode === "vps5" ? "Пылесос 5" : "БАБЛОСОС"}</div><div class="sub">${rule}</div></div>`;
   }
   const statsTable = document.getElementById("vacuum-desk-stats");
-  if (statsTable) {
-    const opensAll = (vacuumLhState.paper || {}).open_trades || [];
-    const body = [
-      ["pyl", "БАБЛОСОС"],
-      ["vps5", "Пылесос 5"],
-    ]
-      .map(([variant, label]) => {
-        const st = vacuumClosedStats(vacuumLhState.closedMap[variant] || []);
-        const openN = opensAll.filter((t) => t.variant === variant).length;
-        const wr = st.winRate == null ? "—" : `${st.winRate.toFixed(1)}%`;
-        const pf = st.pf == null ? "—" : st.pf === Infinity ? "∞" : st.pf.toFixed(2);
-        const current = variant === vacuumDeskVariant() ? " vacuum-stats-current" : "";
-        return `<tr class="${current.trim()}">
-          <td><b>${label}</b></td>
-          <td>${openN}</td>
-          <td>${st.n}</td>
-          <td>${st.n ? `${st.wins} / ${st.losses}` : "—"}</td>
-          <td>${wr}</td>
-          ${vacuumPnlTd(st.net)}
-          ${vacuumPnlTd(st.n ? st.avgWin : null)}
-          ${vacuumPnlTd(st.n ? -Math.abs(st.avgLoss) : null, st.n ? vacuumMoney(-Math.abs(st.avgLoss)) : "—")}
-          <td>${pf}</td>
-          ${vacuumPnlTd(st.n ? st.best : null)}
-          ${vacuumPnlTd(st.n ? st.worst : null)}
-          ${vacuumPnlTd(st.n ? st.avgRoe : null, st.n ? `${st.avgRoe >= 0 ? "+" : ""}${st.avgRoe.toFixed(1)}%` : "—")}
-          <td>${st.n ? vacuumDur(st.avgMin) : "—"}</td>
-          <td>${st.n ? `${st.dd.toFixed(1)}%` : "—"}</td>
-          ${vacuumPnlTd(st.n ? -st.fees : null)}
-        </tr>`;
-      })
-      .join("");
-    statsTable.innerHTML = `<thead><tr>
-      <th>Стратегия</th><th>Открыто</th><th>Закрыто</th><th>Плюс / минус</th><th>Винрейт</th>
-      <th>Итог</th><th>Ср. плюс</th><th>Ср. минус</th><th>PF</th><th>Лучшая</th><th>Худшая</th>
-      <th>Ср. ROE</th><th>Ср. время</th><th>Просадка</th><th>Комиссии</th>
-    </tr></thead><tbody>${body}</tbody>`;
-  }
+  if (statsTable) statsTable.innerHTML = vacuumAnalyticsTable();
   const opens = ((vacuumLhState.paper || {}).open_trades || []).filter((t) => t.variant === vacuumDeskVariant());
   const openTable = document.getElementById("vacuum-desk-open");
   if (openTable) {

@@ -96,10 +96,16 @@ body {
   overflow: hidden;
 }
 
-#view-vacuum-lh.vacuum-lh-detail-open {
+#view-vacuum-lh.vacuum-lh-detail-open,
+#view-vacuum-lh.vacuum-desk-open {
   overflow-x: hidden;
   overflow-y: auto;
   max-height: calc(100vh - 72px);
+}
+
+#view-vacuum-lh.vacuum-desk-open .vacuum-desk {
+  flex: none;
+  padding-bottom: 28px;
 }
 
 #view-vacuum-lh.vacuum-lh-detail-open .psc-workspace {
@@ -280,7 +286,14 @@ body {
 }
 .paper-table td.pnl-plus { color: var(--green); font-weight: 700; font-variant-numeric: tabular-nums; }
 .paper-table td.pnl-minus { color: var(--red); font-weight: 700; font-variant-numeric: tabular-nums; }
-.paper-table tr.vacuum-stats-current td { background: rgba(93, 173, 226, 0.08); }
+.paper-table tr.vacuum-stats-current td,
+.vacuum-analytics td.current,
+.vacuum-analytics th.current { background: rgba(93, 173, 226, 0.08); }
+.vacuum-analytics th,
+.vacuum-analytics td { text-align: right; }
+.vacuum-analytics th:first-child,
+.vacuum-analytics td:first-child { text-align: left; color: var(--muted); font-weight: 600; }
+.vacuum-analytics th.current { color: var(--text); }
 
 .vacuum-lh-toolbar {
   display: flex;
