@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import config
-from signal_engine.paper.pivot_clock import just_confirmed
+from signal_engine.paper.pivot_clock import second_bar_close_ms
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
 from signal_engine.vacuum_lh import _meets_turnover
@@ -182,10 +182,17 @@ def symbols_waiting_htf_second_bar(states: dict[str, SymbolState], now_ms: int) 
     return {symbol for symbol, state in states.items() if htf_second_bar_pending(state, now_ms)}
 
 
-def opposite_just_confirmed(state: SymbolState, now_ms: int, open_side: str, interval: str = "5") -> dict | None:
-    """Любой L15–L30 противоположной стороны, чья вторая свеча закрылась только что.
+def opposite_appeared(
+    state: SymbolState,
+    now_ms: int,
+    open_side: str,
+    opened_at_ms: int,
+    interval: str = "5",
+) -> dict | None:
+    """Противоположный L15–L30, вторая свеча которого закрылась уже после входа.
 
-    Подтверждение 15м/30м здесь не нужно: это выход, не вход.
+    Проверка выхода не привязана к 10 секундам: пивот остаётся поводом закрыть,
+    пока сделка открыта. Подтверждение 15м/30м для выхода не нужно.
     """
     if open_side not in ("long", "short"):
         return None
@@ -199,10 +206,12 @@ def opposite_just_confirmed(state: SymbolState, now_ms: int, open_side: str, int
         if want == "short"
         else pivot_lows_floating_left(bars, left, left_max, right)
     )
+    opened = int(opened_at_ms)
     hit: dict | None = None
     for point in points:
         ts = int(point["time"])
-        if not just_confirmed(ts, now_ms, interval):
+        confirmed_at = second_bar_close_ms(ts, interval)
+        if confirmed_at > int(now_ms) or confirmed_at <= opened:
             continue
         if hit is None or ts > int(hit["pivot_time_ms"]):
             hit = {

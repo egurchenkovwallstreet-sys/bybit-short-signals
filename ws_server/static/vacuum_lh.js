@@ -1885,8 +1885,8 @@ function renderVacuumDesk() {
   if (summary) {
     const rule =
       vacuumLhState.mode === "vps5"
-        ? "Вход как у баблососа, только с подтверждением 15м/30м. Закрытие — любой противоположный пивот. Стоп сразу −15%, с +3% пол +0.5%, с +7% трейл пик − 20."
-        : "Вход: 5м своей 15м, слабее предыдущей, без пробоя 30м, 10 секунд. Закрытие: любой противоположный пивот. Стоп ±5% от свечи экстремума.";
+        ? "Вход как у баблососа, только с подтверждением 15м/30м. Закрытие на каждой 5м: любой новый противоположный пивот. Стоп сразу −15%, с +3% пол +0.5%, с +7% трейл пик − 20."
+        : "Вход: 5м своей 15м, слабее предыдущей, без пробоя 30м, 10 секунд. Закрытие на каждой 5м: любой новый противоположный пивот. Стоп ±5% от свечи экстремума.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>

@@ -15,7 +15,7 @@ from signal_engine.paper.pivot_clock import (
     symbols_waiting_second_bar,
 )
 from signal_engine.paper.position import Position, bab_pivot_stop_price, price_for_roe
-from signal_engine.paper.m5_htf import htf_second_bar_pending, opposite_just_confirmed, qualify_m5_pivot
+from signal_engine.paper.m5_htf import htf_second_bar_pending, opposite_appeared, qualify_m5_pivot
 from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
 from signal_engine.swing_highs import closed_bars
 from signal_engine.paper.vac_lh_detect import (
@@ -188,12 +188,12 @@ class M5HtfGateTest(unittest.TestCase):
         state.bars_htf["5"] = bars
         pyl = evaluate_pyl(state, now_ms, None)
         self.assertFalse(pyl["passed"])
-        hit = opposite_just_confirmed(state, now_ms, "long", "5")
+        hit = opposite_appeared(state, now_ms + 11_000, "long", peak_ts, "5")
         self.assertIsNotNone(hit)
         self.assertEqual(hit["side"], "short")
         self.assertEqual(hit["pivot_time_ms"], peak_ts)
-        self.assertIsNone(opposite_just_confirmed(state, now_ms, "short", "5"))
-        self.assertIsNone(opposite_just_confirmed(state, now_ms + 11_000, "long", "5"))
+        self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "short", peak_ts, "5"))
+        self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "long", now_ms + 11_000, "5"))
 
 
 class PivotConfirmClockTest(unittest.TestCase):
