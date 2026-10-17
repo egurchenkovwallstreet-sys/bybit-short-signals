@@ -1,8 +1,7 @@
-"""TZ-pivot (L15–L30, 2 справа) + фильтр старшего ТФ для входа БАБЛОСОС / Пылесос 5 / Пылесос 15.
+"""TZ-pivot L15–L30 (left_strength), 2 справа.
 
-5m: экстремум своей 15m, слабее предыдущей 15m, без пробоя 30m.
-15m: экстремум своего 1H, слабее предыдущего 1H, без пробоя 4H.
-Вход — 10 секунд после закрытия второй свечи справа.
+5m (pyl/vps5): LH/HL без 15m/30m; в окне 3-й свечи — кандидат с max left_strength.
+15m (vps15): + HTF 1H/4H; вход 10 с после 2-й 15m справа.
 """
 
 from __future__ import annotations
@@ -102,10 +101,10 @@ def qualify_m5_pivot(index: dict[int, Bar], pivot_ts: int, side: str) -> str:
     return qualify_htf_pivot(index, pivot_ts, side, "5")
 
 
-def _pack(bar: Bar, side: str) -> dict:
+def _pack(bar: Bar, side: str, left_strength: int | None = None) -> dict:
     price = float(bar.high) if side == "short" else float(bar.low)
     ts = int(bar.timestamp)
-    return {
+    out = {
         "side": side,
         "signal_key": f"{side}:{ts}:{price}",
         "pivot_time_ms": ts,
@@ -114,6 +113,18 @@ def _pack(bar: Bar, side: str) -> dict:
         "pivot_high": float(bar.high),
         "pivot_low": float(bar.low),
     }
+    if left_strength is not None:
+        out["left_strength"] = int(left_strength)
+    return out
+
+
+def _pivot_left_strength(p: dict) -> int | None:
+    ls = int(p.get("left_strength") or 0)
+    lo = config.VACUUM_LH_PIVOT_LEFT
+    hi = config.VACUUM_LH_PIVOT_LEFT_MAX
+    if lo <= ls <= hi:
+        return ls
+    return None
 
 
 def _tz_pivot_times_ms(snap: dict) -> list[int]:
@@ -137,7 +148,7 @@ def _pivot_in_entry_window(ts: int, now_ms: int, interval: str, step: int) -> bo
 
 
 def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dict | None:
-    """Pivot L15–L30 + 2 справа (как на графике) и фильтр старшего ТФ."""
+    """Pivot L15–L30 + 2 справа; 5m — без 15m/30m, приоритет max left_strength."""
     step = _BAR_STEP.get(interval)
     if step is None:
         return None
@@ -148,35 +159,43 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
     if len(bars) < 12:
         return None
     index = _index(bars)
-    events: list[tuple[int, str]] = []
+    candidates: list[tuple[int, int, str]] = []
     for p in snap.get("peaks") or []:
         ts = int(p["time_ms"])
-        if not _pivot_in_entry_window(ts, now_ms, interval, step):
+        ls = _pivot_left_strength(p)
+        if ls is None or not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
         if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue
-        if qualify_htf_pivot(index, ts, "short", interval) == "ok":
-            events.append((ts, "short"))
+        if interval == "5":
+            candidates.append((ls, ts, "short"))
+        elif qualify_htf_pivot(index, ts, "short", interval) == "ok":
+            candidates.append((ls, ts, "short"))
     for p in snap.get("troughs") or []:
         ts = int(p["time_ms"])
-        if not _pivot_in_entry_window(ts, now_ms, interval, step):
+        ls = _pivot_left_strength(p)
+        if ls is None or not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
         if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue
-        if qualify_htf_pivot(index, ts, "long", interval) == "ok":
-            events.append((ts, "long"))
-    if not events:
+        if interval == "5":
+            candidates.append((ls, ts, "long"))
+        elif qualify_htf_pivot(index, ts, "long", interval) == "ok":
+            candidates.append((ls, ts, "long"))
+    if not candidates:
         return None
-    events.sort(key=lambda x: x[0], reverse=True)
-    ts, side = events[0]
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    ls, ts, side = candidates[0]
     bar = index.get(ts)
     if bar is None:
         return None
-    return _pack(bar, side)
+    return _pack(bar, side, ls)
 
 
 def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") -> str:
-    """Причина по TZ-pivot, у которого уже две свечи справа."""
+    """Причина по TZ-pivot в окне входа (5m — L15–L30, 15m — + HTF)."""
+    if interval == "5":
+        return "ok" if htf_pivot_setup(state, now_ms, "5") else "no_bar"
     step = _BAR_STEP.get(interval)
     if step is None:
         return "no_bar"
@@ -188,7 +207,7 @@ def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") ->
         return "no_bar"
     index = _index(bars)
     fallback = "no_bar"
-    not_ext = "not_15m_extreme" if interval == "5" else "not_1h_extreme"
+    not_ext = "not_1h_extreme"
     for ts in _tz_pivot_times_ms(snap):
         if not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
@@ -205,7 +224,7 @@ def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") ->
 
 
 def htf_pivot_setup(state: SymbolState, now_ms: int, interval: str) -> dict | None:
-    """Самый свежий TZ-pivot на interval + подтверждение старшего ТФ."""
+    """TZ-pivot в окне входа; 5m — max L15–L30, 15m — + HTF."""
     if not _meets_turnover(state):
         return None
     return _setup_from_tz_pivots(state, now_ms, interval)

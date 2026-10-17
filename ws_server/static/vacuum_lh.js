@@ -2004,10 +2004,10 @@ function renderVacuumDesk() {
           : "БАБЛОСОС";
     const rule =
       vacuumLhState.mode === "vps5"
-        ? "Вход на 3-й 5m после пивота + 15м/30м. Закрытие на каждой 5м: любой новый противоположный пивот. Стоп −15%, с +3% +0.5%, с +7% трейл пик − 20."
+        ? "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие: противоп. pivot после 2-й 5m справа. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
         : vacuumLhState.mode === "vps15"
-          ? "15m pivot L15–L30. Вход 10 с после 2-й 15m справа. Закрытие по противоположному pivot в 10 с. Стоп −15%, с +3% +0.5%, с +7% трейл пик − 20."
-          : "Вход на 3-й 5m после пивота + 15м/30м. Закрытие на каждой 5м: любой противоположный пивот. Стоп ±5% от свечи экстремума.";
+          ? "15m pivot L15–L30 + 1H/4H. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 10 с. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
+          : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие после 2-й 5m у противоп. pivot. Стоп ±5% от свечи пивота.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>

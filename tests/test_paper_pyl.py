@@ -20,6 +20,7 @@ from signal_engine.paper.pivot_clock import (
 )
 from signal_engine.paper.position import Position, bab_pivot_stop_price, price_for_roe
 from signal_engine.paper.m5_htf import (
+    htf_pivot_setup,
     htf_second_bar_pending,
     m5_htf_setup,
     opposite_appeared,
@@ -90,7 +91,7 @@ class PylPivotDiffTest(unittest.TestCase):
         self.assertEqual(sig["side"], "short")
 
     def test_mandatory_count(self) -> None:
-        self.assertEqual(len(PYL_MANDATORY), 4)
+        self.assertEqual(len(PYL_MANDATORY), 3)
 
 
 class FiveMinStoreAndEntryTest(unittest.TestCase):
@@ -144,17 +145,25 @@ class FiveMinStoreAndEntryTest(unittest.TestCase):
 
 
 class M5HtfGateTest(unittest.TestCase):
-    def test_higher_15m_is_rejected(self) -> None:
+    def test_pyl_ignores_htf_uses_left_strength(self) -> None:
         base = _aligned_base()
-        highs = [16, 15, 14.5, 13, 12.5, 14, 10, 10, 10, 12, 11, 11]
+        highs = [16, 15, 14.5, 13, 12.5, 14, 10, 10, 10, 12, 11, 11, 10.5]
         bars = _bars(base, highs, [9] * len(highs))
         state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
         state.bars_htf["5"] = bars
         peak_ts = base + 9 * STEP
-        index = {int(b.timestamp): b for b in closed_bars(bars, "5", peak_ts + 3 * STEP)}
+        now_ms = peak_ts + 3 * STEP + 60_000
+        index = {int(b.timestamp): b for b in closed_bars(bars, "5", now_ms)}
         self.assertEqual(qualify_m5_pivot(index, peak_ts, "short"), "not_weaker_15m")
-        pyl = evaluate_pyl(state, peak_ts + 3 * STEP, None)
-        self.assertFalse(pyl["passed"])
+        snap = {
+            "interval": "5",
+            "peaks": [{"time_ms": peak_ts, "price": 12.0, "left_strength": 30}],
+            "troughs": [],
+        }
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=snap):
+            pyl = evaluate_pyl(state, now_ms, None)
+        self.assertTrue(pyl["passed"], pyl.get("failed"))
+        self.assertEqual(pyl["metrics"].get("left_strength"), 30)
 
     def test_break_of_prior_30m_is_rejected(self) -> None:
         base = _aligned_base()
@@ -163,7 +172,7 @@ class M5HtfGateTest(unittest.TestCase):
         state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
         state.bars_htf["5"] = bars
         peak_ts = base + 9 * STEP
-        now_ms = peak_ts + 3 * STEP
+        now_ms = peak_ts + 3 * STEP + 60_000
         index = {int(b.timestamp): b for b in closed_bars(bars, "5", now_ms)}
         self.assertEqual(qualify_m5_pivot(index, peak_ts, "short"), "break_30m")
         snap = {
@@ -174,8 +183,8 @@ class M5HtfGateTest(unittest.TestCase):
         with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=snap):
             pyl = evaluate_pyl(state, now_ms, None)
             setup = m5_htf_setup(state, now_ms)
-        self.assertFalse(pyl["passed"])
-        self.assertIsNone(setup)
+        self.assertTrue(pyl["passed"], pyl.get("failed"))
+        self.assertIsNotNone(setup)
 
     def test_higher_low_is_long(self) -> None:
         base = _aligned_base()
@@ -201,6 +210,23 @@ class M5HtfGateTest(unittest.TestCase):
         """Локальный high без L15–L30 не даёт вход, даже если 15m/30m проходят."""
         state, now_ms, peak_ts = _lower_high_state()
         self.assertIsNone(m5_htf_setup(state, now_ms))
+
+    def test_picks_highest_left_strength_in_window(self) -> None:
+        state, now_ms, peak_ts = _lower_high_state()
+        weak_ts = peak_ts - 4 * STEP
+        snap = {
+            "interval": "5",
+            "peaks": [
+                {"time_ms": weak_ts, "price": 11.5, "left_strength": 15},
+                {"time_ms": peak_ts, "price": 12.0, "left_strength": 30},
+            ],
+            "troughs": [],
+        }
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=snap):
+            setup = htf_pivot_setup(state, now_ms, "5")
+        self.assertIsNotNone(setup)
+        self.assertEqual(setup["pivot_time_ms"], peak_ts)
+        self.assertEqual(setup.get("left_strength"), 30)
 
     def test_pending_after_first_right_bar(self) -> None:
         state, now_ms, peak_ts = _lower_high_state()
