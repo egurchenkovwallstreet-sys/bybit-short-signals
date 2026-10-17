@@ -150,6 +150,68 @@ body {
   height: 100%;
 }
 
+.vacuum-trade-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 16;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.vacuum-trade-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+
+.vacuum-trade-box.plus {
+  background: rgba(61, 214, 140, 0.2);
+  border-color: rgba(61, 214, 140, 0.45);
+}
+
+.vacuum-trade-box.minus {
+  background: rgba(255, 93, 115, 0.2);
+  border-color: rgba(255, 93, 115, 0.45);
+}
+
+.vacuum-trade-signal {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #0f141b;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.vacuum-trade-box.minus .vacuum-trade-signal {
+  background: rgba(255, 210, 216, 0.92);
+}
+
+.vacuum-trade-pnl {
+  position: absolute;
+  min-width: 72px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #fff;
+  white-space: nowrap;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+}
+
+.vacuum-trade-pnl.plus {
+  background: #1f8a4c;
+}
+
+.vacuum-trade-pnl.minus {
+  background: #c43b4e;
+}
+
 .vacuum-lh-chart-ph {
   position: absolute;
   inset: 0;

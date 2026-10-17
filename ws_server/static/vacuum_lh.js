@@ -49,7 +49,10 @@ const vacuumLhState = {
   mode: "scan",
   paper: null,
   closed: [],
+  closedMap: { pyl: [], vps5: [] },
+  closedReady: false,
   closedVariant: "",
+  _lastOpenCount: null,
   lhInterval: "15",
   chartInterval: "15",
   byInterval: {},
@@ -177,6 +180,7 @@ function normalizeVacuumChartDom() {
       <div class="psc-tf-row vacuum-lh-chart-tf-row" id="${VAC_CHART.chartTfRow}"></div>
       <div class="psc-chart-wrap vacuum-lh-chart-wrap">
         <div id="${VAC_CHART.chart}" class="psc-candle-chart"></div>
+        <div id="vacuum-trade-overlay" class="vacuum-trade-overlay" aria-hidden="true"></div>
       </div>`;
   } else if (!document.getElementById(VAC_CHART.chartTfRow)) {
     const row = document.createElement("div");
@@ -184,6 +188,7 @@ function normalizeVacuumChartDom() {
     row.id = VAC_CHART.chartTfRow;
     pane.insertBefore(row, pane.firstChild);
   }
+  ensureVacuumTradeOverlayEl();
 }
 
 function setVacuumDetailOpen(open) {
@@ -659,6 +664,8 @@ async function toggleVacuumLhSymbol(symbol) {
     window.signalSocket.send(JSON.stringify({ type: "select_vacuum_lh", symbol }));
     requestVacuumChartAnchors(vacuumLhState.chartInterval);
   }
+  await ensureVacuumPaper();
+  void fetchVacuumDeskClosed(false);
   await loadVacuumChartDisplay(true);
 }
 
@@ -900,6 +907,8 @@ function clearVacuumLhOverlays(runtime) {
   } catch (_e) {
     /* ignore */
   }
+  const ov = document.getElementById("vacuum-trade-overlay");
+  if (ov) ov.innerHTML = "";
 }
 
 function scheduleVacuumLhMarkerRedraw() {
@@ -1003,6 +1012,7 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   const raw = [
     ...vacuumLhPivotMarkers(runtime, peaks || [], chartInterval, "peak", chainPeakKeys),
     ...vacuumLhPivotMarkers(runtime, troughs || [], chartInterval, "trough", chainTroughKeys),
+    ...vacuumTradeMarkers(runtime, chartInterval),
   ];
   const byTime = new Map();
   for (const m of raw) {
@@ -1024,11 +1034,162 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
       /* ignore */
     }
   }
+  drawVacuumTradeOverlay(runtime);
 }
 
 function resizeVacuumLhChart() {
   if (!vacuumLhState.selected) return;
   resizeVacuumChartNow();
+}
+
+function vacuumChartTradeVariants() {
+  return vacuumLhState.mode === "scan" ? ["pyl", "vps5"] : [vacuumDeskVariant()];
+}
+
+function vacuumSymbolTrades(symbol) {
+  if (!symbol) return [];
+  const variants = new Set(vacuumChartTradeVariants());
+  const opens = ((vacuumLhState.paper || {}).open_trades || []).filter(
+    (t) => t.symbol === symbol && variants.has(t.variant),
+  );
+  const closed = vacuumChartTradeVariants().flatMap((v) => vacuumLhState.closedMap[v] || []);
+  return [
+    ...opens.map((t) => ({ ...t, _open: true })),
+    ...closed.filter((t) => t.symbol === symbol).map((t) => ({ ...t, _open: false })),
+  ];
+}
+
+function vacuumTradeSide(trade) {
+  return trade.side || trade.entry?.side || (trade.entry?.metrics || {}).side || "short";
+}
+
+function vacuumTradeCurrentPrice(trade, live) {
+  if (trade._open) {
+    const liveN = Number(live);
+    if (liveN > 0) return liveN;
+    return Number(trade.last_price) || Number(trade.entry_price) || 0;
+  }
+  return Number(trade.exit_price || trade.last_price || trade.entry_price) || 0;
+}
+
+function vacuumTradeWorstPrice(trade, current) {
+  const entry = Number(trade.entry_price) || 0;
+  const stored = Number(trade.worst_price) || entry;
+  if (vacuumTradeSide(trade) === "long") return Math.min(stored, current || stored, entry || stored);
+  return Math.max(stored, current || stored, entry || stored);
+}
+
+function vacuumTradeBoxPrices(trade, live) {
+  const entry = Number(trade.entry_price) || 0;
+  const current = vacuumTradeCurrentPrice(trade, live);
+  const worst = vacuumTradeWorstPrice(trade, current);
+  if (vacuumTradeSide(trade) === "long") {
+    return { top: Math.max(current, entry), bottom: Math.min(worst, current, entry) };
+  }
+  return { top: Math.max(worst, entry, current), bottom: Math.min(current, entry) };
+}
+
+function ensureVacuumTradeOverlayEl() {
+  const wrap = document.querySelector(`#${VAC_CHART.workspace} .vacuum-lh-chart-wrap`);
+  if (!wrap) return null;
+  let el = document.getElementById("vacuum-trade-overlay");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "vacuum-trade-overlay";
+    el.className = "vacuum-trade-overlay";
+    el.setAttribute("aria-hidden", "true");
+    wrap.appendChild(el);
+  }
+  return el;
+}
+
+function vacuumCoordTime(runtime, ms, iv) {
+  if (!ms) return null;
+  const barTime = vacuumMarkerBarTime(runtime, { time_ms: ms }, iv);
+  if (!barTime || !runtime.chart) return null;
+  const x = runtime.chart.timeScale().timeToCoordinate(barTime);
+  return x == null || Number.isNaN(x) ? null : x;
+}
+
+function drawVacuumTradeOverlay(runtime) {
+  const el = ensureVacuumTradeOverlayEl();
+  const symbol = vacuumLhState.selected;
+  if (!el) return;
+  if (!runtime?.chart || !runtime.series || !symbol) {
+    el.innerHTML = "";
+    return;
+  }
+  const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
+  const trades = vacuumSymbolTrades(symbol);
+  if (!trades.length) {
+    el.innerHTML = "";
+    return;
+  }
+  const iv = vacuumLhState.chartInterval;
+  const hostW = el.clientWidth || 0;
+  const hostH = el.clientHeight || 0;
+  const lastBar = runtime._lastBars?.[runtime._lastBars.length - 1];
+  const nowX =
+    lastBar && runtime.chart.timeScale().timeToCoordinate(lastBar.time);
+  const parts = [];
+  for (const trade of trades) {
+    const entry = Number(trade.entry_price);
+    if (!entry) continue;
+    const left = vacuumCoordTime(runtime, trade.opened_at, iv);
+    let right = trade._open
+      ? nowX
+      : vacuumCoordTime(runtime, trade.closed_at, iv);
+    if (left == null && right == null) continue;
+    const x1 = left == null ? 0 : left;
+    const x2 = right == null || Number.isNaN(right) ? hostW : right;
+    const leftPx = Math.max(0, Math.min(x1, x2));
+    const rightPx = Math.min(hostW || x2, Math.max(x1, x2));
+    const width = Math.max(8, rightPx - leftPx);
+    const current = vacuumTradeCurrentPrice(trade, live);
+    const box = vacuumTradeBoxPrices(trade, live);
+    const yTop = runtime.series.priceToCoordinate(box.top);
+    const yBot = runtime.series.priceToCoordinate(box.bottom);
+    const yCur = runtime.series.priceToCoordinate(current);
+    if (yTop == null || yBot == null) continue;
+    const topPx = Math.max(0, Math.min(yTop, yBot));
+    const botPx = Math.max(yTop, yBot);
+    const height = Math.max(6, botPx - topPx);
+    const roe = Number(trade.roe_pct);
+    const pnl = Number(trade.pnl_usd);
+    const plus = (Number.isFinite(roe) ? roe : pnl) >= 0;
+    const tone = plus ? "plus" : "minus";
+    const sideText = vacuumTradeSide(trade) === "long" ? "лонг" : "шорт";
+    const roeTxt = Number.isFinite(roe) ? `${roe >= 0 ? "+" : ""}${roe.toFixed(1)}%` : "—";
+    const pnlTxt = Number.isFinite(pnl) ? `${pnl >= 0 ? "+" : ""}$${Math.abs(pnl).toFixed(2)}` : "—";
+    const labelTop = yCur == null || Number.isNaN(yCur) ? topPx + height / 2 - 16 : yCur - 16;
+    const labelLeft = Math.min(hostW - 86, Math.max(leftPx + width - 4, leftPx + 8));
+    parts.push(
+      `<div class="vacuum-trade-box ${tone}" style="left:${Math.round(leftPx)}px;top:${Math.round(topPx)}px;width:${Math.round(width)}px;height:${Math.round(height)}px">
+        <span class="vacuum-trade-signal">${sideText}</span>
+      </div>
+      <div class="vacuum-trade-pnl ${tone}" style="left:${Math.round(labelLeft)}px;top:${Math.round(Math.max(2, Math.min(hostH - 36, labelTop)))}px">${roeTxt}<br>${pnlTxt}</div>`,
+    );
+  }
+  el.innerHTML = parts.join("");
+}
+
+function vacuumTradeMarkers(runtime, chartInterval) {
+  const markers = [];
+  const trades = vacuumSymbolTrades(vacuumLhState.selected);
+  for (const trade of trades) {
+    const barTime = vacuumMarkerBarTime(runtime, { time_ms: trade.opened_at }, chartInterval);
+    if (!barTime) continue;
+    const long = vacuumTradeSide(trade) === "long";
+    markers.push({
+      time: barTime,
+      position: long ? "belowBar" : "aboveBar",
+      color: long ? "#3ddc84" : "#ff5d73",
+      shape: long ? "arrowUp" : "arrowDown",
+      text: long ? "лонг" : "шорт",
+      _rank: 5000,
+    });
+  }
+  return markers;
 }
 
 function vacuumMoney(n) {
@@ -1055,19 +1216,42 @@ function vacuumDeskWatch() {
 function onVacuumPaper(data) {
   if (!data) return;
   vacuumLhState.paper = data;
+  const opens = (data.open_trades || []).filter((t) => t.variant === "pyl" || t.variant === "vps5");
+  if (vacuumLhState._lastOpenCount != null && opens.length < vacuumLhState._lastOpenCount) {
+    void fetchVacuumDeskClosed(true);
+  }
+  vacuumLhState._lastOpenCount = opens.length;
   if (vacuumLhState.mode !== "scan") renderVacuumDesk();
+  if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
+    drawVacuumTradeOverlay(vacuumLhState.chart);
+  }
 }
 
 async function fetchVacuumDeskClosed(force) {
-  const variant = vacuumDeskVariant();
-  if (!force && vacuumLhState.closedVariant === variant && vacuumLhState.closed.length) return;
+  if (!force && vacuumLhState.closedReady) {
+    vacuumLhState.closed = vacuumLhState.closedMap[vacuumDeskVariant()] || [];
+    vacuumLhState.closedVariant = vacuumDeskVariant();
+    return;
+  }
   try {
-    const res = await fetch(`/api/paper/trades?status=closed&limit=200&variant=${encodeURIComponent(variant)}`);
-    if (!res.ok) return;
-    const body = await res.json();
-    vacuumLhState.closed = body.rows || [];
-    vacuumLhState.closedVariant = variant;
+    const pairs = await Promise.all(
+      ["pyl", "vps5"].map(async (variant) => {
+        const res = await fetch(`/api/paper/trades?status=closed&limit=500&variant=${encodeURIComponent(variant)}`);
+        if (!res.ok) return [variant, []];
+        const body = await res.json();
+        return [variant, body.rows || []];
+      }),
+    );
+    for (const [variant, rows] of pairs) {
+      vacuumLhState.closedMap[variant] = rows;
+    }
+    vacuumLhState.closedReady = true;
+    vacuumLhState.closed = vacuumLhState.closedMap[vacuumDeskVariant()] || [];
+    vacuumLhState.closedVariant = vacuumDeskVariant();
     if (vacuumLhState.mode !== "scan") renderVacuumDesk();
+    if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
+      drawVacuumTradeOverlay(vacuumLhState.chart);
+    }
   } catch (_err) {
     /* ignore */
   }

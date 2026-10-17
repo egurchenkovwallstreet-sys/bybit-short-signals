@@ -2640,6 +2640,7 @@ class PaperStrategy:
             "stop_price": pos.stop_price,
             "liq_price": pos.liq_price,
             "best_price": pos.best_price,
+            "worst_price": pos.worst_price,
             "margin": round(pos.margin, 2),
             "notional": round(pos.notional, 2),
             "qty": pos.qty,
