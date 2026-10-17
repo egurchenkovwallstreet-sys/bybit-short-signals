@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import config
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
-from signal_engine.paper.pivot_clock import second_bar_close_ms
+from signal_engine.paper.pivot_clock import entry_on_third_bar, second_bar_close_ms
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
 from signal_engine.vacuum_lh import _meets_turnover
@@ -129,6 +129,13 @@ def _tz_pivot_times_ms(snap: dict) -> list[int]:
     return sorted(times, reverse=True)
 
 
+def _pivot_in_entry_window(ts: int, now_ms: int, interval: str, step: int) -> bool:
+    del step
+    if interval == "5":
+        return entry_on_third_bar(ts, now_ms, "5")
+    return int(now_ms) >= second_bar_close_ms(ts, interval)
+
+
 def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dict | None:
     """Pivot L15–L30 + 2 справа (как на графике) и фильтр старшего ТФ."""
     step = _BAR_STEP.get(interval)
@@ -144,7 +151,7 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
     events: list[tuple[int, str]] = []
     for p in snap.get("peaks") or []:
         ts = int(p["time_ms"])
-        if ts + 3 * step > int(now_ms):
+        if not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
         if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue
@@ -152,7 +159,7 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
             events.append((ts, "short"))
     for p in snap.get("troughs") or []:
         ts = int(p["time_ms"])
-        if ts + 3 * step > int(now_ms):
+        if not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
         if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue
@@ -183,7 +190,7 @@ def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") ->
     fallback = "no_bar"
     not_ext = "not_15m_extreme" if interval == "5" else "not_1h_extreme"
     for ts in _tz_pivot_times_ms(snap):
-        if ts + 3 * step > int(now_ms):
+        if not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
         if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
             continue

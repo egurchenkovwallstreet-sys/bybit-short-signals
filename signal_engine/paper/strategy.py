@@ -47,7 +47,7 @@ from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, e
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.m5_htf import opposite_appeared, symbols_waiting_htf_second_bar
-from signal_engine.paper.pivot_clock import just_confirmed, symbols_waiting_second_bar
+from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, symbols_waiting_second_bar
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_htf_pivot_entry, evaluate_pyl
 from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
@@ -1906,17 +1906,19 @@ class PaperStrategy:
         armed |= opens
         self._confirm_arm = armed
 
-    def _bar_just_confirmed(self, entry: dict, now_ms: int, interval: str) -> bool:
+    def _pivot_entry_window(self, entry: dict, now_ms: int, interval: str) -> bool:
         if not entry.get("passed"):
             return False
         metrics = entry.get("metrics") or {}
         pivot_time = metrics.get("pivot_time_ms")
         if not pivot_time:
             return False
+        if interval == "5":
+            return entry_on_third_bar(int(pivot_time), now_ms, "5")
         return just_confirmed(int(pivot_time), now_ms, interval)
 
-    def _five_min_just_confirmed(self, entry: dict, now_ms: int) -> bool:
-        return self._bar_just_confirmed(entry, now_ms, config.PAPER_PYL_INTERVAL)
+    def _five_min_entry_window(self, entry: dict, now_ms: int) -> bool:
+        return self._pivot_entry_window(entry, now_ms, config.PAPER_PYL_INTERVAL)
 
     def _evaluate_pyl(self, states: dict[str, SymbolState], now_ms: int) -> None:
         variant = config.PAPER_PYL_VARIANT
@@ -1935,7 +1937,7 @@ class PaperStrategy:
             ev_clean = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
             pc = int(ev_clean.get("passed_count") or 0)
             side = ev_clean.get("side")
-            fresh = self._five_min_just_confirmed(ev_clean, now_ms)
+            fresh = self._five_min_entry_window(ev_clean, now_ms)
             if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
                 watch.append(
                     {
@@ -2176,7 +2178,7 @@ class PaperStrategy:
                 snap = snapshot_pivot_levels(state, interval, now_ms)
                 if snap is not None:
                     self._vps_prev_snap[(variant, symbol)] = snap
-                fresh = self._bar_just_confirmed(ev_data, now_ms, interval)
+                fresh = self._pivot_entry_window(ev_data, now_ms, interval)
                 pc = int(ev_data.get("passed_count") or 0)
                 if pc > 0 or m.get("peaks") or m.get("troughs"):
                     watch.append(

@@ -1,8 +1,7 @@
-"""Часы подтверждения 5м pivot: вторая свеча справа и 10 секунд на действие.
+"""Часы pivot: 5m вход на 3-й свече справа; 15m — 10 с после 2-й подтверждающей.
 
-Первая правая свеча закрылась — монета в списке ожидания.
-Вторая закрылась — только в эти 10 секунд можно закрыть противоположную
-позицию по рынку и открыть новую. Старый pivot входом не является.
+БАБЛОСОС / Пылесос 5: вход только пока открыта 3-я 5m после экстремума.
+Пылесос 15: вход в 10 с после закрытия 2-й 15m справа от экстремума.
 """
 
 from __future__ import annotations
@@ -24,6 +23,26 @@ def second_bar_close_ms(pivot_time_ms: int, interval: str = "5") -> int:
     step = bar_step_ms(interval)
     right = config.VACUUM_LH_PIVOT_RIGHT
     return int(pivot_time_ms) + (right + 1) * step
+
+
+def third_bar_open_ms(pivot_time_ms: int, interval: str = "5") -> int:
+    """Open 3-й 5m-свечи после пивота (1-я и 2-я справа уже закрыты)."""
+    return int(pivot_time_ms) + 3 * bar_step_ms(interval)
+
+
+def third_bar_close_ms(pivot_time_ms: int, interval: str = "5") -> int:
+    """Закрытие 3-й 5m-свечи после пивота."""
+    return int(pivot_time_ms) + 4 * bar_step_ms(interval)
+
+
+def entry_on_third_bar(pivot_time_ms: int, now_ms: int, interval: str = "5") -> bool:
+    """Вход pyl/vps5: только пока 3-я 5m после pivot открыта."""
+    if interval != "5":
+        return False
+    start = third_bar_open_ms(pivot_time_ms, interval)
+    end = third_bar_close_ms(pivot_time_ms, interval)
+    now = int(now_ms)
+    return start <= now < end
 
 
 def just_confirmed(pivot_time_ms: int, now_ms: int, interval: str = "5", slack_ms: int | None = None) -> bool:

@@ -10,10 +10,13 @@ import config
 from signal_engine.paper.lh_scan_pivot import signal_from_pivot_diff
 from signal_engine.paper.pivot_clock import (
     batch_has_closed_bar,
+    entry_on_third_bar,
     first_bar_waiting,
     just_confirmed,
     second_bar_close_ms,
     symbols_waiting_second_bar,
+    third_bar_close_ms,
+    third_bar_open_ms,
 )
 from signal_engine.paper.position import Position, bab_pivot_stop_price, price_for_roe
 from signal_engine.paper.m5_htf import (
@@ -47,11 +50,11 @@ def _bars(base: int, highs: list[float], lows: list[float]) -> list[Bar]:
 def _lower_high_state() -> tuple[SymbolState, int, int]:
     """Предыдущая 30м high 16, предыдущая 15м high 14, экстремум 12 на первой 5м своей 15м."""
     base = _aligned_base()
-    highs = [16, 15, 14.5, 13, 12.5, 14, 13, 12.2, 11.5, 12, 11, 11]
+    highs = [16, 15, 14.5, 13, 12.5, 14, 13, 12.2, 11.5, 12, 11, 11, 10.5]
     lows = [9] * len(highs)
     bars = _bars(base, highs, lows)
     peak_ts = base + 9 * STEP
-    now_ms = peak_ts + 3 * STEP
+    now_ms = peak_ts + 3 * STEP + 60_000
     state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
     state.bars_htf["5"] = bars
     return state, now_ms, peak_ts
@@ -125,14 +128,15 @@ class FiveMinStoreAndEntryTest(unittest.TestCase):
             self.assertTrue(pyl["passed"], pyl.get("failed"))
             self.assertEqual(pyl.get("side"), "short")
             self.assertEqual(pyl["metrics"]["pivot_time_ms"], peak_ts)
-            self.assertEqual(second_bar_close_ms(peak_ts, "5") - peak_ts, 3 * STEP)
-            late = entry_open_until_ms(peak_ts, "5") + 10 * STEP
+            self.assertTrue(entry_on_third_bar(peak_ts, now_ms, "5"))
+            late = third_bar_close_ms(peak_ts, "5") + 10 * STEP
+            self.assertFalse(entry_on_third_bar(peak_ts, late, "5"))
             window_sig = detect_entry_signal(None, pyl["metrics"], "5", late)
             self.assertIsNone(window_sig)
             vps5_late = evaluate_htf_pivot_entry(state, late, None, "5", kind="vps5")
-            self.assertTrue(vps5_late["passed"], vps5_late.get("failed"))
+            self.assertFalse(vps5_late["passed"])
             pyl_late = evaluate_pyl(state, late, None)
-            self.assertTrue(pyl_late["passed"], pyl_late.get("failed"))
+            self.assertFalse(pyl_late["passed"])
 
     def test_collector_fetches_5m(self) -> None:
         self.assertIn("5", config.KLINE_INTERVALS)
@@ -175,12 +179,12 @@ class M5HtfGateTest(unittest.TestCase):
     def test_higher_low_is_long(self) -> None:
         base = _aligned_base()
         highs = [12] * 12
-        lows = [8, 8.2, 8.1, 8.4, 8.3, 8.5, 9, 9.1, 9.2, 10, 11, 11]
+        lows = [8, 8.2, 8.1, 8.4, 8.3, 8.5, 9, 9.1, 9.2, 10, 11, 11, 10.5]
         bars = _bars(base, highs, lows)
         state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
         state.bars_htf["5"] = bars
         trough_ts = base + 9 * STEP
-        now_ms = trough_ts + 3 * STEP
+        now_ms = trough_ts + 3 * STEP + 60_000
         snap = {
             "interval": "5",
             "peaks": [],
@@ -231,14 +235,15 @@ class PivotConfirmClockTest(unittest.TestCase):
         self.assertFalse(just_confirmed(pivot, close_at + 11_000, "15"))
         self.assertTrue(first_bar_waiting(pivot, close_at - 1_000, "15"))
 
-    def test_window_is_ten_seconds_after_second_bar(self) -> None:
+    def test_five_min_entry_on_third_bar_only(self) -> None:
         pivot = T0
+        self.assertEqual(third_bar_open_ms(pivot, "5"), pivot + 3 * STEP)
+        self.assertEqual(third_bar_close_ms(pivot, "5"), pivot + 4 * STEP)
+        self.assertFalse(entry_on_third_bar(pivot, pivot + 3 * STEP - 1, "5"))
+        self.assertTrue(entry_on_third_bar(pivot, pivot + 3 * STEP, "5"))
+        self.assertTrue(entry_on_third_bar(pivot, pivot + 4 * STEP - 1, "5"))
+        self.assertFalse(entry_on_third_bar(pivot, pivot + 4 * STEP, "5"))
         close_at = second_bar_close_ms(pivot, "5")
-        self.assertEqual(close_at, pivot + 3 * STEP)
-        self.assertTrue(just_confirmed(pivot, close_at, "5"))
-        self.assertTrue(just_confirmed(pivot, close_at + 9_000, "5"))
-        self.assertFalse(just_confirmed(pivot, close_at + 11_000, "5"))
-        self.assertFalse(just_confirmed(pivot, close_at - 1, "5"))
         self.assertTrue(first_bar_waiting(pivot, close_at - 1_000, "5"))
         self.assertFalse(first_bar_waiting(pivot, close_at, "5"))
 
@@ -255,7 +260,7 @@ class PivotConfirmClockTest(unittest.TestCase):
         armed = symbols_waiting_second_bar({"XUSDT": state}, now_ms, "5")
         self.assertIn("XUSDT", armed)
         self.assertFalse(just_confirmed(peak_ts, now_ms, "5"))
-        self.assertTrue(just_confirmed(peak_ts, second_bar_close_ms(peak_ts, "5") + 500, "5"))
+        self.assertTrue(entry_on_third_bar(peak_ts, third_bar_open_ms(peak_ts, "5") + 500, "5"))
 
     def test_closed_bar_ready_when_next_candle_exists(self) -> None:
         close_ms = T0 + 3 * STEP
