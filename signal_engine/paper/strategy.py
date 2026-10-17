@@ -45,9 +45,11 @@ from signal_engine.paper.detect import (
 )
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
+from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
+from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.vac_detect import VAC_CHECK_LABELS, VAC_MANDATORY, evaluate_vac
-from signal_engine.paper.vac_lh_detect import VPS_CHECK_LABELS, VPS_MANDATORY, evaluate_vps, snapshot_pivot_levels
+from signal_engine.paper.vac_lh_detect import VPS_CHECK_LABELS, VPS_MANDATORY, evaluate_vps
 from signal_engine.paper.css_detect import (
     CSS_CHECK_LABELS,
     CSS_MANDATORY,
@@ -238,7 +240,7 @@ class PaperStrategy:
         self.plus_blocked: dict[str, set[int]] = {}
         self._sc10_used_bars: dict[str, int] = {}
         self._impulse_used_bars: dict[tuple[str, str], int] = {}
-        self._pyl_used_bars: dict[tuple[str, str], int] = {}
+        self._pyl_prev_snap: dict[str, dict] = {}
         self._pyl_watch: list[dict] = []
         self._vac_used_bars: dict[tuple[str, str], int] = {}
         self._vac_watch: list[dict] = []
@@ -335,10 +337,6 @@ class PaperStrategy:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
                 if bar_ts:
                     self._impulse_used_bars[(variant, row["symbol"])] = bar_ts
-            if variant == config.PAPER_PYL_VARIANT:
-                bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
-                if bar_ts:
-                    self._pyl_used_bars[(variant, row["symbol"])] = bar_ts
             if variant == config.PAPER_VAC_VARIANT:
                 bar_ts = int((((_loads(row["entry_json"]) or {}).get("metrics") or {}).get("bar_ts")) or 0)
                 if bar_ts:
@@ -1842,39 +1840,49 @@ class PaperStrategy:
         variant = config.PAPER_PYL_VARIANT
         if variant not in VARIANTS:
             return
-        cooldown = config.PAPER_REENTRY_COOLDOWN_SEC * 1000
+        interval = config.PAPER_PYL_INTERVAL
         watch: list[dict] = []
         for symbol, state in states.items():
-            if not state.last_price or len(state.bars_htf.get("15") or []) < 10:
+            if not state.last_price:
                 continue
-            ev_data = evaluate_pyl(state, now_ms)
-            pc = int(ev_data.get("passed_count") or 0)
-            if pc > 0:
+            prev = self._pyl_prev_snap.get(symbol)
+            snap = snapshot_pivot_levels(state, interval, now_ms)
+            if snap is not None:
+                self._pyl_prev_snap[symbol] = snap
+            ev_data = evaluate_pyl(state, now_ms, prev)
+            ev_clean = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
+            pc = int(ev_clean.get("passed_count") or 0)
+            side = ev_clean.get("side")
+            if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
                 watch.append(
                     {
                         "symbol": symbol,
                         "passed_count": pc,
-                        "failed": list(ev_data.get("failed") or []),
-                        "eval": {"pyl": ev_data},
-                        "grade": ev_data.get("grade"),
-                        "score": ev_data.get("score"),
-                        "ready": bool(ev_data.get("passed")),
+                        "failed": list(ev_clean.get("failed") or []),
+                        "eval": {"pyl": ev_clean},
+                        "grade": ev_clean.get("grade"),
+                        "score": ev_clean.get("score"),
+                        "ready": bool(ev_clean.get("passed")),
+                        "side": side,
                     }
                 )
-            if (variant, symbol) in self.trades:
+            open_key = (variant, symbol)
+            if open_key in self.trades:
+                trade = self.trades[open_key]
+                if ev_clean.get("passed") and side and side != trade.pos.side:
+                    self._close_trade(trade, "opposite_pivot", state, now_ms)
+                    balance = self.balances[variant]
+                    margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                    if margin > 0 and balance - self.used_margin(variant) >= margin:
+                        self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms)
                 continue
-            if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
-                continue
-            if not ev_data.get("passed"):
-                continue
-            bar_ts = int(ev_data.get("metrics", {}).get("bar_ts") or 0)
-            if bar_ts and self._pyl_used_bars.get((variant, symbol)) == bar_ts:
+            if not ev_clean.get("passed"):
                 continue
             balance = self.balances[variant]
             margin = balance * config.PAPER_MARGIN_PCT / 100.0
             if margin <= 0 or balance - self.used_margin(variant) < margin:
                 continue
-            self._open_pyl_trade(variant, symbol, state, ev_data, margin, now_ms)
+            self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms)
         watch.sort(key=lambda r: (-int(r["passed_count"]), r["symbol"]))
         self._pyl_watch = watch[:100]
 
@@ -1882,6 +1890,11 @@ class PaperStrategy:
         self, variant: str, symbol: str, state: SymbolState, entry: dict, margin: float, now_ms: int
     ) -> None:
         price = float(state.last_price)
+        m = entry.get("metrics") or {}
+        side = str(m.get("side") or entry.get("side") or "short")
+        pivot_high = float(m.get("pivot_high") or 0)
+        pivot_low = float(m.get("pivot_low") or 0)
+        stop = bab_pivot_stop_price(side, pivot_high, pivot_low)
         tape = self.tape.symbols.get(symbol)
         nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
         pos = Position(
@@ -1890,8 +1903,9 @@ class PaperStrategy:
             entry_price=price,
             margin=margin,
             next_funding_ts=nft,
-            side="short",
+            side=side,
             stop_style=config.paper_stop_style(variant),
+            stop_price=stop,
         )
         trade_id = self.store.insert_trade(
             {
@@ -1934,18 +1948,15 @@ class PaperStrategy:
             candidate_id=None,
             last_check=now_ms,
         )
-        bar_ts = int(entry.get("metrics", {}).get("bar_ts") or 0)
-        if bar_ts:
-            self._pyl_used_bars[(variant, symbol)] = bar_ts
         self._next_analytics = 0
         log.info(
-            "Тест [%s]: открыт шорт %s по %s, маржа %.2f USD, условий %s/%s",
+            "Тест [%s]: открыт %s %s по %s, стоп %s, маржа %.2f USD",
             variant,
+            side,
             symbol,
             price,
+            stop,
             margin,
-            entry.get("passed_count"),
-            len(PYL_MANDATORY),
         )
 
     def _evaluate_vac(self, states: dict[str, SymbolState], now_ms: int) -> None:

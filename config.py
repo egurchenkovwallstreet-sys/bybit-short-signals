@@ -266,7 +266,7 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
-PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "vps15", "vps5")
+PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "vps15", "vps5")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -307,12 +307,11 @@ PAPER_DPS_MIN_TURNOVER = _env_float("PAPER_DPS_MIN_TURNOVER", 10_000_000.0)
 PAPER_DPS_COOLDOWN_SEC = _env_int("PAPER_DPS_COOLDOWN_SEC", 90 * 60)
 PAPER_DPS_MAX_OPEN = _env_int("PAPER_DPS_MAX_OPEN", 3)
 
-# БАБЛОСОС $$$ (pyl): 1-я медвежья после V₂; вход close < close этой свечи (offset 2–4).
+# БАБЛОСОС $$$ (pyl): M5 pivot как LH-скан; стоп ±5% ROE от high/low свечи pivot; flip по opposite pivot.
 PAPER_PYL_VARIANT = "pyl"
-PAPER_PYL_PIVOT_WING = _env_int("PAPER_PYL_PIVOT_WING", 1)
-PAPER_PYL_LOOKBACK_BARS = _env_int("PAPER_PYL_LOOKBACK_BARS", 96)
-PAPER_PYL_ENTRY_OFFSET_MIN = _env_int("PAPER_PYL_ENTRY_OFFSET_MIN", 2)
-PAPER_PYL_ENTRY_OFFSET_MAX = _env_int("PAPER_PYL_ENTRY_OFFSET_MAX", 4)
+PAPER_PYL_INTERVAL = "5"
+PAPER_PYL_STOP_ROE = _env_float("PAPER_PYL_STOP_ROE", 5.0)
+# vac — прежний трейл pyl (не путать с bab):
 PAPER_PYL_INITIAL_STOP_ROE = _env_float("PAPER_PYL_INITIAL_STOP_ROE", -10.0)
 PAPER_PYL_LOSS_CAP_ROE = _env_float("PAPER_PYL_LOSS_CAP_ROE", -10.0)
 PAPER_PYL_TRAIL_ARM_ROE = _env_float("PAPER_PYL_TRAIL_ARM_ROE", 10.0)
@@ -402,7 +401,9 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
-    if variant in (PAPER_PYL_VARIANT, PAPER_VAC_VARIANT):
+    if variant == PAPER_PYL_VARIANT:
+        return "bab"
+    if variant == PAPER_VAC_VARIANT:
         return "pyl"
     if variant in PAPER_VPS_VARIANTS:
         return "vps"
@@ -715,7 +716,7 @@ def chart_tf_to_oi_interval(chart_tf: str) -> str:
 VACUUM_LH_MIN_TURNOVER_24H_USDT = _env_float("VACUUM_LH_MIN_TURNOVER_24H_USDT", 300_000.0)
 VACUUM_LH_PEAK_COUNT = _env_int("VACUUM_LH_PEAK_COUNT", 5)
 VACUUM_LH_PRICE_BELOW_LAST = _env_int("VACUUM_LH_PRICE_BELOW_LAST", 3)
-# Pivot LH/HL: минимум 7 свечей слева, до 20 (сила уровня), 2 справа; high/low.
+# Pivot LH/HL (единое правило для LH-скана, vps, БАБЛОСОС): L15–L30 слева, 2 справа, gap ≥30.
 VACUUM_LH_PIVOT_LEFT = _env_int("VACUUM_LH_PIVOT_LEFT", 15)
 VACUUM_LH_PIVOT_LEFT_MAX = _env_int("VACUUM_LH_PIVOT_LEFT_MAX", 30)
 VACUUM_LH_PIVOT_RIGHT = _env_int("VACUUM_LH_PIVOT_RIGHT", 2)

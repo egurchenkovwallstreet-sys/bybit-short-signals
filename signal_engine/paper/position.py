@@ -338,6 +338,20 @@ def _profit_lock_prices(
     return prices
 
 
+def bab_pivot_stop_price(
+    side: str,
+    pivot_high: float,
+    pivot_low: float,
+    leverage: int | None = None,
+) -> float:
+    """Стоп: шорт — на 5% ROE выше high pivot-свечи; лонг — на 5% ROE ниже low."""
+    lev = leverage or config.PAPER_LEVERAGE
+    roe = -abs(config.PAPER_PYL_STOP_ROE)
+    if side == "long":
+        return price_for_long_roe(pivot_low, roe, lev)
+    return price_for_roe(pivot_high, roe, lev)
+
+
 def pyl_trail_stop(
     entry: float,
     best_price: float,
@@ -642,6 +656,14 @@ class Position:
                 funding_paid=self.funding_paid,
             )
             self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "bab":
+            if self.stop_price <= 0:
+                self.stop_price = (
+                    long_liquidation_price(self.entry_price, self.leverage)
+                    if self.side == "long"
+                    else liquidation_price(self.entry_price, self.leverage)
+                )
             return
         if self.stop_style == "pyl":
             trail = pyl_trail_stop(

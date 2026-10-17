@@ -793,11 +793,11 @@
       const total = mandatory().length;
       if (!rows.length) {
         table.innerHTML =
-          '<tbody><tr><td class="quiet">Нет претендентов: на 15m пока нет пары pivot-вершин с lower high.</td></tr></tbody>';
+          '<tbody><tr><td class="quiet">Нет сигналов: ждём новый pivot 5m (LH-скан L15–L30, gap 30).</td></tr></tbody>';
         return;
       }
       table.innerHTML = `<thead><tr>
-      <th>Монета</th><th>Условия</th><th>Не хватает</th><th>V₂ high</th><th>Смещение</th><th>Готово</th><th>Сила</th>
+      <th>Монета</th><th>Условия</th><th>Не хватает</th><th>Сторона</th><th>Pivot</th><th>Готово</th><th>Сила</th>
     </tr></thead><tbody>${rows
         .map((r) => {
           const ev = (r.eval && r.eval.pyl) || {};
@@ -807,8 +807,8 @@
           <td><b>${esc(r.symbol)}</b></td>
           <td>${checkDots(ev)} ${r.passed_count}/${total}</td>
           <td>${esc(failed.join(", ") || "—")}</td>
-          <td>${price(m.vertex_high)}</td>
-          <td>${m.offset_bars != null ? m.offset_bars + "×15m" : "—"}</td>
+          <td>${esc(r.side || m.side || "—")}</td>
+          <td>${price(m.pivot_price)}</td>
           <td>${r.ready ? "да" : "нет"}</td>
           <td class="grade-${r.grade || "C"}">${r.grade || "—"} · ${num(r.score, 1)}</td>
         </tr>`;

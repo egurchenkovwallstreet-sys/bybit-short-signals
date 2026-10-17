@@ -4,14 +4,8 @@ from __future__ import annotations
 
 import config
 from signal_engine.paper.detect import _check, grade_for
+from signal_engine.paper.lh_scan_pivot import pivot_keys as _keys, snapshot_pivot_levels
 from signal_engine.state import SymbolState
-from signal_engine.vacuum_lh import (
-    _bars_for_interval,
-    _meets_turnover,
-    _min_bars,
-    all_anchor_peaks,
-    all_anchor_troughs,
-)
 
 _INTERVAL_MS = {
     "5": 300_000,
@@ -34,29 +28,6 @@ VPS_CHECK_LABELS = {
     "structure_vs_prev": "Шорт — уровень сверху (max); лонг — уровень снизу (min)",
     "entry_window": "Только 1-я незакрытая свеча после 2 свечей подтверждения pivot",
 }
-
-
-def snapshot_pivot_levels(state: SymbolState, interval: str, now_ms: int) -> dict | None:
-    if not _meets_turnover(state):
-        return None
-    bars = _bars_for_interval(state, interval)
-    if len(bars) < _min_bars(interval):
-        return None
-    peaks = all_anchor_peaks(bars, interval, now_ms)
-    troughs = all_anchor_troughs(bars, interval, now_ms)
-    return {
-        "interval": interval,
-        "peaks": peaks,
-        "troughs": troughs,
-    }
-
-
-def _keys(points: list[dict]) -> frozenset[tuple[int, float]]:
-    out: set[tuple[int, float]] = set()
-    for p in points:
-        t = int(p.get("time_ms") or p.get("time") or 0)
-        out.add((t, round(float(p["price"]), 8)))
-    return frozenset(out)
 
 
 def entry_window_start_ms(pivot_time_ms: int, interval: str) -> int:

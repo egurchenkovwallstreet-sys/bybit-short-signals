@@ -1,139 +1,106 @@
-"""БАБЛОСОС $$$: lower high 15m; 1-я медвежья после V₂, вход ниже её close."""
+"""БАБЛОСОС $$$: M5 pivot LH-скана; вход при подтверждении; стоп ±5% ROE от high/low свечи pivot."""
 
 from __future__ import annotations
 
 import config
 from signal_engine.paper.detect import _check, _r, grade_for
-from signal_engine.state import Bar, SymbolState
-from signal_engine.swing_highs import closed_bars, pivot_highs_indexed
+from signal_engine.paper.lh_scan_pivot import (
+    pivot_candle_bar,
+    signal_from_pivot_diff,
+    snapshot_pivot_levels,
+)
+from signal_engine.state import SymbolState
+
+PYL_INTERVAL = config.PAPER_PYL_INTERVAL
 
 PYL_MANDATORY = (
-    "first_vertex",
-    "lower_second",
-    "bearish_first_after_v2",
-    "entry_below_bearish_close",
+    "turnover_ok",
+    "pivot_confirmed",
+    "pivot_candle",
+    "side_from_pivot",
 )
 
 PYL_CHECK_LABELS = {
-    "first_vertex": "V₁ — предыдущая pivot-вершина 15m",
-    "lower_second": "V₂ ниже V₁ по high (нижняя вершина)",
-    "bearish_first_after_v2": "1-я закрытая 15m после V₂: close < open",
-    "entry_below_bearish_close": "Close входной свечи < close 1-й медвежьей после V₂",
+    "turnover_ok": "Оборот 24ч ≥ порога LH-скана",
+    "pivot_confirmed": "Pivot подтверждён (2 свечи справа, L15–L30, gap ≥30)",
+    "pivot_candle": "Свеча pivot найдена (high/low для стопа)",
+    "side_from_pivot": "Max → шорт, min → лонг",
 }
 
 
-def _bars15(state: SymbolState) -> list[Bar]:
-    raw = state.bars_htf.get("15") or []
-    return [Bar(b.timestamp, b.open, b.high, b.low, b.close, b.volume) for b in raw]
-
-
-def _bearish(bar: Bar) -> bool:
-    return float(bar.close) < float(bar.open) - 1e-12
-
-
-def evaluate_pyl(state: SymbolState, now_ms: int) -> dict:
-    bars = _bars15(state)
-    closed = closed_bars(bars, "15", now_ms)
-    lookback = config.PAPER_PYL_LOOKBACK_BARS
-    if len(closed) > lookback:
-        closed = closed[-lookback:]
-    wing = config.PAPER_PYL_PIVOT_WING
-    pivots = pivot_highs_indexed(closed, wing)
-    confirm_i = len(closed) - 1
-    confirm = closed[confirm_i] if confirm_i >= 0 else None
-    min_off = config.PAPER_PYL_ENTRY_OFFSET_MIN
-    max_off = config.PAPER_PYL_ENTRY_OFFSET_MAX
-
-    match = None
-    bear1: Bar | None = None
-    if confirm is not None and len(pivots) >= 2:
-        for k in range(len(pivots) - 1, 0, -1):
-            v2 = pivots[k]
-            v1 = pivots[k - 1]
-            vi = int(v2["bar_index"])
-            if float(v2["price"]) >= float(v1["price"]) - 1e-12:
-                continue
-            if confirm_i < vi + 2:
-                continue
-            offset = confirm_i - vi
-            if offset < min_off or offset > max_off:
-                continue
-            b1 = closed[vi + 1]
-            if not _bearish(b1):
-                continue
-            if confirm.close >= b1.close - 1e-12:
-                continue
-            match = {
-                "v1": v1,
-                "v2": v2,
-                "offset": offset,
-                "v2_bar": closed[vi],
-                "bear1": b1,
-            }
-            bear1 = b1
-            break
+def evaluate_pyl(state: SymbolState, now_ms: int, prev_snap: dict | None = None) -> dict:
+    snap = snapshot_pivot_levels(state, PYL_INTERVAL, now_ms)
+    signal = signal_from_pivot_diff(prev_snap, snap)
+    pivot_bar = (
+        pivot_candle_bar(state, PYL_INTERVAL, int(signal["pivot_time_ms"]), now_ms)
+        if signal
+        else None
+    )
+    turnover_ok = snap is not None
+    confirmed = signal is not None
+    has_bar = pivot_bar is not None
+    side_ok = confirmed and signal.get("side") in ("short", "long")
 
     checks = {
-        "first_vertex": _check(
-            match is not None,
-            None if match is None else _r(float(match["v1"]["price"]), 6),
-            "pivot V₁",
+        "turnover_ok": _check(
+            turnover_ok,
+            "да" if turnover_ok else "нет",
+            "оборот 24ч ≥ порога",
         ),
-        "lower_second": _check(
-            match is not None,
-            None
-            if match is None
-            else {
-                "first_high": _r(float(match["v1"]["price"]), 6),
-                "second_high": _r(float(match["v2"]["price"]), 6),
-            },
-            "high(V₂) < high(V₁)",
+        "pivot_confirmed": _check(
+            confirmed,
+            signal.get("signal_key") if signal else "—",
+            "новый pivot 5m",
         ),
-        "bearish_first_after_v2": _check(
-            bear1 is not None and _bearish(bear1),
+        "pivot_candle": _check(
+            has_bar,
             None
-            if bear1 is None
-            else {"open": _r(bear1.open, 6), "close": _r(bear1.close, 6)},
-            "close < open",
+            if pivot_bar is None
+            else {"high": _r(pivot_bar.high, 6), "low": _r(pivot_bar.low, 6)},
+            "high/low свечи pivot",
         ),
-        "entry_below_bearish_close": _check(
-            match is not None and bear1 is not None and confirm is not None,
-            None
-            if match is None or bear1 is None or confirm is None
-            else {
-                "entry_close": _r(confirm.close, 6),
-                "bear1_close": _r(bear1.close, 6),
-            },
-            "close входа < close 1-й медвежьей",
+        "side_from_pivot": _check(
+            side_ok,
+            signal.get("side") if signal else "—",
+            "max/min",
         ),
     }
     failed = [k for k in PYL_MANDATORY if not checks[k]["ok"]]
     passed = not failed
-    metrics = {
-        "confirm_ts": int(confirm.timestamp) if confirm else None,
-        "bar_ts": int(confirm.timestamp) if confirm else None,
+    metrics: dict = {
+        "bar_ts": int(signal["pivot_time_ms"]) if signal else None,
         "pump": {
             "kind": "pyl",
-            "side": "short",
-            "trigger": "15m",
+            "side": signal.get("side") if signal else None,
+            "trigger": f"{PYL_INTERVAL}m",
         },
     }
-    if match:
-        metrics["v1_ts"] = int(match["v1"]["time"])
-        metrics["v2_ts"] = int(match["v2"]["time"])
-        metrics["offset_bars"] = match["offset"]
-        metrics["vertex_high"] = float(match["v2"]["price"])
-        metrics["bear1_close"] = float(bear1.close) if bear1 else None
+    if signal and pivot_bar is not None:
+        metrics.update(
+            {
+                "signal_key": signal["signal_key"],
+                "pivot_time_ms": signal["pivot_time_ms"],
+                "pivot_price": signal["pivot_price"],
+                "pivot_kind": signal["pivot_kind"],
+                "side": signal["side"],
+                "pivot_high": float(pivot_bar.high),
+                "pivot_low": float(pivot_bar.low),
+            }
+        )
+    if snap:
+        metrics["peaks"] = list(snap.get("peaks") or [])[-3:]
+        metrics["troughs"] = list(snap.get("troughs") or [])[-3:]
+
     return {
         "checks": checks,
         "metrics": metrics,
-        "score": 90.0 if passed else 30.0,
-        "grade": grade_for(90.0 if passed else 30.0),
+        "score": 92.0 if passed else 25.0,
+        "grade": grade_for(92.0 if passed else 25.0),
         "strict_btc": False,
         "passed": passed,
         "passed_count": len(PYL_MANDATORY) - len(failed),
         "failed": failed,
         "variants": [config.PAPER_PYL_VARIANT] if passed else [],
         "entry_blocked": [],
-        "side": "short" if passed else None,
+        "side": signal.get("side") if passed else None,
     }
