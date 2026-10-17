@@ -74,44 +74,47 @@ class Engine:
         if self.paper is not None:
             self.paper.ingest(message)
 
-    def scan(self, now_ms: int) -> list[dict]:
-        wins, total = self.store.outcome_counts()
-        changed: list[dict] = []
-        names = set(self.symbols) | set(self.open_signals)
-        for symbol in sorted(names):
-            state = self.symbols.setdefault(symbol, SymbolState(symbol))
-            signal = self.open_signals.get(symbol)
-            if signal is None:
-                if not _meets_turnover(state):
+    def scan(self, now_ms: int, *, boards: bool = True, pivots: bool = True) -> list[dict]:
+        out: list[dict] = []
+        if boards:
+            wins, total = self.store.outcome_counts()
+            changed: list[dict] = []
+            names = set(self.symbols) | set(self.open_signals)
+            for symbol in sorted(names):
+                state = self.symbols.setdefault(symbol, SymbolState(symbol))
+                signal = self.open_signals.get(symbol)
+                if signal is None:
+                    if not _meets_turnover(state):
+                        continue
+                    opened = self._try_open(state, now_ms, wins, total)
+                    if opened is not None:
+                        changed.append(opened.to_message("open", now_ms))
                     continue
-                opened = self._try_open(state, now_ms, wins, total)
-                if opened is not None:
-                    changed.append(opened.to_message("open", now_ms))
-                continue
-            outcome = classify_outcome(signal.entry_price, state.last_price or signal.last_price, signal.created_at, now_ms)
-            if outcome is not None:
-                self._close(signal, outcome, state.last_price or signal.last_price, now_ms)
-                changed.append(signal.to_message("close", now_ms))
-                continue
-            if self._refresh(signal, evaluate(state, now_ms), now_ms, wins, total):
-                changed.append(signal.to_message("update", now_ms))
-        # Доска каждые 3 секунды — снимок колонок, даже если галочки не менялись.
-        out = [
-            *changed,
-            self._board(now_ms),
-            build_pump_scan_board(self.symbols, now_ms, self.watches),
-            build_x2_retrace_board(self.symbols, now_ms, self.watches),
-            build_pump_strategy_board(self.symbols, now_ms, self.watches),
-        ]
+                outcome = classify_outcome(signal.entry_price, state.last_price or signal.last_price, signal.created_at, now_ms)
+                if outcome is not None:
+                    self._close(signal, outcome, state.last_price or signal.last_price, now_ms)
+                    changed.append(signal.to_message("close", now_ms))
+                    continue
+                if self._refresh(signal, evaluate(state, now_ms), now_ms, wins, total):
+                    changed.append(signal.to_message("update", now_ms))
+            out.extend(
+                [
+                    *changed,
+                    self._board(now_ms),
+                    build_pump_scan_board(self.symbols, now_ms, self.watches),
+                    build_x2_retrace_board(self.symbols, now_ms, self.watches),
+                    build_pump_strategy_board(self.symbols, now_ms, self.watches),
+                ]
+            )
         vacuum = self._maybe_vacuum_board(now_ms)
         if vacuum is not None:
             out.append(vacuum)
         if self.paper is not None:
             try:
-                out.append(self.paper.scan(self.symbols, now_ms))
+                out.append(self.paper.scan(self.symbols, now_ms, pivots=pivots))
             except Exception:
                 log.exception("Тест стратегии: ошибка скана")
-        if self.pump_lab is not None:
+        if boards and self.pump_lab is not None:
             try:
                 board = self.pump_lab.maybe_scan(self.symbols, now_ms)
                 if board is not None:

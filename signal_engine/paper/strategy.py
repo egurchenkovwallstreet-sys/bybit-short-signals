@@ -546,7 +546,7 @@ class PaperStrategy:
 
     # --- скан ---
 
-    def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict:
+    def scan(self, states: dict[str, SymbolState], now_ms: int, *, pivots: bool = True) -> dict:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
         self._refresh_peaks(states, now_ms)
         if config.PAPER_LT20_VARIANT in VARIANTS:
@@ -578,11 +578,12 @@ class PaperStrategy:
             self._refresh_five_min_arm(states, now_ms)
         if config.PAPER_VPS15_VARIANT in VARIANTS:
             self._refresh_fifteen_min_arm(states, now_ms)
-        if config.PAPER_PYL_VARIANT in VARIANTS:
-            self._evaluate_pyl(states, now_ms)
-        if config.PAPER_VAC_VARIANT in VARIANTS:
-            self._evaluate_vac(states, now_ms)
-        self._evaluate_vps_variants(states, now_ms)
+        if pivots:
+            if config.PAPER_PYL_VARIANT in VARIANTS:
+                self._evaluate_pyl(states, now_ms)
+            if config.PAPER_VAC_VARIANT in VARIANTS:
+                self._evaluate_vac(states, now_ms)
+            self._evaluate_vps_variants(states, now_ms)
         self._persist(now_ms)
         if now_ms >= self._next_equity:
             for variant in VARIANTS:

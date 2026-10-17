@@ -48,6 +48,7 @@ class SignalService:
             config.REDIS_CHANNEL_SIGNALS,
         )
         next_scan = 0.0
+        next_boards = 0.0
         self._confirm_burst = False
         side_tasks: list[asyncio.Task] = []
         if self.engine.paper is not None:
@@ -60,9 +61,14 @@ class SignalService:
                     self._ingest_raw(message.get("data"))
                 now = time.monotonic()
                 if now >= next_scan and not self._confirm_burst:
-                    for item in self.engine.scan(int(time.time() * 1000)):
+                    ts = int(time.time() * 1000)
+                    boards = now >= next_boards
+                    pivots = (ts % 300_000) <= config.PAPER_PIVOT_EVAL_WINDOW_MS
+                    for item in self.engine.scan(ts, boards=boards, pivots=pivots):
                         self._publisher.publish(item)
                     next_scan = now + config.MARKET_SCAN_INTERVAL_SEC
+                    if boards:
+                        next_boards = now + config.PUMP_BOARD_INTERVAL_SEC
         finally:
             for task in side_tasks:
                 task.cancel()
@@ -108,21 +114,29 @@ class SignalService:
         assert paper is not None
         rest = BybitRest()
         await rest.open()
+        five_at: dict[str, float] = {}
         try:
             while True:
                 paper_syms = set(paper.kline_wanted())
-                five_syms = self._five_min_symbols()
+                five_syms = self._five_min_symbols() - paper_syms
                 for symbol in sorted(paper_syms | five_syms):
                     if self._confirm_burst:
                         await asyncio.sleep(0.2)
                         break
-                    fetched = paper.kline_at.get(symbol, 0.0)
-                    if time.time() - fetched < config.PAPER_KLINE_REFRESH_SEC:
-                        continue
-                    intervals = (*config.PAPER_EMA_INTERVALS, "5") if symbol in paper_syms else ("5",)
+                    if symbol in paper_syms:
+                        if time.time() - paper.kline_at.get(symbol, 0.0) < config.PAPER_KLINE_REFRESH_SEC:
+                            continue
+                        intervals = (*config.PAPER_EMA_INTERVALS, "5")
+                        limit = config.PAPER_KLINE_LIMIT
+                    else:
+                        if time.time() - five_at.get(symbol, 0.0) < config.PAPER_FIVE_MIN_REFRESH_SEC:
+                            continue
+                        five_at[symbol] = time.time()
+                        intervals = ("5",)
+                        limit = config.PAPER_FIVE_MIN_FETCH_LIMIT
                     for interval in intervals:
                         try:
-                            message = await rest.fetch_klines(symbol, interval, config.PAPER_KLINE_LIMIT)
+                            message = await rest.fetch_klines(symbol, interval, limit)
                         except asyncio.CancelledError:
                             raise
                         except Exception:
@@ -202,7 +216,7 @@ class SignalService:
                         still.append(symbol)
                 pending = still
                 if ready:
-                    for item in self.engine.scan(now_ms):
+                    for item in self.engine.scan(now_ms, boards=False, pivots=True):
                         if self._publisher is not None:
                             self._publisher.publish(item)
         finally:

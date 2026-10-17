@@ -153,8 +153,9 @@ REDIS_CHANNEL_SIGNALS = _env("REDIS_CHANNEL_SIGNALS", "signals:updates")
 WS_MAX_HZ = _env_int("WS_MAX_HZ", 10)
 TICKER_BATCH_INTERVAL_MS = _env_int("TICKER_BATCH_INTERVAL_MS", 500)
 
-# Как часто проверять каждую пару на памп.
+# Стопы теста и пылесос. Поиск пампов и старые доски — отдельно, втрое реже.
 MARKET_SCAN_INTERVAL_SEC = _env_int("MARKET_SCAN_INTERVAL_SEC", 3)
+PUMP_BOARD_INTERVAL_SEC = _env_int("PUMP_BOARD_INTERVAL_SEC", 9)
 
 # Страница и WebSocket. Только локальный просмотр, сервер не торгует.
 WEB_HOST = _env("WEB_HOST", "127.0.0.1")
@@ -241,6 +242,12 @@ PAPER_EMA_INTERVALS = ("15", "30", "60", "240")
 PAPER_EMA_PERIODS = (50, 100, 200)
 PAPER_KLINE_LIMIT = _env_int("PAPER_KLINE_LIMIT", 320)
 PAPER_KLINE_REFRESH_SEC = _env_int("PAPER_KLINE_REFRESH_SEC", 60)
+# Фон 5м для пылесоса: реже и короче, чем свечи кандидатов теста.
+PAPER_FIVE_MIN_REFRESH_SEC = _env_int("PAPER_FIVE_MIN_REFRESH_SEC", 180)
+PAPER_FIVE_MIN_FETCH_LIMIT = _env_int("PAPER_FIVE_MIN_FETCH_LIMIT", 120)
+# Полный разбор pivot только в эти миллисекунды после закрытия 5м.
+# Вспышка подтверждения считает pivot сразу, без этого окна.
+PAPER_PIVOT_EVAL_WINDOW_MS = _env_int("PAPER_PIVOT_EVAL_WINDOW_MS", 20_000)
 
 # Двойная вершина: 1H ≥10 свечей между вершинами или 30m ≥20, разница ≤3%, после 2-й ≥3 ч.
 PAPER_DT_MIN_BARS_1H = _env_int("PAPER_DT_MIN_BARS_1H", 10)
@@ -537,7 +544,7 @@ PAPER_READY_4H_BARS = _env_int("PAPER_READY_4H_BARS", 84)
 # Круглый уровень (0.5, 1, 5, 10…): пик или диапазон в пределах этого % от уровня.
 PAPER_ROUND_LEVEL_NEAR_PCT = _env_float("PAPER_ROUND_LEVEL_NEAR_PCT", 1.5)
 
-PAPER_DETECT_INTERVAL_SEC = _env_int("PAPER_DETECT_INTERVAL_SEC", 30)
+PAPER_DETECT_INTERVAL_SEC = _env_int("PAPER_DETECT_INTERVAL_SEC", 90)
 PAPER_PERSIST_INTERVAL_SEC = _env_int("PAPER_PERSIST_INTERVAL_SEC", 15)
 PAPER_EQUITY_SNAPSHOT_SEC = _env_int("PAPER_EQUITY_SNAPSHOT_SEC", 300)
 
