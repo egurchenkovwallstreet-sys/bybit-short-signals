@@ -204,7 +204,7 @@ def evaluate_vps(
         "failed": failed,
         "passed_count": passed,
         "passed": passed == len(VPS_MANDATORY),
-        "grade": grade_for(passed, len(VPS_MANDATORY)),
-        "score": float(passed),
+        "score": float(passed * 25),
+        "grade": grade_for(92.0 if passed == len(VPS_MANDATORY) else float(passed * 20)),
         "metrics": metrics,
     }
