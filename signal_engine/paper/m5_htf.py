@@ -7,8 +7,10 @@
 
 from __future__ import annotations
 
+import config
+from signal_engine.paper.pivot_clock import just_confirmed
 from signal_engine.state import Bar, SymbolState
-from signal_engine.swing_highs import closed_bars
+from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
 from signal_engine.vacuum_lh import _meets_turnover
 
 M5 = 300_000
@@ -178,3 +180,35 @@ def htf_second_bar_pending(state: SymbolState, now_ms: int) -> bool:
 
 def symbols_waiting_htf_second_bar(states: dict[str, SymbolState], now_ms: int) -> set[str]:
     return {symbol for symbol, state in states.items() if htf_second_bar_pending(state, now_ms)}
+
+
+def opposite_just_confirmed(state: SymbolState, now_ms: int, open_side: str, interval: str = "5") -> dict | None:
+    """Любой L15–L30 противоположной стороны, чья вторая свеча закрылась только что.
+
+    Подтверждение 15м/30м здесь не нужно: это выход, не вход.
+    """
+    if open_side not in ("long", "short"):
+        return None
+    want = "short" if open_side == "long" else "long"
+    bars = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
+    left = config.VACUUM_LH_PIVOT_LEFT
+    left_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    right = config.VACUUM_LH_PIVOT_RIGHT
+    points = (
+        pivot_highs_floating_left(bars, left, left_max, right)
+        if want == "short"
+        else pivot_lows_floating_left(bars, left, left_max, right)
+    )
+    hit: dict | None = None
+    for point in points:
+        ts = int(point["time"])
+        if not just_confirmed(ts, now_ms, interval):
+            continue
+        if hit is None or ts > int(hit["pivot_time_ms"]):
+            hit = {
+                "side": want,
+                "pivot_time_ms": ts,
+                "pivot_price": float(point["price"]),
+                "pivot_kind": "peak" if want == "short" else "trough",
+            }
+    return hit

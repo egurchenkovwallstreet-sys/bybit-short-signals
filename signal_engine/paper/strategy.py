@@ -46,7 +46,7 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
-from signal_engine.paper.m5_htf import symbols_waiting_htf_second_bar
+from signal_engine.paper.m5_htf import opposite_just_confirmed, symbols_waiting_htf_second_bar
 from signal_engine.paper.pivot_clock import just_confirmed, symbols_waiting_second_bar
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
 from signal_engine.paper.position import bab_pivot_stop_price
@@ -1952,12 +1952,16 @@ class PaperStrategy:
             open_key = (variant, symbol)
             if open_key in self.trades:
                 trade = self.trades[open_key]
-                if fresh and side and side != trade.pos.side:
+                closed_side = trade.pos.side
+                raw_exit = opposite_just_confirmed(state, now_ms, closed_side, interval)
+                confirmed_exit = bool(fresh and side and side != closed_side)
+                if raw_exit or confirmed_exit:
                     self._close_trade(trade, "opposite_pivot", state, now_ms)
-                    balance = self.balances[variant]
-                    margin = balance * config.PAPER_MARGIN_PCT / 100.0
-                    if margin > 0 and balance - self.used_margin(variant) >= margin:
-                        self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms)
+                    if confirmed_exit:
+                        balance = self.balances[variant]
+                        margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                        if margin > 0 and balance - self.used_margin(variant) >= margin:
+                            self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms)
                 continue
             if not fresh:
                 continue
@@ -2195,13 +2199,19 @@ class PaperStrategy:
                 open_key = (variant, symbol)
                 if open_key in self.trades:
                     trade = self.trades[open_key]
+                    closed_side = trade.pos.side
                     side = ev_data.get("side") or m.get("side")
-                    if fresh and side and side != trade.pos.side:
+                    confirmed_exit = bool(fresh and side and side != closed_side)
+                    raw_exit = (
+                        opposite_just_confirmed(state, now_ms, closed_side, interval) if like_pyl else None
+                    )
+                    if raw_exit or confirmed_exit:
                         self._close_trade(trade, "opposite_pivot", state, now_ms)
-                        balance = self.balances[variant]
-                        margin = balance * config.PAPER_MARGIN_PCT / 100.0
-                        if margin > 0 and balance - self.used_margin(variant) >= margin:
-                            self._open_vps_trade(variant, symbol, state, ev_data, margin, now_ms)
+                        if confirmed_exit:
+                            balance = self.balances[variant]
+                            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                            if margin > 0 and balance - self.used_margin(variant) >= margin:
+                                self._open_vps_trade(variant, symbol, state, ev_data, margin, now_ms)
                     continue
                 if not fresh:
                     continue
