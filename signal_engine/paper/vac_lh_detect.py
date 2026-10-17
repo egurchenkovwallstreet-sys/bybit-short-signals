@@ -1,4 +1,4 @@
-"""Paper Пылесос 15 / 5: новый pivot — шорт если max ниже прошлого max, лонг если min выше прошлого min."""
+"""Paper Пылесос 15 / 5: новый pivot-high → шорт, новый pivot-low → лонг (без сравнения с прошлым уровнем)."""
 
 from __future__ import annotations
 
@@ -20,8 +20,8 @@ VPS_MANDATORY = (
 
 VPS_CHECK_LABELS = {
     "turnover_ok": "Оборот 24ч ≥ порога сканера LH",
-    "new_pivot": "Новый подтверждённый pivot",
-    "structure_vs_prev": "Шорт: новый max ниже предыдущего; лонг: новый min выше предыдущего",
+    "new_pivot": "Новый подтверждённый pivot (max или min)",
+    "structure_vs_prev": "Шорт — уровень сверху (max); лонг — уровень снизу (min)",
 }
 
 
@@ -48,44 +48,6 @@ def _keys(points: list[dict]) -> frozenset[tuple[int, float]]:
     return frozenset(out)
 
 
-def _ordered(points: list[dict]) -> list[dict]:
-    return sorted(points, key=lambda p: int(p["time_ms"]))
-
-
-def side_for_new_peak(peaks: list[dict], new_key: tuple[int, float]) -> str | None:
-    ordered = _ordered(peaks)
-    idx = next(
-        (
-            i
-            for i, p in enumerate(ordered)
-            if (int(p["time_ms"]), round(float(p["price"]), 8)) == new_key
-        ),
-        -1,
-    )
-    if idx < 1:
-        return None
-    if float(ordered[idx]["price"]) < float(ordered[idx - 1]["price"]):
-        return "short"
-    return None
-
-
-def side_for_new_trough(troughs: list[dict], new_key: tuple[int, float]) -> str | None:
-    ordered = _ordered(troughs)
-    idx = next(
-        (
-            i
-            for i, p in enumerate(ordered)
-            if (int(p["time_ms"]), round(float(p["price"]), 8)) == new_key
-        ),
-        -1,
-    )
-    if idx < 1:
-        return None
-    if float(ordered[idx]["price"]) > float(ordered[idx - 1]["price"]):
-        return "long"
-    return None
-
-
 def _pack_signal(t_ms: int, side: str, key: tuple[int, float], price: float) -> dict:
     return {
         "side": side,
@@ -103,35 +65,23 @@ def _signal_from_diff(prev: dict, cur: dict) -> dict | None:
         return None
     events: list[tuple[int, str, tuple[int, float], float]] = []
     for key in new_peaks:
-        side = side_for_new_peak(cur.get("peaks") or [], key)
-        if side:
-            events.append((key[0], side, key, float(key[1])))
+        events.append((key[0], "short", key, float(key[1])))
     for key in new_troughs:
-        side = side_for_new_trough(cur.get("troughs") or [], key)
-        if side:
-            events.append((key[0], side, key, float(key[1])))
-    if not events:
-        return None
+        events.append((key[0], "long", key, float(key[1])))
     events.sort(key=lambda x: x[0])
     t_ms, side, key, price = events[-1]
     return _pack_signal(t_ms, side, key, price)
 
 
 def latest_qualifying_signal(cur: dict) -> dict | None:
-    """Последний pivot на TF: шорт/лонг vs предыдущий (если diff пропустили — рестарт, первый тик)."""
+    """Последний pivot по времени (если diff пропустили): max → шорт, min → лонг."""
     events: list[tuple[int, str, tuple[int, float], float]] = []
-    peaks = _ordered(cur.get("peaks") or [])
-    if len(peaks) >= 2:
-        prev_p, last_p = peaks[-2], peaks[-1]
-        if float(last_p["price"]) < float(prev_p["price"]):
-            key = (int(last_p["time_ms"]), round(float(last_p["price"]), 8))
-            events.append((key[0], "short", key, float(last_p["price"])))
-    troughs = _ordered(cur.get("troughs") or [])
-    if len(troughs) >= 2:
-        prev_t, last_t = troughs[-2], troughs[-1]
-        if float(last_t["price"]) > float(prev_t["price"]):
-            key = (int(last_t["time_ms"]), round(float(last_t["price"]), 8))
-            events.append((key[0], "long", key, float(last_t["price"])))
+    for p in cur.get("peaks") or []:
+        key = (int(p["time_ms"]), round(float(p["price"]), 8))
+        events.append((key[0], "short", key, float(p["price"])))
+    for p in cur.get("troughs") or []:
+        key = (int(p["time_ms"]), round(float(p["price"]), 8))
+        events.append((key[0], "long", key, float(p["price"])))
     if not events:
         return None
     events.sort(key=lambda x: x[0])
@@ -165,7 +115,7 @@ def evaluate_vps(
             structure_ok,
             structure_ok,
             signal.get("side") if signal else "—",
-            "нет LH/HL к прошлому",
+            "ждём новый max/min",
         ),
     }
     failed = [k for k in VPS_MANDATORY if not checks[k]["ok"]]

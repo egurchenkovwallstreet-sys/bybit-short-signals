@@ -714,14 +714,14 @@
       const candNote = document.querySelector("#paper-cand-section .quiet");
       if (candNote) {
         candNote.textContent =
-          `${vpsChartInterval(paper.variant)}m: новый pivot. Шорт — max ниже предыдущего max; лонг — min выше предыдущего min. Одна сделка до нового сигнала. Стоп −10% ROE, трейл пик − 10 п.п.`;
+          `${vpsChartInterval(paper.variant)}m: новый pivot-max → шорт, новый pivot-min → лонг (без сравнения с прошлым уровнем). Одна сделка до нового сигнала. Стоп −10% ROE, трейл − 10 п.п.`;
       }
       const tf = vpsChartInterval(paper.variant);
       const rows = vpsWatchRows();
       const total = mandatory().length;
       if (!rows.length) {
         table.innerHTML =
-          `<tbody><tr><td class="quiet">Нет сигналов: ждём новый pivot ${tf}m (шорт — max ниже прошлого, лонг — min выше прошлого).</td></tr></tbody>`;
+          `<tbody><tr><td class="quiet">Нет сигналов: ждём новый pivot ${tf}m (max → шорт, min → лонг).</td></tr></tbody>`;
         return;
       }
       table.innerHTML = `<thead><tr>

@@ -1,57 +1,48 @@
-"""Paper Пылесос 15/5: вход по одному прошлому pivot."""
+"""Paper Пылесос: max → шорт, min → лонг."""
 
 from __future__ import annotations
 
 import unittest
 
-from signal_engine.paper.vac_lh_detect import (
-    detect_entry_signal,
-    latest_qualifying_signal,
-    side_for_new_peak,
-    side_for_new_trough,
-)
+from signal_engine.paper.vac_lh_detect import detect_entry_signal, latest_qualifying_signal
 
 
 class VacLhPaperDetectTest(unittest.TestCase):
-    def test_short_one_prev_lower(self) -> None:
-        peaks = [
-            {"time_ms": 1, "price": 10.0},
-            {"time_ms": 2, "price": 8.0},
-        ]
-        self.assertEqual(side_for_new_peak(peaks, (2, 8.0)), "short")
-        self.assertIsNone(side_for_new_peak(peaks[:1], (1, 10.0)))
-
-    def test_long_one_prev_higher(self) -> None:
-        troughs = [
-            {"time_ms": 1, "price": 5.0},
-            {"time_ms": 2, "price": 6.0},
-        ]
-        self.assertEqual(side_for_new_trough(troughs, (2, 6.0)), "long")
-
-    def test_latest_qualifying_without_prev(self) -> None:
+    def test_new_peak_is_short_even_if_higher_than_prev(self) -> None:
+        prev = {"peaks": [{"time_ms": 1, "price": 8.0}], "troughs": []}
         cur = {
             "peaks": [
-                {"time_ms": 1, "price": 10.0},
-                {"time_ms": 2, "price": 9.0},
+                {"time_ms": 1, "price": 8.0},
+                {"time_ms": 2, "price": 10.0},
             ],
-            "troughs": [],
-        }
-        sig = latest_qualifying_signal(cur)
-        self.assertIsNotNone(sig)
-        assert sig is not None
-        self.assertEqual(sig["side"], "short")
-        self.assertIsNotNone(detect_entry_signal(None, cur))
-
-    def test_detect_from_snap_diff(self) -> None:
-        prev = {"peaks": [{"time_ms": 1, "price": 10.0}], "troughs": []}
-        cur = {
-            "peaks": [{"time_ms": 1, "price": 10.0}, {"time_ms": 2, "price": 9.0}],
             "troughs": [],
         }
         sig = detect_entry_signal(prev, cur)
         self.assertIsNotNone(sig)
         assert sig is not None
         self.assertEqual(sig["side"], "short")
+
+    def test_new_trough_is_long_even_if_lower_than_prev(self) -> None:
+        prev = {"peaks": [], "troughs": [{"time_ms": 1, "price": 6.0}]}
+        cur = {
+            "peaks": [],
+            "troughs": [
+                {"time_ms": 1, "price": 6.0},
+                {"time_ms": 2, "price": 5.0},
+            ],
+        }
+        sig = detect_entry_signal(prev, cur)
+        assert sig is not None
+        self.assertEqual(sig["side"], "long")
+
+    def test_latest_pivot_by_time(self) -> None:
+        cur = {
+            "peaks": [{"time_ms": 1, "price": 10.0}],
+            "troughs": [{"time_ms": 2, "price": 5.0}],
+        }
+        sig = latest_qualifying_signal(cur)
+        assert sig is not None
+        self.assertEqual(sig["side"], "long")
 
 
 if __name__ == "__main__":
