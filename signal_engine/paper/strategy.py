@@ -48,6 +48,7 @@ from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, eval
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
 from signal_engine.paper.position import bab_pivot_stop_price
+from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
 from signal_engine.paper.vac_detect import VAC_CHECK_LABELS, VAC_MANDATORY, evaluate_vac
 from signal_engine.paper.vac_lh_detect import VPS_CHECK_LABELS, VPS_MANDATORY, evaluate_vps
 from signal_engine.paper.css_detect import (
@@ -294,17 +295,25 @@ class PaperStrategy:
             self._ensure_balance(variant)
             gap = config.paper_peak_gap_roe(variant)
             kind = str(row["kind"] or "")
-            side = "long" if config.paper_is_long(variant) or kind.endswith("_long") else "short"
+            entry = _loads(row["entry_json"])
+            side = resolve_trade_side(
+                side=row["side"] if "side" in row.keys() else None,
+                kind=kind,
+                variant=variant,
+                entry=entry,
+            )
+            entry_px = float(row["entry_price"])
+            lev = int(row["leverage"])
             pos = Position(
                 symbol=row["symbol"],
                 opened_at=int(row["opened_at"]),
-                entry_price=float(row["entry_price"]),
+                entry_price=entry_px,
                 margin=float(row["margin"]),
-                leverage=int(row["leverage"]),
+                leverage=lev,
                 best_price=float(row["best_price"]),
                 worst_price=float(row["worst_price"]),
                 stop_price=float(row["stop_price"]),
-                liq_price=float(row["liq_price"]),
+                liq_price=liq_price_for_side(side, entry_px, lev),
                 entry_fee=float(row["entry_fee"]),
                 funding_paid=float(row["funding_paid"] or 0),
                 next_funding_ts=row["next_funding_ts"],
@@ -312,7 +321,7 @@ class PaperStrategy:
                 peak_gap_roe=gap,
                 side=side,
                 stop_style=config.paper_stop_style(variant),
-                scaled_half=bool((_loads(row["entry_json"]) or {}).get("css2_half")),
+                scaled_half=bool((entry or {}).get("css2_half")),
             )
             # Стоп по правилу варианта: t20 — +0.5% net/лок/трейл 20, p10 — +0.5% net и пик − gap.
             pos._sync_stop(float(row["last_price"] or row["entry_price"]))
@@ -620,17 +629,25 @@ class PaperStrategy:
         self._ensure_balance(variant)
         gap = config.paper_peak_gap_roe(variant)
         kind = str(row["kind"] or "")
-        side = "long" if config.paper_is_long(variant) or kind.endswith("_long") else "short"
+        entry = _loads(row["entry_json"])
+        side = resolve_trade_side(
+            side=row["side"] if "side" in row.keys() else None,
+            kind=kind,
+            variant=variant,
+            entry=entry,
+        )
+        entry_px = float(row["entry_price"])
+        lev = int(row["leverage"])
         pos = Position(
             symbol=row["symbol"],
             opened_at=int(row["opened_at"]),
-            entry_price=float(row["entry_price"]),
+            entry_price=entry_px,
             margin=float(row["margin"]),
-            leverage=int(row["leverage"]),
+            leverage=lev,
             best_price=float(row["best_price"]),
             worst_price=float(row["worst_price"]),
             stop_price=float(row["stop_price"]),
-            liq_price=float(row["liq_price"]),
+            liq_price=liq_price_for_side(side, entry_px, lev),
             entry_fee=float(row["entry_fee"]),
             funding_paid=float(row["funding_paid"] or 0),
             next_funding_ts=row["next_funding_ts"],
@@ -638,7 +655,7 @@ class PaperStrategy:
             peak_gap_roe=gap,
             side=side,
             stop_style=config.paper_stop_style(variant),
-            scaled_half=bool((_loads(row["entry_json"]) or {}).get("css2_half")),
+            scaled_half=bool((entry or {}).get("css2_half")),
         )
         last = float(row["last_price"] or row["entry_price"])
         pos.update(last, last, last)
@@ -791,6 +808,8 @@ class PaperStrategy:
                 "stop_price": pos.stop_price,
                 "last_price": pos.last_price,
                 "funding_paid": pos.funding_paid,
+                "side": pos.side,
+                "liq_price": pos.liq_price,
                 "balance_before": balance_before_close,
                 "balance_after": self.balances[variant],
                 "exit_json": exit_json,
@@ -1935,6 +1954,7 @@ class PaperStrategy:
                 "strict_btc": False,
                 "balance_before": self.balances[variant],
                 "entry_json": entry,
+                "side": side,
             }
         )
         self.trades[(variant, symbol)] = OpenTrade(
@@ -2158,6 +2178,7 @@ class PaperStrategy:
                 "strict_btc": False,
                 "balance_before": self.balances[variant],
                 "entry_json": entry,
+                "side": side,
             }
         )
         self.trades[(variant, symbol)] = OpenTrade(
@@ -2343,7 +2364,9 @@ class PaperStrategy:
             self.store.update_trade(
                 trade.id,
                 {
+                    "side": pos.side,
                     "stop_price": pos.stop_price,
+                    "liq_price": pos.liq_price,
                     "best_price": pos.best_price,
                     "worst_price": pos.worst_price,
                     "last_price": pos.last_price,

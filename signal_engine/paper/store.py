@@ -170,6 +170,18 @@ class PaperStore:
                 "INSERT OR IGNORE INTO paper_kv(key, value) VALUES(?, ?)",
                 (f"balance:{variant}", start),
             )
+        trade_cols = {r["name"] for r in db.execute("PRAGMA table_info(paper_trades)")}
+        if "side" not in trade_cols:
+            db.execute("ALTER TABLE paper_trades ADD COLUMN side TEXT")
+            from signal_engine.paper.trade_side import entry_from_raw, resolve_trade_side
+
+            for row in db.execute("SELECT id, kind, variant, entry_json FROM paper_trades"):
+                side = resolve_trade_side(
+                    kind=str(row["kind"] or ""),
+                    variant=str(row["variant"] or ""),
+                    entry=entry_from_raw(row["entry_json"]),
+                )
+                db.execute("UPDATE paper_trades SET side = ? WHERE id = ?", (side, row["id"]))
 
     def close(self) -> None:
         if self.conn is not None:
@@ -197,6 +209,16 @@ class PaperStore:
     # --- сделки ---
 
     def insert_trade(self, row: dict[str, Any]) -> int:
+        if not str(row.get("side") or "").strip():
+            from signal_engine.paper.trade_side import entry_from_raw, resolve_trade_side
+
+            row = dict(row)
+            entry = row.get("entry_json")
+            row["side"] = resolve_trade_side(
+                kind=str(row.get("kind") or ""),
+                variant=str(row.get("variant") or ""),
+                entry=entry_from_raw(entry) if not isinstance(entry, dict) else entry,
+            )
         keys = list(row)
         cur = self.db.execute(
             f"INSERT INTO paper_trades({', '.join(keys)}) VALUES({', '.join('?' for _ in keys)})",
