@@ -1,13 +1,13 @@
-"""Экстремум 5м принимается только как экстремум своей 15м.
+"""БАБЛОСОС / Пылесос 5: вход только от TZ-pivot на 5m (L15–L30, 2 справа, как LH/HL на графике).
 
-Шорт: high 15м ниже high предыдущей 15м и не выше high предыдущей 30м.
-Лонг: low 15м выше low предыдущей 15м и не ниже low предыдущей 30м.
-Две 5м справа экстремум не обновляют. Вход — на закрытии второй, это третья свеча.
+Поверх pivot — фильтр 15m/30m (qualify_m5_pivot): экстремум своей 15m, слабее предыдущей 15m,
+без пробоя предыдущей 30m, две 5m справа не обновляют. Вход — 10 секунд после второй справа.
 """
 
 from __future__ import annotations
 
 import config
+from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.pivot_clock import second_bar_close_ms
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
@@ -99,15 +99,66 @@ def _pack(bar: Bar, side: str) -> dict:
     }
 
 
+def _tz_pivot_times_ms(snap: dict) -> list[int]:
+    times: set[int] = set()
+    for p in snap.get("peaks") or []:
+        t = int(p.get("time_ms") or 0)
+        if t > 0:
+            times.add(t)
+    for p in snap.get("troughs") or []:
+        t = int(p.get("time_ms") or 0)
+        if t > 0:
+            times.add(t)
+    return sorted(times, reverse=True)
+
+
+def _setup_from_tz_pivots(state: SymbolState, now_ms: int) -> dict | None:
+    """Pivot L15–L30 + 2 справа (как на графике) и фильтр 15м/30м для входа."""
+    snap = snapshot_pivot_levels(state, "5", now_ms)
+    if not snap:
+        return None
+    bars = closed_bars(state.bars_htf.get("5") or [], "5", now_ms)
+    if len(bars) < 12:
+        return None
+    index = _index(bars)
+    events: list[tuple[int, str]] = []
+    for p in snap.get("peaks") or []:
+        ts = int(p["time_ms"])
+        if ts + 3 * M5 > int(now_ms):
+            continue
+        if index.get(ts + M5) is None or index.get(ts + 2 * M5) is None:
+            continue
+        if qualify_m5_pivot(index, ts, "short") == "ok":
+            events.append((ts, "short"))
+    for p in snap.get("troughs") or []:
+        ts = int(p["time_ms"])
+        if ts + 3 * M5 > int(now_ms):
+            continue
+        if index.get(ts + M5) is None or index.get(ts + 2 * M5) is None:
+            continue
+        if qualify_m5_pivot(index, ts, "long") == "ok":
+            events.append((ts, "long"))
+    if not events:
+        return None
+    events.sort(key=lambda x: x[0], reverse=True)
+    ts, side = events[0]
+    bar = index.get(ts)
+    if bar is None:
+        return None
+    return _pack(bar, side)
+
+
 def newest_pivot_reason(state: SymbolState, now_ms: int) -> str:
-    """Причина по самой свежей свече, у которой уже есть две справа."""
+    """Причина по TZ-pivot (L15–L30), у которого уже две свечи справа."""
+    snap = snapshot_pivot_levels(state, "5", now_ms)
+    if not snap:
+        return "no_bar"
     bars = closed_bars(state.bars_htf.get("5") or [], "5", now_ms)
     if len(bars) < 12:
         return "no_bar"
     index = _index(bars)
     fallback = "no_bar"
-    for bar in reversed(bars):
-        ts = int(bar.timestamp)
+    for ts in _tz_pivot_times_ms(snap):
         if ts + 3 * M5 > int(now_ms):
             continue
         if index.get(ts + M5) is None or index.get(ts + 2 * M5) is None:
@@ -123,21 +174,10 @@ def newest_pivot_reason(state: SymbolState, now_ms: int) -> str:
 
 
 def m5_htf_setup(state: SymbolState, now_ms: int) -> dict | None:
-    """Самый свежий экстремум 5м, который уже прошёл 15м, 30м и две свечи справа."""
+    """Самый свежий TZ-pivot 5m (как LH/HL на графике) + подтверждение 15м/30м."""
     if not _meets_turnover(state):
         return None
-    bars = closed_bars(state.bars_htf.get("5") or [], "5", now_ms)
-    if len(bars) < 12:
-        return None
-    index = _index(bars)
-    for bar in reversed(bars):
-        ts = int(bar.timestamp)
-        if ts + 3 * M5 > int(now_ms):
-            continue
-        for side in ("short", "long"):
-            if qualify_m5_pivot(index, ts, side) == "ok":
-                return _pack(bar, side)
-    return None
+    return _setup_from_tz_pivots(state, now_ms)
 
 
 def htf_second_bar_pending(state: SymbolState, now_ms: int) -> bool:

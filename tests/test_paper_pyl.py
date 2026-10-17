@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import config
 from signal_engine.paper.lh_scan_pivot import signal_from_pivot_diff
@@ -15,7 +16,12 @@ from signal_engine.paper.pivot_clock import (
     symbols_waiting_second_bar,
 )
 from signal_engine.paper.position import Position, bab_pivot_stop_price, price_for_roe
-from signal_engine.paper.m5_htf import htf_second_bar_pending, opposite_appeared, qualify_m5_pivot
+from signal_engine.paper.m5_htf import (
+    htf_second_bar_pending,
+    m5_htf_setup,
+    opposite_appeared,
+    qualify_m5_pivot,
+)
 from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
 from signal_engine.swing_highs import closed_bars
 from signal_engine.paper.vac_lh_detect import (
@@ -113,19 +119,25 @@ class FiveMinStoreAndEntryTest(unittest.TestCase):
 
     def test_vps5_enters_like_pyl_without_window(self) -> None:
         state, now_ms, peak_ts = _lower_high_state()
-        pyl = evaluate_pyl(state, now_ms, None)
-        self.assertTrue(pyl["passed"], pyl.get("failed"))
-        self.assertEqual(pyl.get("side"), "short")
-        self.assertEqual(pyl["metrics"]["pivot_time_ms"], peak_ts)
-        self.assertEqual(second_bar_close_ms(peak_ts, "5") - peak_ts, 3 * STEP)
-        late = entry_open_until_ms(peak_ts, "5") + 10 * STEP
-        window_sig = detect_entry_signal(None, pyl["metrics"], "5", late)
-        self.assertIsNone(window_sig)
-        vps15_style = evaluate_vps(state, late, None, "5", kind="vps5")
-        self.assertFalse(vps15_style["passed"])
-        self.assertIn("entry_window", vps15_style["failed"])
-        pyl_late = evaluate_pyl(state, late, None)
-        self.assertTrue(pyl_late["passed"], pyl_late.get("failed"))
+        snap = {
+            "interval": "5",
+            "peaks": [{"time_ms": peak_ts, "price": 12.0, "left_strength": 30}],
+            "troughs": [],
+        }
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=snap):
+            pyl = evaluate_pyl(state, now_ms, None)
+            self.assertTrue(pyl["passed"], pyl.get("failed"))
+            self.assertEqual(pyl.get("side"), "short")
+            self.assertEqual(pyl["metrics"]["pivot_time_ms"], peak_ts)
+            self.assertEqual(second_bar_close_ms(peak_ts, "5") - peak_ts, 3 * STEP)
+            late = entry_open_until_ms(peak_ts, "5") + 10 * STEP
+            window_sig = detect_entry_signal(None, pyl["metrics"], "5", late)
+            self.assertIsNone(window_sig)
+            vps15_style = evaluate_vps(state, late, None, "5", kind="vps5")
+            self.assertFalse(vps15_style["passed"])
+            self.assertIn("entry_window", vps15_style["failed"])
+            pyl_late = evaluate_pyl(state, late, None)
+            self.assertTrue(pyl_late["passed"], pyl_late.get("failed"))
 
     def test_collector_fetches_5m(self) -> None:
         self.assertIn("5", config.KLINE_INTERVALS)
@@ -151,12 +163,19 @@ class M5HtfGateTest(unittest.TestCase):
         state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
         state.bars_htf["5"] = bars
         peak_ts = base + 9 * STEP
-        index = {int(b.timestamp): b for b in closed_bars(bars, "5", peak_ts + 3 * STEP)}
+        now_ms = peak_ts + 3 * STEP
+        index = {int(b.timestamp): b for b in closed_bars(bars, "5", now_ms)}
         self.assertEqual(qualify_m5_pivot(index, peak_ts, "short"), "break_30m")
-        pyl = evaluate_pyl(state, peak_ts + 3 * STEP, None)
+        snap = {
+            "interval": "5",
+            "peaks": [{"time_ms": peak_ts, "price": 12.0, "left_strength": 30}],
+            "troughs": [],
+        }
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=snap):
+            pyl = evaluate_pyl(state, now_ms, None)
+            setup = m5_htf_setup(state, now_ms)
         self.assertFalse(pyl["passed"])
-        self.assertNotIn("htf_15m", pyl["failed"])
-        self.assertIn("htf_30m", pyl["failed"])
+        self.assertIsNone(setup)
 
     def test_higher_low_is_long(self) -> None:
         base = _aligned_base()
@@ -166,10 +185,22 @@ class M5HtfGateTest(unittest.TestCase):
         state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
         state.bars_htf["5"] = bars
         trough_ts = base + 9 * STEP
-        pyl = evaluate_pyl(state, trough_ts + 3 * STEP, None)
+        now_ms = trough_ts + 3 * STEP
+        snap = {
+            "interval": "5",
+            "peaks": [],
+            "troughs": [{"time_ms": trough_ts, "price": 10.0, "left_strength": 30}],
+        }
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=snap):
+            pyl = evaluate_pyl(state, now_ms, None)
         self.assertTrue(pyl["passed"], pyl.get("failed"))
         self.assertEqual(pyl.get("side"), "long")
         self.assertEqual(pyl["metrics"]["pivot_time_ms"], trough_ts)
+
+    def test_setup_ignores_non_tz_local_high(self) -> None:
+        """Локальный high без L15–L30 не даёт вход, даже если 15m/30m проходят."""
+        state, now_ms, peak_ts = _lower_high_state()
+        self.assertIsNone(m5_htf_setup(state, now_ms))
 
     def test_pending_after_first_right_bar(self) -> None:
         state, now_ms, peak_ts = _lower_high_state()
