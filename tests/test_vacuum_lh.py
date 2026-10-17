@@ -246,24 +246,24 @@ class VacuumHourRangeTest(unittest.TestCase):
             Bar(now_ms - (n - i) * 60_000, 100.0, high, low, 100.0, 1.0) for i in range(n)
         ]
 
-    def test_three_percent_passes(self) -> None:
+    def test_two_percent_passes(self) -> None:
         now = NOW
-        state = SymbolState("X", bars_1m=self._minutes(now, 103.0, 100.0), last_price=100.0)
-        self.assertAlmostEqual(hour_range_pct(state, now, 100.0), 3.0)
+        state = SymbolState("X", bars_1m=self._minutes(now, 102.0, 100.0), last_price=100.0)
+        self.assertAlmostEqual(hour_range_pct(state, now, 100.0), 2.0)
         state.turnover_24h_usdt = 1_100_000.0
         state.bars_htf["60"] = [_valley_bar(now - i * H, 90.0) for i in range(30, 0, -1)]
         self.assertIsNotNone(scan_symbol(state, now))
 
-    def test_below_three_percent_rejected(self) -> None:
+    def test_below_two_percent_rejected(self) -> None:
         now = NOW
         state = SymbolState(
             "X",
-            bars_1m=self._minutes(now, 102.9, 100.0),
+            bars_1m=self._minutes(now, 101.9, 100.0),
             last_price=100.0,
             turnover_24h_usdt=1_100_000.0,
             bars_htf={"60": [_valley_bar(now - i * H, 90.0) for i in range(30, 0, -1)]},
         )
-        self.assertAlmostEqual(hour_range_pct(state, now, 100.0), 2.9)
+        self.assertAlmostEqual(hour_range_pct(state, now, 100.0), 1.9)
         self.assertIsNone(scan_symbol(state, now))
 
     def test_no_hour_bars_rejected(self) -> None:

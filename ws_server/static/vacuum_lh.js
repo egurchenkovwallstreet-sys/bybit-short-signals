@@ -833,7 +833,7 @@ function renderVacuumLhBoard() {
   }
   const tfLabel = labelTf(vacuumLhState.lhInterval);
   if (!vacuumLhState.signals.length) {
-    root.innerHTML = `<p class="quiet pump-strategy-empty">На ${tfLabel}: нет монет с оборотом от 1 млн и размахом за час от 3%. Список обновляется каждые ~45 с.</p>`;
+    root.innerHTML = `<p class="quiet pump-strategy-empty">На ${tfLabel}: нет монет с оборотом от 1 млн и размахом за час от 2%. Список обновляется каждые ~45 с.</p>`;
     return;
   }
   const buckets = { down: [], mixed: [], up: [] };
