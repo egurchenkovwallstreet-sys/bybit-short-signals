@@ -762,6 +762,7 @@ class PaperStrategy:
         pos = trade.pos
         variant = trade.variant
         result = pos.close_result(reason)
+        balance_before_close = self.balances[variant]
         self.balances[variant] += result["pnl_usd"]
         points = state.oi_points()
         exit_json = {
@@ -790,6 +791,7 @@ class PaperStrategy:
                 "stop_price": pos.stop_price,
                 "last_price": pos.last_price,
                 "funding_paid": pos.funding_paid,
+                "balance_before": balance_before_close,
                 "balance_after": self.balances[variant],
                 "exit_json": exit_json,
             },
