@@ -278,6 +278,9 @@ body {
   margin: 0 0 6px;
   font-size: 0.95rem;
 }
+.paper-table td.pnl-plus { color: var(--green); font-weight: 700; font-variant-numeric: tabular-nums; }
+.paper-table td.pnl-minus { color: var(--red); font-weight: 700; font-variant-numeric: tabular-nums; }
+.paper-table tr.vacuum-stats-current td { background: rgba(93, 173, 226, 0.08); }
 
 .vacuum-lh-toolbar {
   display: flex;

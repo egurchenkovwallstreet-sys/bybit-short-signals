@@ -1676,6 +1676,88 @@ function vacuumMoney(n) {
   return `${sign}${x.toFixed(2)}`;
 }
 
+function vacuumPnlClass(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x) || x === 0) return "";
+  return x > 0 ? "pnl-plus" : "pnl-minus";
+}
+
+function vacuumPnlTd(n, text) {
+  const cls = vacuumPnlClass(n);
+  const body = text == null ? vacuumMoney(n) : text;
+  return `<td class="${cls}">${body}</td>`;
+}
+
+function vacuumTimeMsk(ms) {
+  const t = Number(ms);
+  if (!t) return "—";
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString("ru-RU", {
+    timeZone: "Europe/Moscow",
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function vacuumDur(min) {
+  if (!Number.isFinite(min) || min < 0) return "—";
+  if (min < 90) return `${Math.round(min)} мин`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m ? `${h} ч ${m} мин` : `${h} ч`;
+}
+
+function vacuumExitLabel(reason) {
+  if (reason === "trailing_stop") return "стоп";
+  if (reason === "liquidation") return "ликвидация";
+  if (reason === "opposite_pivot") return "противоположный";
+  return reason || "—";
+}
+
+function vacuumClosedStats(rows) {
+  const list = rows || [];
+  const pnls = list.map((t) => Number(t.pnl_usd) || 0);
+  const wins = pnls.filter((p) => p > 0);
+  const losses = pnls.filter((p) => p <= 0);
+  const grossWin = wins.reduce((a, b) => a + b, 0);
+  const grossLoss = -losses.reduce((a, b) => a + b, 0);
+  const roes = list.map((t) => Number(t.roe_pct) || 0);
+  const durs = list
+    .map((t) => (t.closed_at && t.opened_at ? (Number(t.closed_at) - Number(t.opened_at)) / 60000 : null))
+    .filter((x) => x != null && x >= 0);
+  let running = 1000;
+  let peak = 1000;
+  let maxDd = 0;
+  list
+    .slice()
+    .sort((a, b) => (Number(a.closed_at) || 0) - (Number(b.closed_at) || 0))
+    .forEach((t) => {
+      running += Number(t.pnl_usd) || 0;
+      if (running > peak) peak = running;
+      if (peak > 0) maxDd = Math.max(maxDd, ((peak - running) / peak) * 100);
+    });
+  const n = list.length;
+  return {
+    n,
+    wins: wins.length,
+    losses: losses.length,
+    winRate: n ? (wins.length / n) * 100 : null,
+    net: pnls.reduce((a, b) => a + b, 0),
+    avgWin: wins.length ? grossWin / wins.length : 0,
+    avgLoss: losses.length ? grossLoss / losses.length : 0,
+    pf: grossLoss > 0 ? grossWin / grossLoss : wins.length ? Infinity : null,
+    best: n ? Math.max(...pnls) : 0,
+    worst: n ? Math.min(...pnls) : 0,
+    avgRoe: n ? roes.reduce((a, b) => a + b, 0) / n : 0,
+    avgMin: durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : 0,
+    dd: maxDd,
+    fees: list.reduce((a, t) => a + (Number(t.entry_fee) || 0) + (Number(t.exit_fee) || 0), 0),
+  };
+}
+
 function vacuumDeskVariant() {
   return vacuumLhState.mode === "vps5" ? "vps5" : "pyl";
 }
@@ -1744,12 +1826,50 @@ function renderVacuumDesk() {
   if (summary) {
     const rule =
       vacuumLhState.mode === "vps5"
-        ? "5 мин: максимум → шорт, минимум → лонг. Вход сразу после подтверждения, как у баблососа. Стоп −10%, трейл пик − 10 пунктов."
-        : "5 мин: максимум → шорт, минимум → лонг. Вход сразу после подтверждения. Стоп ±5% от свечи экстремума, выход стоп или переворот.";
+        ? "Тот же вход, что у баблососа: 10 секунд после второй свечи. Стоп −10%, трейл пик − 10 пунктов."
+        : "5 мин: максимум → шорт, минимум → лонг. Вход и закрытие в 10 секунд после второй свечи. Стоп ±5% от свечи экстремума.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>
       <div class="paper-card"><span class="label">Правило</span><div class="value">${vacuumLhState.mode === "vps5" ? "Пылесос 5" : "БАБЛОСОС"}</div><div class="sub">${rule}</div></div>`;
+  }
+  const statsTable = document.getElementById("vacuum-desk-stats");
+  if (statsTable) {
+    const opensAll = (vacuumLhState.paper || {}).open_trades || [];
+    const body = [
+      ["pyl", "БАБЛОСОС"],
+      ["vps5", "Пылесос 5"],
+    ]
+      .map(([variant, label]) => {
+        const st = vacuumClosedStats(vacuumLhState.closedMap[variant] || []);
+        const openN = opensAll.filter((t) => t.variant === variant).length;
+        const wr = st.winRate == null ? "—" : `${st.winRate.toFixed(1)}%`;
+        const pf = st.pf == null ? "—" : st.pf === Infinity ? "∞" : st.pf.toFixed(2);
+        const current = variant === vacuumDeskVariant() ? " vacuum-stats-current" : "";
+        return `<tr class="${current.trim()}">
+          <td><b>${label}</b></td>
+          <td>${openN}</td>
+          <td>${st.n}</td>
+          <td>${st.n ? `${st.wins} / ${st.losses}` : "—"}</td>
+          <td>${wr}</td>
+          ${vacuumPnlTd(st.net)}
+          ${vacuumPnlTd(st.n ? st.avgWin : null)}
+          ${vacuumPnlTd(st.n ? -Math.abs(st.avgLoss) : null, st.n ? vacuumMoney(-Math.abs(st.avgLoss)) : "—")}
+          <td>${pf}</td>
+          ${vacuumPnlTd(st.n ? st.best : null)}
+          ${vacuumPnlTd(st.n ? st.worst : null)}
+          ${vacuumPnlTd(st.n ? st.avgRoe : null, st.n ? `${st.avgRoe >= 0 ? "+" : ""}${st.avgRoe.toFixed(1)}%` : "—")}
+          <td>${st.n ? vacuumDur(st.avgMin) : "—"}</td>
+          <td>${st.n ? `${st.dd.toFixed(1)}%` : "—"}</td>
+          ${vacuumPnlTd(st.n ? -st.fees : null)}
+        </tr>`;
+      })
+      .join("");
+    statsTable.innerHTML = `<thead><tr>
+      <th>Стратегия</th><th>Открыто</th><th>Закрыто</th><th>Плюс / минус</th><th>Винрейт</th>
+      <th>Итог</th><th>Ср. плюс</th><th>Ср. минус</th><th>PF</th><th>Лучшая</th><th>Худшая</th>
+      <th>Ср. ROE</th><th>Ср. время</th><th>Просадка</th><th>Комиссии</th>
+    </tr></thead><tbody>${body}</tbody>`;
   }
   const opens = ((vacuumLhState.paper || {}).open_trades || []).filter((t) => t.variant === vacuumDeskVariant());
   const openTable = document.getElementById("vacuum-desk-open");
@@ -1763,7 +1883,7 @@ function renderVacuumDesk() {
           <td>${t.entry_price}</td>
           <td>${t.last_price}</td>
           <td>${t.stop_price}</td>
-          <td>${vacuumMoney(t.pnl_usd)}</td>
+          ${vacuumPnlTd(t.pnl_usd)}
         </tr>`,
           )
           .join("")}</tbody>`
@@ -1791,27 +1911,27 @@ function renderVacuumDesk() {
   const closedTable = document.getElementById("vacuum-desk-closed");
   if (closedTable) {
     closedTable.innerHTML = closed.length
-      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>P&L</th><th>Выход</th></tr></thead><tbody>${closed
-          .slice(0, 80)
+      ? `<thead><tr><th>Закрыта</th><th>Монета</th><th>Сторона</th><th>Вход</th><th>Выход</th><th>ROE</th><th>P&L</th><th>Время</th><th>Причина</th></tr></thead><tbody>${closed
+          .slice(0, 200)
           .map((t) => {
             const side = t.side || ((t.entry || {}).metrics || {}).side;
-            const reason =
-              t.exit_reason === "trailing_stop"
-                ? "стоп"
-                : t.exit_reason === "liquidation"
-                  ? "ликвидация"
-                  : t.exit_reason === "opposite_pivot"
-                    ? "переворот"
-                    : t.exit_reason || "—";
+            const mins = t.closed_at && t.opened_at ? (Number(t.closed_at) - Number(t.opened_at)) / 60000 : null;
+            const roe = Number(t.roe_pct);
+            const roeText = Number.isFinite(roe) ? `${roe >= 0 ? "+" : ""}${roe.toFixed(1)}%` : "—";
             return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
+          <td>${vacuumTimeMsk(t.closed_at)}</td>
           <td><b>${t.symbol}</b></td>
           <td>${side === "long" ? "лонг" : side === "short" ? "шорт" : "—"}</td>
-          <td>${vacuumMoney(t.pnl_usd)}</td>
-          <td>${reason}</td>
+          <td>${t.entry_price ?? "—"}</td>
+          <td>${t.exit_price ?? "—"}</td>
+          ${vacuumPnlTd(roe, roeText)}
+          ${vacuumPnlTd(t.pnl_usd)}
+          <td>${vacuumDur(mins)}</td>
+          <td>${vacuumExitLabel(t.exit_reason)}</td>
         </tr>`;
           })
           .join("")}</tbody>`
-      : `<tbody><tr><td class="quiet">Нет закрытых сделок</td></tr></tbody>`;
+      : `<tbody><tr><td class="quiet">Нет закрытых сделок. Винрейт появится после первых выходов.</td></tr></tbody>`;
   }
 }
 
