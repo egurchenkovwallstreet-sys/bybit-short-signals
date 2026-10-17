@@ -235,6 +235,16 @@
     if (rows.length && !rows.includes(paper.variant)) paper.variant = rows[0];
     if (!isVisible()) return;
     render();
+    const closedN = (vstats(paper.variant).trades || {}).closed || 0;
+    if (
+      closedN > 0 &&
+      (paper.closedVariant !== paper.variant || !(paper.closed && paper.closed.length))
+    ) {
+      fetchLists(true).then(() => {
+        renderClosed();
+        renderHistory();
+      });
+    }
   }
 
   function isVisible() {
