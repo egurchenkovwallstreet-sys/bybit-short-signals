@@ -237,6 +237,7 @@ function initVacuumLhTab() {
       vacuumLhState.chart = window.boardChart.createRuntime();
     }
     ensureVacuumTradeClock();
+    ensureVacuumTradeWarm();
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !vacuumLhState.selected) return;
       const view = document.getElementById("view-vacuum-lh");
@@ -487,11 +488,27 @@ function drawVacuumCandles(candles, resetScale) {
   if (!symbol || !candles?.length || !mountVacuumChart()) return false;
   const BC = window.boardChart;
   const interval = vacuumLhState.chartInterval;
+  const runtime = vacuumLhState.chart;
+  let keptRange = null;
+  if (!resetScale && runtime?.chart) {
+    try {
+      keptRange = runtime.chart.timeScale().getVisibleLogicalRange();
+    } catch (_e) {
+      keptRange = null;
+    }
+  }
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
-  BC.drawCandles(vacuumLhState.chart, candles, interval, resetScale, VAC_CHART.chart, live);
-  if (resetScale) focusVacuumTradeWindow(vacuumLhState.chart);
-  ensureVacuumLhMarkerHooks(vacuumLhState.chart);
-  drawVacuumLhOverlays(vacuumLhState.chart, getVacuumChartPeaks(), getVacuumChartTroughs(), interval);
+  BC.drawCandles(runtime, candles, interval, resetScale, VAC_CHART.chart, live);
+  if (resetScale) focusVacuumTradeWindow(runtime);
+  else if (keptRange) {
+    try {
+      runtime.chart.timeScale().setVisibleLogicalRange(keptRange);
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+  ensureVacuumLhMarkerHooks(runtime);
+  drawVacuumLhOverlays(runtime, getVacuumChartPeaks(), getVacuumChartTroughs(), interval);
   requestAnimationFrame(resizeVacuumChartNow);
   setVacuumChartPlaceholder("");
   return true;
@@ -514,6 +531,11 @@ function vacuumLoadStillValid(seq, symbol) {
 async function loadVacuumChartDisplay(resetScale) {
   const symbol = vacuumLhState.selected;
   if (!symbol) return;
+  if (paintVacuumChartFromBuffer(resetScale)) {
+    ensureVacuumBuffers(symbol);
+    void refreshVacuumVisibleChart();
+    return;
+  }
   const seq = ++vacuumLhState._loadSeq;
   setVacuumChartPlaceholder("Загрузка свечей…");
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
@@ -524,45 +546,147 @@ async function loadVacuumChartDisplay(resetScale) {
   }
   const BC = window.boardChart;
   const interval = vacuumLhState.chartInterval;
-  await ensureVacuumBuffers(symbol, vacuumLhState.bufferSymbol !== symbol);
-  if (!vacuumLoadStillValid(seq, symbol)) return;
   let candles = BC.getCachedCandles(symbol, interval);
   if (candles.length < VACUUM_MIN_BARS) {
     candles = await BC.ensureCandles(null, symbol, interval, null, { refreshFallback: true });
   }
   if (!vacuumLoadStillValid(seq, symbol)) return;
+  if (paintVacuumChartFromBuffer(resetScale)) {
+    ensureVacuumBuffers(symbol);
+    return;
+  }
   if (candles.length < 1) {
     setVacuumChartPlaceholder("Нет данных свечей для этого TF — попробуйте 15m или 1H");
     return;
   }
   drawVacuumCandles(candles, resetScale);
+  ensureVacuumBuffers(symbol);
 }
 
-async function ensureVacuumBuffers(symbol, force) {
-  if (!force && vacuumLhState.bufferSymbol === symbol && !vacuumLhState.bufferLoading) {
-    return VACUUM_BUFFER_TF.every(
-      (iv) => window.boardChart.getCachedCandles(symbol, iv).length >= VACUUM_MIN_BARS,
-    );
-  }
-  vacuumLhState.bufferLoading = true;
-  vacuumLhState.bufferSymbol = symbol;
+function ensureVacuumBuffers(symbol) {
   const BC = window.boardChart;
+  if (!symbol || !BC?.scheduleAssetsPrefetch) return;
   BC.scheduleAssetsPrefetch([symbol], {
     intervals: VACUUM_BUFFER_TF,
     book: false,
     liq: false,
     priority: "high",
   });
-  try {
-    await Promise.all(
-      VACUUM_BUFFER_TF.map((iv) =>
-        BC.ensureCandles(null, symbol, iv, null, { refreshFallback: true }),
-      ),
-    );
-  } finally {
-    vacuumLhState.bufferLoading = false;
+}
+
+function vacuumTradeSymbols() {
+  const open = ((vacuumLhState.paper || {}).open_trades || [])
+    .filter((t) => t.variant === "pyl" || t.variant === "vps5")
+    .map((t) => t.symbol);
+  const closed = ["pyl", "vps5"].flatMap((variant) =>
+    (vacuumLhState.closedMap[variant] || []).map((t) => t.symbol),
+  );
+  const selected = vacuumLhState.selected ? [vacuumLhState.selected] : [];
+  const seen = new Set();
+  const out = [];
+  for (const symbol of [...selected, ...open, ...closed]) {
+    if (!symbol || seen.has(symbol)) continue;
+    seen.add(symbol);
+    out.push(symbol);
   }
-  return true;
+  return out;
+}
+
+function vacuumCandlesFresh(symbol, interval, maxAgeMs) {
+  const BC = window.boardChart;
+  if (!BC?.getAssetBucket) return false;
+  const bucket = BC.getAssetBucket(symbol);
+  const candles = bucket.intervals.get(interval) || [];
+  const at = bucket.intervalAt.get(interval) || 0;
+  return candles.length >= VACUUM_MIN_BARS && Date.now() - at < maxAgeMs;
+}
+
+function warmVacuumTradeCharts() {
+  const BC = window.boardChart;
+  if (!BC?.scheduleAssetsPrefetch) return;
+  const symbols = vacuumTradeSymbols();
+  if (!symbols.length) return;
+  const selected = vacuumLhState.selected;
+  const stale = symbols.filter(
+    (symbol) =>
+      symbol !== selected &&
+      VACUUM_BUFFER_TF.some((interval) => !vacuumCandlesFresh(symbol, interval, 180_000)),
+  );
+  if (stale.length) {
+    BC.scheduleAssetsPrefetch(stale, {
+      intervals: VACUUM_BUFFER_TF,
+      book: false,
+      liq: false,
+      priority: "low",
+    });
+  }
+  if (selected && VACUUM_BUFFER_TF.some((interval) => !vacuumCandlesFresh(selected, interval, 20_000))) {
+    ensureVacuumBuffers(selected);
+  }
+}
+
+function scheduleVacuumTradeCharts() {
+  if (vacuumLhState._warmSoon) return;
+  vacuumLhState._warmSoon = setTimeout(() => {
+    vacuumLhState._warmSoon = 0;
+    warmVacuumTradeCharts();
+  }, 400);
+}
+
+function ensureVacuumTradeWarm() {
+  if (!window.boardChart) return;
+  window.boardChart._notifyKlines = onVacuumKlinesReady;
+  if (vacuumLhState._warmTimer) return;
+  void fetchVacuumDeskClosed(false);
+  scheduleVacuumTradeCharts();
+  vacuumLhState._warmTimer = setInterval(() => {
+    warmVacuumTradeCharts();
+    void refreshVacuumVisibleChart();
+  }, 15000);
+}
+
+function onVacuumKlinesReady(symbol, interval) {
+  if (vacuumLhState.selected !== symbol || vacuumLhState.chartInterval !== interval) return;
+  if (vacuumLhState.chart?._lastBars?.length) return;
+  paintVacuumChartFromBuffer(true);
+}
+
+async function refreshVacuumVisibleChart() {
+  const symbol = vacuumLhState.selected;
+  const interval = vacuumLhState.chartInterval;
+  const BC = window.boardChart;
+  const runtime = vacuumLhState.chart;
+  if (!symbol || !interval || !BC?._fetchKlines || !runtime?.series) return;
+  let candles = await BC._fetchKlines(symbol, interval, false);
+  if (vacuumLhState.selected !== symbol || vacuumLhState.chartInterval !== interval) return;
+  if (vacuumSeriesStale(candles, interval)) {
+    candles = await BC._fetchKlines(symbol, interval, true);
+    if (vacuumLhState.selected !== symbol || vacuumLhState.chartInterval !== interval) return;
+  }
+  if (!candles?.length) return;
+  const bucket = BC.getAssetBucket(symbol);
+  bucket.intervals.set(interval, candles);
+  bucket.intervalAt.set(interval, Date.now());
+  if (!runtime._lastBars?.length) {
+    drawVacuumCandles(candles, true);
+    return;
+  }
+  const prev = runtime._lastBars[runtime._lastBars.length - 1];
+  const next = candles[candles.length - 1];
+  const nextTime = BC.candleTime(next.timestamp ?? next.time, interval);
+  const same =
+    candles.length === runtime._lastBars.length &&
+    BC.barTimeToSec(nextTime) === BC.barTimeToSec(prev.time) &&
+    Number(next.close) === Number(prev.close);
+  if (!same) drawVacuumCandles(candles, false);
+}
+
+function vacuumSeriesStale(candles, interval) {
+  if (!candles?.length) return true;
+  const last = Number(candles[candles.length - 1].timestamp || candles[candles.length - 1].time || 0);
+  const ms = last > 1e12 ? last : last * 1000;
+  const step = (window.boardChart?.INTERVAL_SEC?.[interval] || 300) * 1000;
+  return !ms || Date.now() - ms > step * 3;
 }
 
 async function switchVacuumChartTf(interval) {
@@ -583,7 +707,11 @@ async function switchVacuumChartTf(interval) {
   }
   renderVacuumTfControls();
   renderVacuumLhInfo();
-  if (paintVacuumChartFromBuffer(true)) return;
+  if (paintVacuumChartFromBuffer(true)) {
+    ensureVacuumBuffers(vacuumLhState.selected);
+    void refreshVacuumVisibleChart();
+    return;
+  }
   await loadVacuumChartDisplay(true);
 }
 
@@ -695,10 +823,11 @@ async function toggleVacuumLhSymbol(symbol) {
     window.signalSocket.send(JSON.stringify({ type: "select_vacuum_lh", symbol }));
     requestVacuumChartAnchors(vacuumLhState.chartInterval);
   }
-  await ensureVacuumPaper();
+  void loadVacuumChartDisplay(true);
+  void ensureVacuumPaper();
   void fetchVacuumDeskClosed(false);
   void fetchVacuumSymbolClosed(symbol);
-  await loadVacuumChartDisplay(true);
+  scheduleVacuumTradeCharts();
 }
 
 function openVacuumLhChart() {
@@ -1360,6 +1489,8 @@ function onVacuumPaper(data) {
   if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
     drawVacuumTradeOverlay(vacuumLhState.chart);
   }
+  ensureVacuumTradeWarm();
+  scheduleVacuumTradeCharts();
 }
 
 async function fetchVacuumDeskClosed(force) {
@@ -1371,7 +1502,7 @@ async function fetchVacuumDeskClosed(force) {
   try {
     const pairs = await Promise.all(
       ["pyl", "vps5"].map(async (variant) => {
-        const res = await fetch(`/api/paper/trades?status=closed&limit=500&variant=${encodeURIComponent(variant)}`);
+        const res = await fetch(`/api/paper/trades?status=closed&limit=2000&variant=${encodeURIComponent(variant)}`);
         if (!res.ok) return [variant, []];
         const body = await res.json();
         return [variant, body.rows || []];
@@ -1387,6 +1518,7 @@ async function fetchVacuumDeskClosed(force) {
     if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
       drawVacuumTradeOverlay(vacuumLhState.chart);
     }
+    scheduleVacuumTradeCharts();
   } catch (_err) {
     /* ignore */
   }

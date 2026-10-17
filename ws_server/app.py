@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -311,8 +312,9 @@ async def klines(
         if days > 0
         else max(100, config.KLINE_FETCH_LIMIT // 2)
     )
-    cached = hub.cache.klines.get(key)
-    if cached and len(cached) >= min_bars and not refresh and days <= 0:
+    cached = hub.cache.klines.get(key) or []
+    last_ts = int((cached[-1] or {}).get("timestamp") or 0) if cached else 0
+    if not refresh and config.kline_cache_servable(len(cached), last_ts, interval, min_bars, int(time.time() * 1000)):
         return {"symbol": symbol, "interval": interval, "window_days": window_days, "candles": cached}
     from collector.rest_client import BybitRest
 

@@ -1142,6 +1142,7 @@ window.boardChart = {
       if (candles.length) {
         bucket.intervals.set(job.interval, candles);
         bucket.intervalAt.set(job.interval, Date.now());
+        if (typeof BC._notifyKlines === "function") BC._notifyKlines(job.symbol, job.interval);
       }
       return;
     }

@@ -702,6 +702,18 @@ def kline_bars_for_days(interval: str, days: int | None = None) -> int:
     return max(10, int(math.ceil(span * 24 * 60 / minutes)))
 
 
+def kline_cache_servable(count: int, last_ts_ms: int, interval: str, min_bars: int, now_ms: int) -> bool:
+    """Можно отдать свечи из памяти, не запрашивая биржу ещё раз."""
+    if count <= 0:
+        return False
+    if count >= min_bars:
+        return True
+    if count < 48 or last_ts_ms <= 0:
+        return False
+    minutes = _KLINE_BAR_MINUTES.get(interval, 60)
+    return now_ms - int(last_ts_ms) <= minutes * 60_000 * 3
+
+
 def oi_bars_for_days(oi_interval: str, days: int | None = None) -> int:
     import math
 

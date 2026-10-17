@@ -13,6 +13,14 @@ import config
 class ConfigDefaultsTest(unittest.TestCase):
     """Константы защиты от перегрузки и пороги сигнала."""
 
+    def test_kline_cache_skips_repeat_exchange_fetch(self) -> None:
+        now = 1_700_000_000_000
+        full = config.kline_bars_for_days("5", 30)
+        self.assertTrue(config.kline_cache_servable(full, now, "5", full, now))
+        self.assertFalse(config.kline_cache_servable(10, now, "5", full, now))
+        self.assertTrue(config.kline_cache_servable(60, now, "5", full, now))
+        self.assertFalse(config.kline_cache_servable(60, now - 3_600_000, "5", full, now))
+
     def test_reconnect_backoff(self) -> None:
         self.assertEqual(config.RECONNECT_DELAYS_SEC, (1, 2, 4, 8))
 
