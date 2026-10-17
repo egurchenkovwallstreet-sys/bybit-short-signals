@@ -15,7 +15,9 @@ from signal_engine.paper.pivot_clock import (
     symbols_waiting_second_bar,
 )
 from signal_engine.paper.position import Position, bab_pivot_stop_price, price_for_roe
+from signal_engine.paper.m5_htf import htf_second_bar_pending, qualify_m5_pivot
 from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_pyl
+from signal_engine.swing_highs import closed_bars
 from signal_engine.paper.vac_lh_detect import (
     detect_entry_signal,
     entry_open_until_ms,
@@ -27,18 +29,28 @@ STEP = 300_000
 T0 = 1_700_000_000_000
 
 
-def _state_with_5m_peak() -> tuple[SymbolState, int, int]:
-    bars: list[Bar] = []
-    for i in range(30):
-        ts = T0 + i * STEP
-        bars.append(Bar(ts, 10.0, 10.2, 9.8, 10.0, 1.0))
-    peak_ts = T0 + 30 * STEP
-    bars.append(Bar(peak_ts, 10.0, 15.0, 9.9, 12.0, 1.0))
-    for i in range(31, 80):
-        ts = T0 + i * STEP
-        bars.append(Bar(ts, 10.0, 10.3, 9.7, 10.0, 1.0))
-    now_ms = bars[-1].timestamp + STEP
-    state = SymbolState("XUSDT", last_price=10.0, turnover_24h_usdt=2_000_000.0)
+def _aligned_base() -> int:
+    raw = 1_700_000_000_000
+    return raw - (raw % (6 * STEP))
+
+
+def _bars(base: int, highs: list[float], lows: list[float]) -> list[Bar]:
+    out: list[Bar] = []
+    for i, (high, low) in enumerate(zip(highs, lows)):
+        mid = (high + low) / 2
+        out.append(Bar(base + i * STEP, mid, high, low, mid, 1.0))
+    return out
+
+
+def _lower_high_state() -> tuple[SymbolState, int, int]:
+    """Предыдущая 30м high 16, предыдущая 15м high 14, экстремум 12 на первой 5м своей 15м."""
+    base = _aligned_base()
+    highs = [16, 15, 14.5, 13, 12.5, 14, 13, 12.2, 11.5, 12, 11, 11]
+    lows = [9] * len(highs)
+    bars = _bars(base, highs, lows)
+    peak_ts = base + 9 * STEP
+    now_ms = peak_ts + 3 * STEP
+    state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
     state.bars_htf["5"] = bars
     return state, now_ms, peak_ts
 
@@ -100,10 +112,12 @@ class FiveMinStoreAndEntryTest(unittest.TestCase):
         self.assertEqual(len(state.bars_htf.get("5") or []), 6)
 
     def test_vps5_enters_like_pyl_without_window(self) -> None:
-        state, now_ms, peak_ts = _state_with_5m_peak()
+        state, now_ms, peak_ts = _lower_high_state()
         pyl = evaluate_pyl(state, now_ms, None)
         self.assertTrue(pyl["passed"], pyl.get("failed"))
         self.assertEqual(pyl.get("side"), "short")
+        self.assertEqual(pyl["metrics"]["pivot_time_ms"], peak_ts)
+        self.assertEqual(second_bar_close_ms(peak_ts, "5") - peak_ts, 3 * STEP)
         late = entry_open_until_ms(peak_ts, "5") + 10 * STEP
         window_sig = detect_entry_signal(None, pyl["metrics"], "5", late)
         self.assertIsNone(window_sig)
@@ -115,6 +129,54 @@ class FiveMinStoreAndEntryTest(unittest.TestCase):
 
     def test_collector_fetches_5m(self) -> None:
         self.assertIn("5", config.KLINE_INTERVALS)
+
+
+class M5HtfGateTest(unittest.TestCase):
+    def test_higher_15m_is_rejected(self) -> None:
+        base = _aligned_base()
+        highs = [16, 15, 14.5, 13, 12.5, 14, 10, 10, 10, 12, 11, 11]
+        bars = _bars(base, highs, [9] * len(highs))
+        state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
+        state.bars_htf["5"] = bars
+        peak_ts = base + 9 * STEP
+        index = {int(b.timestamp): b for b in closed_bars(bars, "5", peak_ts + 3 * STEP)}
+        self.assertEqual(qualify_m5_pivot(index, peak_ts, "short"), "not_weaker_15m")
+        pyl = evaluate_pyl(state, peak_ts + 3 * STEP, None)
+        self.assertFalse(pyl["passed"])
+
+    def test_break_of_prior_30m_is_rejected(self) -> None:
+        base = _aligned_base()
+        highs = [11, 10.5, 10, 10, 10, 10, 14, 13, 12.5, 12, 11, 11]
+        bars = _bars(base, highs, [9] * len(highs))
+        state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
+        state.bars_htf["5"] = bars
+        peak_ts = base + 9 * STEP
+        index = {int(b.timestamp): b for b in closed_bars(bars, "5", peak_ts + 3 * STEP)}
+        self.assertEqual(qualify_m5_pivot(index, peak_ts, "short"), "break_30m")
+        pyl = evaluate_pyl(state, peak_ts + 3 * STEP, None)
+        self.assertFalse(pyl["passed"])
+        self.assertNotIn("htf_15m", pyl["failed"])
+        self.assertIn("htf_30m", pyl["failed"])
+
+    def test_higher_low_is_long(self) -> None:
+        base = _aligned_base()
+        highs = [12] * 12
+        lows = [8, 8.2, 8.1, 8.4, 8.3, 8.5, 9, 9.1, 9.2, 10, 11, 11]
+        bars = _bars(base, highs, lows)
+        state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
+        state.bars_htf["5"] = bars
+        trough_ts = base + 9 * STEP
+        pyl = evaluate_pyl(state, trough_ts + 3 * STEP, None)
+        self.assertTrue(pyl["passed"], pyl.get("failed"))
+        self.assertEqual(pyl.get("side"), "long")
+        self.assertEqual(pyl["metrics"]["pivot_time_ms"], trough_ts)
+
+    def test_pending_after_first_right_bar(self) -> None:
+        state, now_ms, peak_ts = _lower_high_state()
+        self.assertFalse(htf_second_bar_pending(state, now_ms))
+        state.bars_htf["5"] = [b for b in state.bars_htf["5"] if int(b.timestamp) <= peak_ts + STEP]
+        pending_now = peak_ts + 2 * STEP + 1_000
+        self.assertTrue(htf_second_bar_pending(state, pending_now))
 
 
 class PivotConfirmClockTest(unittest.TestCase):

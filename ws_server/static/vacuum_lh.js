@@ -1898,8 +1898,8 @@ function renderVacuumDesk() {
   if (summary) {
     const rule =
       vacuumLhState.mode === "vps5"
-        ? "Тот же вход, что у баблососа: 10 секунд после второй свечи. Стоп −10%, трейл пик − 10 пунктов."
-        : "5 мин: максимум → шорт, минимум → лонг. Вход и закрытие в 10 секунд после второй свечи. Стоп ±5% от свечи экстремума.";
+        ? "Тот же вход, что у баблососа: экстремум 15м, вход на 3-й свече 5м. Стоп −10%, трейл пик − 10 пунктов."
+        : "5м экстремум своей 15м и слабее предыдущей, без пробоя 30м. Вход на 3-й свече, 10 секунд. Стоп ±5% от свечи экстремума.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>

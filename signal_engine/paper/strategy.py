@@ -46,7 +46,8 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
-from signal_engine.paper.pivot_clock import just_confirmed, symbols_waiting_second_bar
+from signal_engine.paper.m5_htf import symbols_waiting_htf_second_bar
+from signal_engine.paper.pivot_clock import just_confirmed
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_pyl
 from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
@@ -1878,7 +1879,7 @@ class PaperStrategy:
             self._confirm_arm |= opens
             return
         self._confirm_arm_at = now_ms
-        armed = symbols_waiting_second_bar(states, now_ms, config.PAPER_PYL_INTERVAL)
+        armed = symbols_waiting_htf_second_bar(states, now_ms)
         armed |= opens
         self._confirm_arm = armed
 

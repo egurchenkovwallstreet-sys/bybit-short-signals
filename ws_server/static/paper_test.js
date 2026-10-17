@@ -832,7 +832,7 @@
       const total = mandatory().length;
       if (!rows.length) {
         table.innerHTML =
-          '<tbody><tr><td class="quiet">Нет сигналов: ждём новый pivot 5m (LH-скан L15–L30, gap 30).</td></tr></tbody>';
+          '<tbody><tr><td class="quiet">Нет сигналов: ждём экстремум 5м своей 15м, слабее предыдущей 15м и без пробоя 30м.</td></tr></tbody>';
         return;
       }
       table.innerHTML = `<thead><tr>
