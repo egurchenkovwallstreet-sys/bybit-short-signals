@@ -46,7 +46,7 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
-from signal_engine.paper.m5_htf import opposite_appeared, symbols_waiting_htf_second_bar
+from signal_engine.paper.m5_htf import opposite_appeared, opposite_pivot_exit_signal, symbols_waiting_htf_second_bar
 from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, symbols_waiting_second_bar
 from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_htf_pivot_entry, evaluate_pyl
 from signal_engine.paper.position import bab_pivot_stop_price
@@ -1955,11 +1955,22 @@ class PaperStrategy:
             if open_key in self.trades:
                 trade = self.trades[open_key]
                 closed_side = trade.pos.side
-                raw_exit = opposite_appeared(state, now_ms, closed_side, trade.pos.opened_at, interval)
-                confirmed_exit = bool(fresh and side and side != closed_side)
-                if raw_exit or confirmed_exit:
+                exit_hit = opposite_pivot_exit_signal(
+                    state, now_ms, closed_side, trade.pos.opened_at, interval
+                )
+                if exit_hit:
+                    opp_ts = int(exit_hit["pivot_time_ms"])
                     self._close_trade(trade, "opposite_pivot", state, now_ms)
-                    if confirmed_exit:
+                    m = ev_clean.get("metrics") or {}
+                    new_side = ev_clean.get("side") or m.get("side")
+                    same_pivot = int(m.get("pivot_time_ms") or 0) == opp_ts
+                    if (
+                        same_pivot
+                        and ev_clean.get("passed")
+                        and new_side
+                        and new_side != closed_side
+                        and entry_on_third_bar(opp_ts, now_ms, interval)
+                    ):
                         balance = self.balances[variant]
                         margin = balance * config.PAPER_MARGIN_PCT / 100.0
                         if margin > 0 and balance - self.used_margin(variant) >= margin:

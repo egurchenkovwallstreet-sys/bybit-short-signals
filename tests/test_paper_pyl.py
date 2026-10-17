@@ -23,6 +23,7 @@ from signal_engine.paper.m5_htf import (
     htf_second_bar_pending,
     m5_htf_setup,
     opposite_appeared,
+    opposite_pivot_exit_signal,
     qualify_m5_pivot,
 )
 from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_htf_pivot_entry, evaluate_pyl
@@ -222,6 +223,12 @@ class M5HtfGateTest(unittest.TestCase):
         self.assertIsNotNone(hit)
         self.assertEqual(hit["side"], "short")
         self.assertEqual(hit["pivot_time_ms"], peak_ts)
+        self.assertIsNone(
+            opposite_pivot_exit_signal(state, peak_ts + 2 * STEP + 1_000, "long", base, "5")
+        )
+        self.assertIsNotNone(
+            opposite_pivot_exit_signal(state, peak_ts + 3 * STEP, "long", base, "5")
+        )
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "short", peak_ts, "5"))
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "long", now_ms + 11_000, "5"))
 

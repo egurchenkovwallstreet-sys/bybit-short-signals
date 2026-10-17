@@ -257,6 +257,22 @@ def symbols_waiting_htf_second_bar(states: dict[str, SymbolState], now_ms: int) 
     return {symbol for symbol, state in states.items() if htf_second_bar_pending(state, now_ms)}
 
 
+def opposite_pivot_exit_signal(
+    state: SymbolState,
+    now_ms: int,
+    open_side: str,
+    opened_at_ms: int,
+    interval: str = "5",
+) -> dict | None:
+    """БАБЛОСОС: выход, когда у противоположного pivot закрылась 2-я свеча справа."""
+    hit = opposite_appeared(state, now_ms, open_side, opened_at_ms, interval)
+    if not hit:
+        return None
+    if int(now_ms) < second_bar_close_ms(int(hit["pivot_time_ms"]), interval):
+        return None
+    return hit
+
+
 def opposite_appeared(
     state: SymbolState,
     now_ms: int,
