@@ -53,6 +53,8 @@ class Engine:
         self.watches.open()
         if self.paper is not None:
             self.paper.open()
+            for sym in self.paper.bab_open_symbols():
+                self.symbols.setdefault(sym, SymbolState(sym))
         if self.pump_lab is not None:
             self.pump_lab.open()
         for signal in self.store.load_open():

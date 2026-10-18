@@ -562,8 +562,22 @@ class PaperStrategy:
 
     # --- скан ---
 
+    def bab_open_symbols(self) -> set[str]:
+        desk = {
+            config.PAPER_PYL_VARIANT,
+            config.PAPER_PYL1_VARIANT,
+            config.PAPER_VPS5_VARIANT,
+            config.PAPER_VPS15_VARIANT,
+        }
+        return {t.symbol for t in self.trades.values() if t.variant in desk and t.variant in VARIANTS}
+
+    def process_bab_opposite_exits(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        """Жёсткое закрытие по противоп. pivot — каждый тик скана, не только окно 5m."""
+        self._process_bab_opposite_exits(states, now_ms)
+
     def scan(self, states: dict[str, SymbolState], now_ms: int, *, pivots: bool = True) -> dict:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
+        self._process_bab_opposite_exits(states, now_ms)
         self._process_manual_closes(states, now_ms)
         self._refresh_peaks(states, now_ms)
         if config.PAPER_LT20_VARIANT in VARIANTS:
@@ -1953,6 +1967,36 @@ class PaperStrategy:
 
     def _five_min_entry_window(self, entry: dict, now_ms: int) -> bool:
         return self._pivot_entry_window(entry, now_ms, config.PAPER_PYL_INTERVAL)
+
+    def _process_bab_opposite_exits(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        specs: list[tuple[str, str, str]] = []
+        if config.PAPER_PYL_VARIANT in VARIANTS:
+            specs.append((config.PAPER_PYL_VARIANT, config.PAPER_PYL_INTERVAL, "pyl"))
+        if config.PAPER_PYL1_VARIANT in VARIANTS:
+            specs.append((config.PAPER_PYL1_VARIANT, config.PAPER_PYL_INTERVAL, "pyl1"))
+        if config.PAPER_VPS5_VARIANT in VARIANTS:
+            specs.append((config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "vps5"))
+        if config.PAPER_VPS15_VARIANT in VARIANTS:
+            specs.append((config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "vps15"))
+        for variant, interval, _kind in specs:
+            for (v, symbol), trade in list(self.trades.items()):
+                if v != variant:
+                    continue
+                state = states.get(symbol)
+                if state is None or not state.last_price:
+                    continue
+                closed_side = trade.pos.side
+                exit_hit: dict | None = None
+                if interval == "15":
+                    exit_hit = opposite_anchor_pivot_exit(
+                        state, now_ms, closed_side, trade.pos.opened_at, interval
+                    )
+                else:
+                    exit_hit = opposite_pivot_exit_signal(
+                        state, now_ms, closed_side, trade.pos.opened_at, interval
+                    )
+                if exit_hit:
+                    self._close_trade(trade, "opposite_pivot", state, now_ms)
 
     def _evaluate_pyl(self, states: dict[str, SymbolState], now_ms: int) -> None:
         self._evaluate_bab_pivot_desk(

@@ -60,12 +60,20 @@ class SignalService:
                 if message and message.get("type") == "message":
                     self._ingest_raw(message.get("data"))
                 now = time.monotonic()
-                if now >= next_scan and not self._confirm_burst:
+                if now >= next_scan:
                     ts = int(time.time() * 1000)
-                    boards = now >= next_boards
+                    boards = now >= next_boards and not self._confirm_burst
                     pivots = (ts % 300_000) <= config.PAPER_PIVOT_EVAL_WINDOW_MS
-                    for item in self.engine.scan(ts, boards=boards, pivots=pivots):
-                        self._publisher.publish(item)
+                    paper = self.engine.paper
+                    if paper is not None:
+                        from signal_engine.state import SymbolState
+
+                        for sym in paper.bab_open_symbols():
+                            self.engine.symbols.setdefault(sym, SymbolState(sym))
+                        paper.process_bab_opposite_exits(self.engine.symbols, ts)
+                    if not self._confirm_burst:
+                        for item in self.engine.scan(ts, boards=boards, pivots=pivots):
+                            self._publisher.publish(item)
                     next_scan = now + config.MARKET_SCAN_INTERVAL_SEC
                     if boards:
                         next_boards = now + config.PUMP_BOARD_INTERVAL_SEC
