@@ -132,8 +132,40 @@ function vacuumPivotMatchCount(p) {
 
 function vacuumLeftStrength(p) {
   const ls = Number(p?.left_strength);
-  if (ls >= 15 && ls <= 30) return ls;
-  return 15;
+  if (Number.isFinite(ls) && ls > 0) return Math.round(ls);
+  return 0;
+}
+
+function vacuumPivotStableKey(p) {
+  const t = Number(p?.time_ms ?? p?.time);
+  const price = Number(p?.price);
+  if (!t || !price) return null;
+  return `${t}:${price.toFixed(8)}`;
+}
+
+function vacuumFreezeAnchorList(prevList, incoming) {
+  const map = new Map();
+  for (const p of prevList || []) {
+    const k = vacuumPivotStableKey(p);
+    if (k) map.set(k, { ...p });
+  }
+  for (const p of incoming || []) {
+    const k = vacuumPivotStableKey(p);
+    if (!k) continue;
+    const prev = map.get(k);
+    if (!prev) {
+      map.set(k, { ...p });
+      continue;
+    }
+    map.set(k, {
+      ...prev,
+      tf_match_count: Math.max(Number(prev.tf_match_count) || 0, Number(p.tf_match_count) || 0) || prev.tf_match_count,
+      tf_matches: prev.tf_matches?.length ? prev.tf_matches : p.tf_matches,
+      confluence: prev.confluence ?? p.confluence,
+      index: prev.index ?? p.index,
+    });
+  }
+  return [...map.values()].sort((a, b) => Number(a.time_ms || a.time || 0) - Number(b.time_ms || b.time || 0));
 }
 
 function vacuumPivotLineStyle(p, fallbackColor, kind) {
@@ -179,10 +211,10 @@ function formatVacuumInfoPivot(p, prefix, lhTf) {
     n >= 2 && p.tf_matches?.length
       ? ` · <span class="vacuum-lh-peak-tag">${p.tf_matches.map(labelTf).join(", ")}</span>`
       : "";
-  const str =
-    p.left_strength >= 16
-      ? ` <span class="vacuum-lh-peak-tag" title="Свечей слева не перебили">L${p.left_strength}</span>`
-      : "";
+  const ls = vacuumLeftStrength(p);
+  const str = ls
+    ? ` <span class="vacuum-lh-peak-tag" title="Свечей слева при формировании">L${ls}</span>`
+    : "";
   return `<li class="${cls}">${prefix}${p.index}: <strong>${p.price}</strong>${str}${n >= 2 ? ` <span class="vacuum-lh-peak-tag">×${n} TF</span>` : ""} (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})${tfNote}</li>`;
 }
 
@@ -491,7 +523,9 @@ function vacuumUnionPivots(lists) {
         continue;
       }
       const next = { ...prev, ...point };
-      next.left_strength = Math.max(Number(prev.left_strength) || 0, Number(point.left_strength) || 0);
+      const prevLs = Number(prev.left_strength) || 0;
+      const nextLs = Number(point.left_strength) || 0;
+      next.left_strength = prevLs > 0 ? prevLs : nextLs;
       if ((Number(prev.tf_match_count) || 0) > (Number(point.tf_match_count) || 0)) {
         next.tf_match_count = prev.tf_match_count;
         next.tf_matches = prev.tf_matches;
@@ -516,7 +550,7 @@ function vacuumApplyChain(anchors, chain) {
       tf_match_count: hit.tf_match_count ?? point.tf_match_count,
       tf_matches: hit.tf_matches || point.tf_matches,
       confluence: hit.confluence ?? point.confluence,
-      left_strength: hit.left_strength || point.left_strength,
+      left_strength: Number(point.left_strength) > 0 ? point.left_strength : hit.left_strength,
     };
   });
 }
@@ -736,10 +770,20 @@ async function loadVacuumChartDisplay(resetScale) {
 function vacuumStoreSeries(symbol, interval, payload) {
   if (!symbol || !interval || !payload?.candles?.length) return;
   const prev = vacuumSeriesEntry(symbol, interval);
+  const anchorPeaks = vacuumFreezeAnchorList(
+    prev?.frozenAnchorPeaks || prev?.anchorPeaks,
+    payload.anchor_peaks || [],
+  );
+  const anchorTroughs = vacuumFreezeAnchorList(
+    prev?.frozenAnchorTroughs || prev?.anchorTroughs,
+    payload.anchor_troughs || [],
+  );
   vacuumLhState.series.set(vacuumSeriesKey(symbol, interval), {
     candles: payload.candles,
-    anchorPeaks: payload.anchor_peaks || [],
-    anchorTroughs: payload.anchor_troughs || [],
+    anchorPeaks,
+    anchorTroughs,
+    frozenAnchorPeaks: anchorPeaks,
+    frozenAnchorTroughs: anchorTroughs,
     chainPeaks: payload.peaks || [],
     chainTroughs: payload.troughs || [],
     at: Date.now(),
@@ -1163,8 +1207,14 @@ function mergeVacuumDetail(data) {
     ...prev,
     ...data,
     signal: data.signal || prevSignal,
-    anchor_peaks: data.anchor_peaks ?? prev.anchor_peaks,
-    anchor_troughs: data.anchor_troughs ?? prev.anchor_troughs,
+    anchor_peaks:
+      data.anchor_peaks != null
+        ? vacuumFreezeAnchorList(prev.anchor_peaks, data.anchor_peaks)
+        : prev.anchor_peaks,
+    anchor_troughs:
+      data.anchor_troughs != null
+        ? vacuumFreezeAnchorList(prev.anchor_troughs, data.anchor_troughs)
+        : prev.anchor_troughs,
     peaks: data.peaks ?? prev.peaks,
     troughs: data.troughs ?? prev.troughs,
   };
@@ -1436,85 +1486,46 @@ function vacuumMarkerTimeKey(time) {
   return BC?.barTimeKey ? BC.barTimeKey(time) : String(time);
 }
 
-function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
-  const markers = [];
-  const iv = chartInterval || vacuumLhState.chartInterval || "60";
-  const colors = kind === "trough" ? TROUGH_COLORS : PEAK_COLORS;
+function vacuumPivotLabelText(p, kind, inChain, i) {
   const prefix = kind === "trough" ? "HL" : "LH";
-  const position = kind === "trough" ? "belowBar" : "aboveBar";
-  points.forEach((p, i) => {
-    const price = Number(p.price);
-    if (!price) return;
-    const inChain = chainKeys?.has(vacuumPivotKey(p));
-    const baseColor = colors[i % colors.length];
-    const n = vacuumPivotMatchCount(p);
-    const ls = vacuumLeftStrength(p);
-    let style = inChain
-      ? vacuumPivotLineStyle(p, baseColor, kind)
-      : vacuumPivotLineStyle(p, baseColor, kind);
-    if (!inChain) {
-      const a = style.amp ?? 0.5;
-      style = {
-        ...style,
-        color: kind === "trough" ? `rgba(76,201,240,${0.45 + a * 0.45})` : `rgba(233,196,106,${0.45 + a * 0.45})`,
-      };
-    }
-    const lsTag = ls >= 16 ? `L${ls}` : "";
-    const label = inChain
-      ? n >= 2
-        ? `${prefix}${p.index || i + 1}·${n}TF${lsTag ? ` ${lsTag}` : ""}`
-        : `${prefix}${p.index || i + 1}${lsTag ? ` ${lsTag}` : ""}`
-      : lsTag || (kind === "trough" ? "L" : "H");
-    const barTime = vacuumMarkerBarTime(runtime, p, iv);
-    if (!barTime) return;
-    const rank = (inChain ? 1000 : 0) + ls * 10 + n;
-    markers.push({
-      time: barTime,
-      position,
-      color: style.color,
-      shape: n >= 2 || ls >= 22 ? "square" : "circle",
-      text: label,
-      _rank: rank,
-    });
-  });
-  return markers;
+  const n = vacuumPivotMatchCount(p);
+  const ls = vacuumLeftStrength(p);
+  const lsTag = ls ? ` L${ls}` : "";
+  if (inChain) {
+    const head = `${prefix}${p.index || i + 1}`;
+    return n >= 2 ? `${head}×${n}TF${lsTag}` : `${head}${lsTag}`;
+  }
+  return ls ? `L${ls}` : kind === "trough" ? "HL" : "LH";
 }
 
-function vacuumTradeChartMarkers(runtime, symbol, chartInterval) {
-  const iv = chartInterval || vacuumChartIv(runtime);
-  const markers = [];
-  for (const trade of vacuumSymbolTrades(symbol)) {
-    const side = vacuumTradeSide(trade);
-    if (side !== "long" && side !== "short") continue;
-    const entryMs = vacuumTradeEntryMs(trade);
-    const barTime = vacuumEventBarTime(runtime, entryMs, iv);
-    if (!barTime) continue;
-    const long = side === "long";
-    markers.push({
-      time: barTime,
-      position: long ? "belowBar" : "aboveBar",
-      color: long ? "#16a34a" : "#dc2626",
-      shape: long ? "arrowUp" : "arrowDown",
-      text: long ? "L" : "S",
-      _rank: 2500,
-    });
-    if (!trade._open && trade.closed_at) {
-      const exitBar = vacuumEventBarTime(runtime, Number(trade.closed_at), iv);
-      if (exitBar) {
-        const exitPx = Number(trade.exit_price || trade.last_price);
-        const plus = vacuumTradePlus(vacuumTradePnl(trade, exitPx));
-        markers.push({
-          time: exitBar,
-          position: long ? "aboveBar" : "belowBar",
-          color: plus ? "#16a34a" : "#dc2626",
-          shape: "square",
-          text: plus ? "✓" : "✕",
-          _rank: 2400,
-        });
-      }
-    }
-  }
-  return markers;
+function vacuumPivotMarkHtml(runtime, p, chartInterval, kind, inChain, i, hostW) {
+  const price = Number(p.price);
+  if (!price) return "";
+  const iv = chartInterval || vacuumLhState.chartInterval || "60";
+  const barTime = vacuumMarkerBarTime(runtime, p, iv);
+  if (barTime == null) return "";
+  const x = runtime.chart.timeScale().timeToCoordinate(barTime);
+  const y = runtime.series.priceToCoordinate(price);
+  if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
+  const n = vacuumPivotMatchCount(p);
+  const ls = vacuumLeftStrength(p);
+  const tone =
+    n >= 3 ? "x3" : n >= 2 ? "x2" : inChain ? "chain" : ls >= 22 ? "strong" : "anchor";
+  const long = kind === "trough";
+  const shift = long ? "translate(-50%, 4px)" : "translate(-50%, calc(-100% - 4px))";
+  const label = vacuumPivotLabelText(p, kind, inChain, i);
+  return `<div class="vacuum-pivot-mark ${kind} ${tone}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}">${label}</div>`;
+}
+
+function vacuumPivotMarksHtml(runtime, points, chartInterval, kind, chainKeys) {
+  const hostW = runtime?.chart ? document.getElementById("vacuum-trade-overlay")?.clientWidth || 0 : 0;
+  const parts = [];
+  (points || []).forEach((p, i) => {
+    const inChain = chainKeys?.has(vacuumPivotKey(p));
+    const html = vacuumPivotMarkHtml(runtime, p, chartInterval, kind, inChain, i, hostW);
+    if (html) parts.push(html);
+  });
+  return parts.join("");
 }
 
 function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
@@ -1522,34 +1533,19 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   clearVacuumLhOverlays(runtime);
   runtime._vacuumPeakLines = [];
   runtime._vacuumTroughLines = [];
-  const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
-  const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
-  const sym = vacuumLhState.selected;
-  const raw = [
-    ...vacuumLhPivotMarkers(runtime, peaks || [], chartInterval, "peak", chainPeakKeys),
-    ...vacuumLhPivotMarkers(runtime, troughs || [], chartInterval, "trough", chainTroughKeys),
-    ...(sym ? vacuumTradeChartMarkers(runtime, sym, chartInterval) : []),
-  ];
-  const byTime = new Map();
-  for (const m of raw) {
-    const k = vacuumMarkerTimeKey(m.time);
-    const prev = byTime.get(k);
-    if (!prev || (m._rank || 0) > (prev._rank || 0)) byTime.set(k, m);
+  try {
+    runtime.series.setMarkers([]);
+  } catch (_e) {
+    /* ignore */
   }
-  const markers = [...byTime.values()]
-    .map(({ _rank, ...rest }) => rest)
-    .sort((a, b) => {
-      const ta = window.boardChart.barTimeToSec(a.time);
-      const tb = window.boardChart.barTimeToSec(b.time);
-      return ta - tb;
-    });
-  if (markers.length) {
-    try {
-      runtime.series.setMarkers(markers);
-    } catch (_e) {
-      /* ignore */
-    }
-  }
+  runtime._vacPivotMarksHtml = (() => {
+    const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
+    const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
+    return (
+      vacuumPivotMarksHtml(runtime, peaks || [], chartInterval, "peak", chainPeakKeys) +
+      vacuumPivotMarksHtml(runtime, troughs || [], chartInterval, "trough", chainTroughKeys)
+    );
+  })();
   drawVacuumTradeOverlay(runtime);
 }
 
@@ -1715,7 +1711,7 @@ function vacuumExitMark(runtime, trade, hostW) {
   const y = exitPx > 0 ? runtime.series.priceToCoordinate(exitPx) : null;
   if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
   const plus = vacuumTradePlus(vacuumTradePnl(trade, exitPx));
-  return `<div class="vacuum-trade-mark ${plus ? "plus" : "minus"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:translate(-50%,-50%)">${plus ? "✓" : "✕"}</div>`;
+  return `<div class="vacuum-trade-exit ${plus ? "plus" : "minus"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:translate(-50%,-50%)" title="Выход">${plus ? "✓" : "✕"}</div>`;
 }
 
 function vacuumTradeHudCard(trade, money) {
@@ -1747,17 +1743,19 @@ function drawVacuumTradeOverlay(runtime) {
   }
   const live = vacuumChartLivePrice(runtime, symbol);
   const trades = vacuumSymbolTrades(symbol);
-  if (!trades.length) {
+  if (!trades.length && !runtime._vacPivotMarksHtml) {
     el.innerHTML = "";
     return;
   }
   const hostW = el.clientWidth || 0;
   const nowMs = Date.now();
-  const parts = [];
+  const parts = [runtime._vacPivotMarksHtml || ""];
   const hud = [];
   for (const trade of trades) {
     const entry = Number(trade.entry_price);
     if (!(entry > 0) || !trade.opened_at) continue;
+    parts.push(vacuumEntryArrow(runtime, trade, hostW));
+    parts.push(vacuumExitMark(runtime, trade, hostW));
     if (!trade._open) continue;
     const current = vacuumTradeCurrentPrice(trade, live);
     const money = vacuumTradePnl(trade, current);

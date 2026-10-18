@@ -298,10 +298,9 @@ def union_pivot_points(*groups: list | None) -> list[dict]:
                 if value in (None, "", []):
                     continue
                 item[field] = value
-            item["left_strength"] = max(
-                int(prev.get("left_strength") or 0),
-                int(raw.get("left_strength") or 0),
-            )
+            prev_ls = int(prev.get("left_strength") or 0)
+            raw_ls = int(raw.get("left_strength") or 0)
+            item["left_strength"] = prev_ls if prev_ls > 0 else raw_ls
             if int(prev.get("tf_match_count") or 0) > int(raw.get("tf_match_count") or 0):
                 item["tf_match_count"] = prev.get("tf_match_count")
                 item["tf_matches"] = prev.get("tf_matches")
@@ -376,7 +375,7 @@ def project_peaks_to_chart(peaks: list[dict], chart_interval: str) -> list[dict]
                 "time_ms": t,
                 "time_chart_ms": t_chart,
                 "lh_interval": chart_interval,
-                "left_strength": int(p.get("left_strength") or config.VACUUM_LH_PIVOT_LEFT),
+                "left_strength": int(p.get("left_strength") or 0),
             }
         )
     return out
@@ -396,7 +395,7 @@ def project_troughs_to_chart(troughs: list[dict], chart_interval: str) -> list[d
                 "time_ms": t,
                 "time_chart_ms": t_chart,
                 "hl_interval": chart_interval,
-                "left_strength": int(p.get("left_strength") or config.VACUUM_LH_PIVOT_LEFT),
+                "left_strength": int(p.get("left_strength") or 0),
             }
         )
     return out
