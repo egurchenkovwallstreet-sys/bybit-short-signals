@@ -1582,11 +1582,51 @@ function vacuumFmtTradePnl(money) {
   return `${roe} · ${usd}`;
 }
 
+function clearVacuumEntryPriceLines(runtime) {
+  if (!runtime?.series) return;
+  for (const pl of runtime._vacEntryPriceLines || []) {
+    try {
+      runtime.series.removePriceLine(pl);
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+  runtime._vacEntryPriceLines = [];
+}
+
+function syncVacuumEntryPriceLines(runtime, symbol) {
+  clearVacuumEntryPriceLines(runtime);
+  if (!symbol) return;
+  const trades = vacuumSymbolTrades(symbol);
+  if (!trades.length) return;
+  trades.sort((a, b) => Number(b.opened_at || 0) - Number(a.opened_at || 0));
+  const t = trades.find((x) => x._open) || trades[0];
+  const entry = Number(t.entry_price);
+  if (!(entry > 0)) return;
+  const long = vacuumTradeSide(t) === "long";
+  const color = long ? "#4ade80" : "#f87171";
+  try {
+    runtime._vacEntryPriceLines = [
+      runtime.series.createPriceLine({
+        price: entry,
+        color,
+        lineWidth: 1,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: "вход",
+      }),
+    ];
+  } catch (_e) {
+    runtime._vacEntryPriceLines = [];
+  }
+}
+
 function clearVacuumLhOverlays(runtime) {
   if (!runtime?.series) return;
   runtime._vacuumPeakLines = [];
   runtime._vacuumTroughLines = [];
   runtime._vacPivotMarksHtml = "";
+  clearVacuumEntryPriceLines(runtime);
   const ov = document.getElementById("vacuum-trade-overlay");
   if (ov) ov.innerHTML = "";
 }
@@ -1866,6 +1906,7 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   } catch (_e) {
     /* ignore */
   }
+  if (sym) syncVacuumEntryPriceLines(runtime, sym);
   const ov = document.getElementById("vacuum-trade-overlay");
   if (ov) ov.innerHTML = "";
 }
