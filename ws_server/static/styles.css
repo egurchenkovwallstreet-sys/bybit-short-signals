@@ -334,6 +334,22 @@ body {
   color: #f87171;
 }
 
+.vacuum-info-trade {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.vacuum-info-trade.open {
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.vacuum-info-trade.closed {
+  border-color: rgba(148, 163, 184, 0.25);
+}
+
 .vacuum-trade-hud {
   position: absolute;
   top: 8px;

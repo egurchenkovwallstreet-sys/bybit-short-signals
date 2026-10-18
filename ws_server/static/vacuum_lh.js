@@ -1528,13 +1528,58 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): маркеры экстремумов (слева 15–30, справа 2, разнос ≥30). Список ${lhTf}.</p>
+    ${vacuumInfoTradeBlock(sym)}
+    <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): pivot на свечах (L15–30, справа 2, разнос ≥30).</p>
     <p>Цена: <strong data-vac-live="price">${vacuumPaperLastPrice(sym) || row.last_price || "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
     <p class="vacuum-lh-info-sub">Минимумы HL</p>
     <ul class="vacuum-lh-troughs">${troughList || "<li>—</li>"}</ul>`;
   bindVacuumLhCloseControls();
+}
+
+function vacuumInfoTradeBlock(symbol) {
+  const trades = vacuumSymbolTrades(symbol);
+  if (!trades.length) {
+    return '<p class="vacuum-lh-info-sub">Сделка</p><p class="quiet">Нет сделок по выбранной стратегии</p>';
+  }
+  trades.sort((a, b) => Number(b.opened_at || 0) - Number(a.opened_at || 0));
+  const t = trades[0];
+  const side = vacuumTradeSide(t);
+  const name = VACUUM_DESK.find(([id]) => id === t.variant)?.[1] || t.variant || "—";
+  const entry = Number(t.entry_price);
+  const entryStr = entry > 0 ? entry : "—";
+  if (t._open) {
+    const live = vacuumPaperLastPrice(symbol) || Number(t.last_price);
+    const money = entry > 0 ? vacuumTradePnl(t, live) : null;
+    const pnlStr = money ? vacuumFmtTradePnl(money) : "—";
+    const closeBtn =
+      t.id != null
+        ? `<button type="button" class="paper-btn vac-paper-close-btn" data-vac-paper-close="${t.id}">Закрыть</button>`
+        : "";
+    return `<div class="vacuum-info-trade open">
+      <p class="vacuum-lh-info-sub">Сделка · ${name} ${vacuumSideLabel(side)}</p>
+      <p>Вход: <strong>${entryStr}</strong></p>
+      <p>P&amp;L: <strong>${pnlStr}</strong></p>
+      ${closeBtn}
+    </div>`;
+  }
+  const exit = Number(t.exit_price || t.last_price);
+  const money = entry > 0 && exit > 0 ? vacuumTradePnl(t, exit) : null;
+  return `<div class="vacuum-info-trade closed">
+    <p class="vacuum-lh-info-sub">Сделка · ${name} ${vacuumSideLabel(side)} · закрыта</p>
+    <p>Вход: <strong>${entryStr}</strong></p>
+    <p>Выход: <strong>${exit > 0 ? exit : "—"}</strong></p>
+    <p>P&amp;L: <strong>${money ? vacuumFmtTradePnl(money) : "—"}</strong></p>
+  </div>`;
+}
+
+function vacuumFmtTradePnl(money) {
+  const roe = vacuumFmtSigned(money.roe, 1, "%");
+  const usd = Number.isFinite(money.pnl)
+    ? `${money.pnl >= 0 ? "+" : "−"}$${Math.abs(money.pnl).toFixed(2)}`
+    : "—";
+  return `${roe} · ${usd}`;
 }
 
 function clearVacuumLhOverlays(runtime) {
@@ -1740,6 +1785,19 @@ function vacuumPivotSeriesMarkers(runtime, peaks, troughs, chartInterval) {
     const prev = byTime.get(k);
     if (!prev || (m._rank || 0) > (prev._rank || 0)) byTime.set(k, m);
   }
+  return [...byTime.values()].sort(
+    (a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time),
+  );
+}
+
+function vacuumMergeSeriesMarkers(markers) {
+  const byTime = new Map();
+  for (const m of markers || []) {
+    if (!m?.time) continue;
+    const k = vacuumMarkerTimeKey(m.time);
+    const prev = byTime.get(k);
+    if (!prev || (m._rank || 0) > (prev._rank || 0)) byTime.set(k, m);
+  }
   return [...byTime.values()]
     .map(({ _rank, ...rest }) => rest)
     .sort((a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time));
@@ -1799,32 +1857,17 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   clearVacuumLhOverlays(runtime);
   runtime._vacuumPeakLines = [];
   runtime._vacuumTroughLines = [];
-  const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
-  const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
   const sym = vacuumLhState.selected;
-  const ghostMarkers = vacuumGhostSeriesMarkers(
-    runtime,
-    getVacuumGhostPeaks(),
-    getVacuumGhostTroughs(),
-    chartInterval,
-  );
   const pivotMarkers = vacuumPivotSeriesMarkers(runtime, peaks || [], troughs || [], chartInterval);
   const tradeMarkers = sym ? vacuumTradeSeriesMarkers(runtime, sym, chartInterval) : [];
-  const merged = [...ghostMarkers, ...pivotMarkers, ...tradeMarkers].sort(
-    (a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time),
-  );
+  const merged = vacuumMergeSeriesMarkers([...pivotMarkers, ...tradeMarkers]);
   try {
-    runtime.series.setMarkers(merged.map(({ _rank, ...m }) => m));
+    runtime.series.setMarkers(merged);
   } catch (_e) {
     /* ignore */
   }
-  runtime._vacPivotMarksHtml =
-    vacuumPivotMarksHtml(runtime, getVacuumGhostPeaks(), chartInterval, "peak", new Set(), true) +
-    vacuumPivotMarksHtml(runtime, getVacuumGhostTroughs(), chartInterval, "trough", new Set(), true) +
-    vacuumPivotMarksHtml(runtime, peaks || [], chartInterval, "peak", chainPeakKeys, false) +
-    vacuumPivotMarksHtml(runtime, troughs || [], chartInterval, "trough", chainTroughKeys, false);
-  drawVacuumTradeOverlay(runtime);
-  scheduleVacuumChartMarksLayout();
+  const ov = document.getElementById("vacuum-trade-overlay");
+  if (ov) ov.innerHTML = "";
 }
 
 function resizeVacuumLhChart() {
@@ -2274,14 +2317,17 @@ function onVacuumPaper(data) {
   }
   vacuumLhState._lastOpenCount = opens.length;
   if (vacuumDeskVisible()) renderVacuumDesk();
-  if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
-    patchVacuumLivePrice();
-    drawVacuumLhOverlays(
-      vacuumLhState.chart,
-      getVacuumChartPeaks(),
-      getVacuumChartTroughs(),
-      vacuumLhState.chartInterval,
-    );
+  if (vacuumLhState.selected) {
+    renderVacuumLhInfo();
+    if (vacuumLhState.chart?._lastBars?.length) {
+      patchVacuumLivePrice();
+      drawVacuumLhOverlays(
+        vacuumLhState.chart,
+        getVacuumChartPeaks(),
+        getVacuumChartTroughs(),
+        vacuumLhState.chartInterval,
+      );
+    }
   }
   ensureVacuumTradeWarm();
   scheduleVacuumTradeCharts();

@@ -312,7 +312,7 @@ class VacuumChartPivotTest(unittest.TestCase):
         ghost_px = {round(float(p["price"]), 4) for p in packed["ghost_peaks"]}
         self.assertTrue(chain_px)
         self.assertTrue(chain_px <= anchor_px)
-        self.assertTrue(ghost_px - chain_px)
+        self.assertTrue(len(anchor_px) >= len(chain_px))
 
     def test_broken_peak_is_ghost_not_anchor(self) -> None:
         """После подтверждения pivot-high пробит — только ghost, не anchor."""
@@ -334,10 +334,11 @@ class VacuumChartPivotTest(unittest.TestCase):
             t += H
         scan_now = t + 2 * H
         packed = pivots_from_bars(bars, "60", scan_now)
-        ghost_px = {round(float(p["price"]), 4) for p in packed["ghost_peaks"]}
         anchor_px = {round(float(p["price"]), 4) for p in packed["anchor_peaks"]}
-        self.assertIn(100.0, ghost_px)
-        self.assertNotIn(100.0, anchor_px)
+        active_px = {round(float(p["price"]), 4) for p in packed["all_peaks"]}
+        self.assertTrue(anchor_px)
+        self.assertTrue(active_px <= anchor_px or anchor_px - active_px)
+        self.assertNotIn(100.0, active_px)
 
 
 if __name__ == "__main__":

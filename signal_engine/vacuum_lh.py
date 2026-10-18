@@ -174,6 +174,7 @@ def _trim_chart_ghosts(ghost: list[dict]) -> list[dict]:
 
 
 def _filtered_pivot_highs(segment: list[Bar], pl: int, pl_max: int, pr: int) -> list[dict]:
+    """Стратегия / скан: только pivot, не перебитые после confirm."""
     gap = config.VACUUM_LH_PIVOT_MIN_GAP
     active, _ = _split_peaks_active_ghost(segment, pl, pl_max, pr, gap)
     return active
@@ -185,16 +186,31 @@ def _filtered_pivot_lows(segment: list[Bar], pl: int, pl_max: int, pr: int) -> l
     return active
 
 
-def _ghost_pivot_highs(segment: list[Bar], pl: int, pl_max: int, pr: int) -> list[dict]:
+def _chart_pivot_highs_filtered(segment: list[Bar], pl: int, pl_max: int, pr: int) -> tuple[list[dict], list[dict]]:
+    """График: все подтверждённые экстремумы после gap; ghost — только вытесненные в кластере."""
+    from signal_engine.swing_highs import filter_pivots_min_bar_gap_split
+
     gap = config.VACUUM_LH_PIVOT_MIN_GAP
-    _, ghost = _split_peaks_active_ghost(segment, pl, pl_max, pr, gap)
-    return ghost
+    raw = pivot_highs_floating_left(segment, pl, pl_max, pr)
+    return filter_pivots_min_bar_gap_split(raw, gap, kind="peak")
+
+
+def _chart_pivot_lows_filtered(segment: list[Bar], pl: int, pl_max: int, pr: int) -> tuple[list[dict], list[dict]]:
+    from signal_engine.swing_highs import filter_pivots_min_bar_gap_split
+
+    gap = config.VACUUM_LH_PIVOT_MIN_GAP
+    raw = pivot_lows_floating_left(segment, pl, pl_max, pr)
+    return filter_pivots_min_bar_gap_split(raw, gap, kind="trough")
+
+
+def _ghost_pivot_highs(segment: list[Bar], pl: int, pl_max: int, pr: int) -> list[dict]:
+    _, gap_replaced = _chart_pivot_highs_filtered(segment, pl, pl_max, pr)
+    return gap_replaced
 
 
 def _ghost_pivot_lows(segment: list[Bar], pl: int, pl_max: int, pr: int) -> list[dict]:
-    gap = config.VACUUM_LH_PIVOT_MIN_GAP
-    _, ghost = _split_troughs_active_ghost(segment, pl, pl_max, pr, gap)
-    return ghost
+    _, gap_replaced = _chart_pivot_lows_filtered(segment, pl, pl_max, pr)
+    return gap_replaced
 
 
 def _lookback_segment(bars: list[Bar], interval: str, now_ms: int) -> list[Bar]:
@@ -251,6 +267,31 @@ def ghost_anchor_troughs(bars: list[Bar], interval: str, now_ms: int) -> list[di
     ghost = _trim_chart_ghosts(_ghost_pivot_lows(segment, pl, pl_max, pr))
     ghost.sort(key=lambda p: int(p["time"]))
     return project_troughs_to_chart(ghost, interval)
+
+
+def chart_anchor_peaks(bars: list[Bar], interval: str, now_ms: int) -> list[dict]:
+    """Якоря для графика: реальные pivot-high после gap (в т.ч. позже перебитые)."""
+    segment = _lookback_segment(bars, interval, now_ms)
+    if not segment:
+        return []
+    pl = config.VACUUM_LH_PIVOT_LEFT
+    pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    pr = config.VACUUM_LH_PIVOT_RIGHT
+    filtered, _ = _chart_pivot_highs_filtered(segment, pl, pl_max, pr)
+    filtered.sort(key=lambda p: int(p["time"]))
+    return project_peaks_to_chart(filtered, interval)
+
+
+def chart_anchor_troughs(bars: list[Bar], interval: str, now_ms: int) -> list[dict]:
+    segment = _lookback_segment(bars, interval, now_ms)
+    if not segment:
+        return []
+    pl = config.VACUUM_LH_PIVOT_LEFT
+    pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    pr = config.VACUUM_LH_PIVOT_RIGHT
+    filtered, _ = _chart_pivot_lows_filtered(segment, pl, pl_max, pr)
+    filtered.sort(key=lambda p: int(p["time"]))
+    return project_troughs_to_chart(filtered, interval)
 
 
 def last_lower_high_peaks(
@@ -439,15 +480,17 @@ def pivots_from_bars(bars: list[Bar], interval: str, now_ms: int) -> dict:
             "peaks": [],
             "troughs": [],
         }
-    anchors_p = all_anchor_peaks(bars, interval, now_ms)
-    anchors_t = all_anchor_troughs(bars, interval, now_ms)
+    anchors_p = chart_anchor_peaks(bars, interval, now_ms)
+    anchors_t = chart_anchor_troughs(bars, interval, now_ms)
+    active_p = all_anchor_peaks(bars, interval, now_ms)
+    active_t = all_anchor_troughs(bars, interval, now_ms)
     ghost_p = ghost_anchor_peaks(bars, interval, now_ms)
     ghost_t = ghost_anchor_troughs(bars, interval, now_ms)
     chain_p = last_lower_high_peaks(bars, interval, now_ms)
     chain_t = last_higher_low_troughs(bars, interval, now_ms)
     return {
-        "all_peaks": anchors_p,
-        "all_troughs": anchors_t,
+        "all_peaks": active_p,
+        "all_troughs": active_t,
         "anchor_peaks": anchors_p,
         "anchor_troughs": anchors_t,
         "ghost_peaks": ghost_p,
