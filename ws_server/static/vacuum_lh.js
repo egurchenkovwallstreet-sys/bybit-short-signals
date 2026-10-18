@@ -336,7 +336,12 @@ function initVacuumLhTab() {
     openVacuumLhChart();
     if (vacuumLhState.chart?._lastBars?.length) {
       patchVacuumLivePrice();
-      drawVacuumTradeOverlay(vacuumLhState.chart);
+      drawVacuumLhOverlays(
+        vacuumLhState.chart,
+        getVacuumChartPeaks(),
+        getVacuumChartTroughs(),
+        vacuumLhState.chartInterval,
+      );
       requestAnimationFrame(resizeVacuumChartNow);
     } else {
       void loadVacuumChartDisplay(true);
@@ -374,22 +379,33 @@ function renderVacuumModes() {
 function setVacuumMode(mode) {
   if (!VACUUM_DESK.some(([id]) => id === mode)) return;
   const prevInterval = vacuumLhState.chartInterval;
+  const prevMode = vacuumLhState.mode;
   vacuumLhState.mode = mode;
   if (vacuumIsDeskMode(mode)) {
     vacuumLhState.chartInterval = vacuumDeskChartInterval(mode);
+    vacuumLhState.closed = vacuumLhState.closedMap[vacuumDeskVariant()] || [];
+    vacuumLhState.closedVariant = vacuumDeskVariant();
+    vacuumLhState._analyticsKey = "";
     void ensureVacuumPaper().then(() => {
-      void fetchVacuumDeskClosed(true);
-      renderVacuumDesk();
+      void fetchVacuumDeskClosed(prevMode !== mode);
+      if (vacuumDeskVisible()) renderVacuumDesk();
     });
   }
   renderVacuumModes();
   renderVacuumTfControls();
   renderVacuumLhBoard();
+  if (vacuumDeskVisible()) renderVacuumDesk();
   if (!vacuumLhState.selected) return;
+  const rt = vacuumLhState.chart;
   if (vacuumLhState.chartInterval !== prevInterval) {
     void loadVacuumChartDisplay(true);
-  } else if (vacuumLhState.chart?._lastBars?.length) {
-    drawVacuumTradeOverlay(vacuumLhState.chart);
+  } else if (rt?._lastBars?.length) {
+    drawVacuumLhOverlays(
+      rt,
+      getVacuumChartPeaks(),
+      getVacuumChartTroughs(),
+      vacuumLhState.chartInterval,
+    );
   }
 }
 
@@ -1956,6 +1972,7 @@ function vacuumAnalyticsTable() {
   const cols = [
     ["pyl", "БАБЛОСОС"],
     ["pyl1", "БАБЛОСОС 1"],
+    ["pylbtc", "БАБЛОСОС+BTC"],
     ["vps5", "Пылесос 5"],
     ["vps15", "Пылесос 15"],
   ].map(([variant, label]) => {
@@ -1974,6 +1991,7 @@ function vacuumAnalyticsTable() {
     };
     const pf = stats.pf == null ? "—" : stats.pf === Infinity ? "∞" : stats.pf.toFixed(2);
     return {
+      variant,
       label,
       current,
       cells: {
@@ -2001,7 +2019,12 @@ function vacuumAnalyticsTable() {
       },
     };
   });
-  const head = cols.map((col) => `<th class="${col.current ? "current" : ""}">${col.label}</th>`).join("");
+  const head = cols
+    .map(
+      (col) =>
+        `<th class="${col.current ? "current" : ""}" data-vac-mode="${col.variant}" title="Показать сделки ${col.label}">${col.label}</th>`,
+    )
+    .join("");
   const line = (name, key) => `<tr><td>${name}</td>${cols.map((col) => col.cells[key]).join("")}</tr>`;
   const html = `<thead><tr><th>Показатель</th>${head}</tr></thead><tbody>
     ${line("Открыто сейчас", "open")}
@@ -2057,7 +2080,12 @@ function onVacuumPaper(data) {
   if (vacuumDeskVisible()) renderVacuumDesk();
   if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
     patchVacuumLivePrice();
-    drawVacuumTradeOverlay(vacuumLhState.chart);
+    drawVacuumLhOverlays(
+      vacuumLhState.chart,
+      getVacuumChartPeaks(),
+      getVacuumChartTroughs(),
+      vacuumLhState.chartInterval,
+    );
   }
   ensureVacuumTradeWarm();
   scheduleVacuumTradeCharts();
@@ -2092,7 +2120,12 @@ async function fetchVacuumDeskClosed(force) {
     vacuumLhState.closedVariant = vacuumDeskVariant();
     if (vacuumDeskVisible()) renderVacuumDesk();
     if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
-      drawVacuumTradeOverlay(vacuumLhState.chart);
+      drawVacuumLhOverlays(
+        vacuumLhState.chart,
+        getVacuumChartPeaks(),
+        getVacuumChartTroughs(),
+        vacuumLhState.chartInterval,
+      );
     }
     scheduleVacuumTradeCharts();
   } catch (_err) {

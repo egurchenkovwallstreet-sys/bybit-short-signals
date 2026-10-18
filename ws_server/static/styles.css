@@ -326,6 +326,15 @@ body {
 .vacuum-analytics td:first-child { text-align: left; color: var(--muted); font-weight: 600; }
 .vacuum-analytics th.current { color: var(--text); }
 
+.vacuum-analytics th[data-vac-mode] {
+  cursor: pointer;
+}
+
+.vacuum-analytics th[data-vac-mode]:hover {
+  color: var(--text);
+  background: rgba(93, 173, 226, 0.06);
+}
+
 .vacuum-lh-toolbar {
   display: flex;
   flex-wrap: wrap;
