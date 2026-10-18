@@ -1110,8 +1110,11 @@ function patchVacuumLivePrice() {
   const sym = vacuumLhState.selected;
   const rt = vacuumLhState.chart;
   if (!sym || !rt?.series || !rt._lastBars?.length) return;
-  const live = findVacuumRow(sym)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
-  if (live == null) return;
+  const live =
+    vacuumPaperLastPrice(sym) ||
+    findVacuumRow(sym)?.last_price ||
+    vacuumLhState.detail?.signal?.last_price;
+  if (live == null || !(Number(live) > 0)) return;
   const BC = window.boardChart;
   const bars = rt._lastBars.map((b) => ({ ...b }));
   BC.patchLiveLastBar(bars, live);
@@ -1319,7 +1322,7 @@ function renderVacuumLhInfo() {
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
     <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): маркеры экстремумов (слева 15–30, справа 2, разнос ≥30). Список ${lhTf}.</p>
-    <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
+    <p>Цена: <strong data-vac-live="price">${vacuumPaperLastPrice(sym) || row.last_price || "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
     <p class="vacuum-lh-info-sub">Минимумы HL</p>
@@ -1510,13 +1513,33 @@ function vacuumSideLabel(side) {
   return "—";
 }
 
+function vacuumPaperLastPrice(symbol) {
+  const opens = (vacuumLhState.paper || {}).open_trades || [];
+  for (const t of opens) {
+    if (t.symbol !== symbol) continue;
+    const p = Number(t.last_price);
+    if (p > 0) return p;
+  }
+  return 0;
+}
+
 function vacuumChartLivePrice(runtime, symbol) {
+  const fromPaper = vacuumPaperLastPrice(symbol);
+  if (fromPaper > 0) return fromPaper;
   const last = runtime?._lastBars?.[runtime._lastBars.length - 1];
   const fromBar = Number(last?.close);
   if (fromBar > 0) return fromBar;
   const row = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
   const n = Number(row);
   return n > 0 ? n : 0;
+}
+
+function vacuumOpenMoney(trade) {
+  const px = Number(trade.last_price);
+  if (!(px > 0)) {
+    return { roe: Number(trade.roe_pct), pnl: Number(trade.pnl_usd) };
+  }
+  return vacuumTradePnl({ ...trade, _open: true }, px);
 }
 
 function vacuumTradeCurrentPrice(trade, live) {
@@ -1906,7 +1929,7 @@ function vacuumAnalyticsTable() {
     const longs = vacuumClosedStats(rows.filter((t) => vacuumTradeSide(t) === "long"));
     const shorts = vacuumClosedStats(rows.filter((t) => vacuumTradeSide(t) === "short"));
     const openRows = opensAll.filter((t) => t.variant === variant);
-    const openPnl = openRows.reduce((sum, t) => sum + (Number(t.pnl_usd) || 0), 0);
+    const openPnl = openRows.reduce((sum, t) => sum + (vacuumOpenMoney(t).pnl || 0), 0);
     const current = variant === vacuumDeskVariant();
     const plain = (html) => `<td class="${current ? "current" : ""}">${html}</td>`;
     const pnl = (n, text) => {
@@ -1996,9 +2019,9 @@ function onVacuumPaper(data) {
   }
   vacuumLhState._lastOpenCount = opens.length;
   if (vacuumDeskVisible()) renderVacuumDesk();
-  else if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
-    drawVacuumTradeOverlay(vacuumLhState.chart);
+  if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
     patchVacuumLivePrice();
+    drawVacuumTradeOverlay(vacuumLhState.chart);
   }
   ensureVacuumTradeWarm();
   scheduleVacuumTradeCharts();
@@ -2060,7 +2083,7 @@ function renderVacuumDesk() {
           ? "15m pivot L15–L30 + 1H/4H. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 2 мин. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
           : vacuumLhState.mode === "pyl1"
             ? "Как БАБЛОСОС + размах ≥2% за час. Запрет при расширении (high↑ и low↓). Лонг: min выше prev; шорт: max ниже prev. Стоп ±5% от пивота."
-            : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие после 2-й 5m у противоп. pivot. Стоп ±5% от свечи пивота.";
+            : "LH/HL L15–L30, вход на 3-й 5m (max L слеva). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>
@@ -2072,18 +2095,21 @@ function renderVacuumDesk() {
   const openTable = document.getElementById("vacuum-desk-open");
   if (openTable) {
     openTable.innerHTML = opens.length
-      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th>Цена</th><th>Стоп</th><th>P&L</th><th></th></tr></thead><tbody>${opens
-          .map(
-            (t) => `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th>Цена</th><th>Стоп</th><th>ROE</th><th>P&L</th><th></th></tr></thead><tbody>${opens
+          .map((t) => {
+            const m = vacuumOpenMoney(t);
+            const roeText = Number.isFinite(m.roe) ? `${m.roe >= 0 ? "+" : ""}${m.roe.toFixed(1)}%` : "—";
+            return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
           <td><b>${t.symbol}</b></td>
           <td>${vacuumSideLabel(vacuumTradeSide(t))}</td>
           <td>${t.entry_price}</td>
           <td>${t.last_price}</td>
           <td>${t.stop_price}</td>
-          ${vacuumPnlTd(t.pnl_usd)}
+          ${vacuumPnlTd(m.roe, roeText)}
+          ${vacuumPnlTd(m.pnl)}
           <td><button type="button" class="paper-btn vac-paper-close-btn" data-vac-paper-close="${t.id}">Закрыть</button></td>
-        </tr>`,
-          )
+        </tr>`;
+          })
           .join("")}</tbody>`
       : `<tbody><tr><td class="quiet">Нет открытых сделок</td></tr></tbody>`;
   }
