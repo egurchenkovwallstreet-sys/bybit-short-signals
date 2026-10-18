@@ -169,10 +169,19 @@ def _pivot_strength_rank(p: dict, kind: str) -> tuple[int, float]:
     return (ls, -price)
 
 
+def _pivot_extreme_gap_rank(p: dict, kind: str) -> tuple[float, int]:
+    """В кластере (< min_gap): сначала экстремум цены, при равенстве — left_strength."""
+    ls = int(p.get("left_strength") or 0)
+    price = float(p["price"])
+    if kind == "peak":
+        return (price, ls)
+    return (-price, ls)
+
+
 def _filter_pivots_min_bar_gap_impl(
     pivots: list[dict], min_gap: int, *, kind: str
 ) -> tuple[list[dict], list[dict]]:
-    """kept + pivot, вытесненные сильнейшим соседом в кластере (< min_gap)."""
+    """kept + pivot, вытеснённые в кластере (< min_gap) соседом с лучшим экстремумом."""
     if min_gap < 1 or not pivots:
         return list(pivots), []
     ordered = sorted(pivots, key=lambda p: int(p.get("bar_index", 0)))
@@ -185,7 +194,7 @@ def _filter_pivots_min_bar_gap_impl(
             continue
         last = kept[-1]
         if bi - int(last.get("bar_index", 0)) < min_gap:
-            if _pivot_strength_rank(p, kind) > _pivot_strength_rank(last, kind):
+            if _pivot_extreme_gap_rank(p, kind) > _pivot_extreme_gap_rank(last, kind):
                 replaced.append(last)
                 kept[-1] = p
         else:
@@ -194,7 +203,7 @@ def _filter_pivots_min_bar_gap_impl(
 
 
 def filter_pivots_min_bar_gap(pivots: list[dict], min_gap: int, *, kind: str) -> list[dict]:
-    """Pivot одного типа не ближе min_gap свечей; в кластере — сильнее left (15–30), затем экстремум."""
+    """Pivot одного типа не ближе min_gap свечей; в кластере — max high / min low, затем L."""
     kept, _ = _filter_pivots_min_bar_gap_impl(pivots, min_gap, kind=kind)
     return kept
 
