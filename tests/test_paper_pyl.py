@@ -27,7 +27,14 @@ from signal_engine.paper.m5_htf import (
     opposite_pivot_exit_signal,
     qualify_m5_pivot,
 )
-from signal_engine.paper.pyl_detect import PYL_MANDATORY, evaluate_htf_pivot_entry, evaluate_pyl
+from signal_engine.paper.pyl_detect import (
+    PYL_MANDATORY,
+    entry_trend_allows,
+    evaluate_htf_pivot_entry,
+    evaluate_pyl,
+    side_matches_structure_bias,
+    structure_bias_two_pivots,
+)
 from signal_engine.swing_highs import closed_bars
 from signal_engine.paper.vac_lh_detect import detect_entry_signal, entry_open_until_ms
 from signal_engine.state import Bar, SymbolState
@@ -60,6 +67,31 @@ def _lower_high_state() -> tuple[SymbolState, int, int]:
     state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
     state.bars_htf["5"] = bars
     return state, now_ms, peak_ts
+
+
+class Pyl1StructureTest(unittest.TestCase):
+    def test_structure_bias_up_down_mixed(self) -> None:
+        peaks_up = [{"price": 10.0}, {"price": 11.0}]
+        troughs_up = [{"price": 8.0}, {"price": 9.0}]
+        self.assertEqual(structure_bias_two_pivots(peaks_up, troughs_up), "up")
+        peaks_down = [{"price": 11.0}, {"price": 10.0}]
+        troughs_down = [{"price": 9.0}, {"price": 8.0}]
+        self.assertEqual(structure_bias_two_pivots(peaks_down, troughs_down), "down")
+        self.assertEqual(structure_bias_two_pivots(peaks_up, troughs_down), "mixed")
+
+    def test_side_matches_bias(self) -> None:
+        self.assertTrue(side_matches_structure_bias("long", "up"))
+        self.assertFalse(side_matches_structure_bias("short", "up"))
+        self.assertTrue(side_matches_structure_bias("short", "down"))
+        self.assertFalse(side_matches_structure_bias("long", "mixed"))
+
+    def test_entry_trend_forbid_double_weakness(self) -> None:
+        peaks = [{"price": 11.0}, {"price": 10.0}]
+        troughs = [{"price": 9.0}, {"price": 8.0}]
+        self.assertTrue(entry_trend_allows("short", peaks, troughs))
+        peaks_bad = [{"price": 11.0}, {"price": 12.0}]
+        troughs_bad = [{"price": 9.0}, {"price": 10.0}]
+        self.assertFalse(entry_trend_allows("short", peaks_bad, troughs_bad))
 
 
 class BabStopTest(unittest.TestCase):

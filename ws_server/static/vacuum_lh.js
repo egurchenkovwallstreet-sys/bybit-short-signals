@@ -44,19 +44,20 @@ const VACUUM_LOAD_CONCURRENCY = 2;
 const VACUUM_DESK = [
   ["scan", "Сканер"],
   ["pyl", "БАБЛОСОС"],
+  ["pyl1", "БАБЛОСОС 1"],
   ["vps5", "Пылесос 5"],
   ["vps15", "Пылесос 15"],
 ];
 
-const VACUUM_TRADE_VARIANTS = ["pyl", "vps5", "vps15"];
+const VACUUM_TRADE_VARIANTS = ["pyl", "pyl1", "vps5", "vps15"];
 
 function vacuumIsDeskMode(mode = vacuumLhState.mode) {
-  return mode === "pyl" || mode === "vps5" || mode === "vps15";
+  return mode === "pyl" || mode === "pyl1" || mode === "vps5" || mode === "vps15";
 }
 
 function vacuumDeskChartInterval(mode = vacuumLhState.mode) {
   if (mode === "vps15") return "15";
-  if (mode === "pyl" || mode === "vps5") return "5";
+  if (mode === "pyl" || mode === "pyl1" || mode === "vps5") return "5";
   return vacuumLhState.lhInterval;
 }
 
@@ -64,7 +65,7 @@ const vacuumLhState = {
   mode: "scan",
   paper: null,
   closed: [],
-  closedMap: { pyl: [], vps5: [], vps15: [] },
+  closedMap: { pyl: [], pyl1: [], vps5: [], vps15: [] },
   symbolClosed: {},
   series: new Map(),
   scanPivots: {},
@@ -1818,6 +1819,7 @@ function vacuumClosedStats(rows) {
 function vacuumDeskVariant() {
   if (vacuumLhState.mode === "vps5") return "vps5";
   if (vacuumLhState.mode === "vps15") return "vps15";
+  if (vacuumLhState.mode === "pyl1") return "pyl1";
   return "pyl";
 }
 
@@ -1850,6 +1852,7 @@ function vacuumAnalyticsTable() {
   const opensAll = (vacuumLhState.paper || {}).open_trades || [];
   const cols = [
     ["pyl", "БАБЛОСОС"],
+    ["pyl1", "БАБЛОСОС 1"],
     ["vps5", "Пылесос 5"],
     ["vps15", "Пылесос 15"],
   ].map(([variant, label]) => {
@@ -1932,6 +1935,7 @@ function vacuumDeskWatch() {
   const data = vacuumLhState.paper || {};
   if (vacuumLhState.mode === "vps5") return data.vps5_watch || [];
   if (vacuumLhState.mode === "vps15") return data.vps15_watch || [];
+  if (vacuumLhState.mode === "pyl1") return data.pyl1_watch || [];
   return data.pyl_watch || [];
 }
 
@@ -2001,13 +2005,17 @@ function renderVacuumDesk() {
         ? "Пылесос 5"
         : vacuumLhState.mode === "vps15"
           ? "Пылесос 15"
-          : "БАБЛОСОС";
+          : vacuumLhState.mode === "pyl1"
+            ? "БАБЛОСОС 1"
+            : "БАБЛОСОС";
     const rule =
       vacuumLhState.mode === "vps5"
         ? "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие: противоп. pivot после 2-й 5m справа. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
         : vacuumLhState.mode === "vps15"
           ? "15m pivot L15–L30 + 1H/4H. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 10 с. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
-          : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие после 2-й 5m у противоп. pivot. Стоп ±5% от свечи пивота.";
+          : vacuumLhState.mode === "pyl1"
+            ? "Как БАБЛОСОС + размах ≥3% за час. 2 верха и 2 низа растут → только лонг; падают → только шорт; смешано — пропуск. Стоп ±5% от пивота."
+            : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие после 2-й 5m у противоп. pivot. Стоп ±5% от свечи пивота.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>

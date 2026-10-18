@@ -7,7 +7,7 @@ from signal_engine.paper.detect import _check, grade_for
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.m5_htf import htf_pivot_setup, newest_pivot_reason
 from signal_engine.state import SymbolState
-from signal_engine.vacuum_lh import _meets_turnover
+from signal_engine.vacuum_lh import _meets_turnover, hour_range_pct
 
 PYL_INTERVAL = config.PAPER_PYL_INTERVAL
 
@@ -34,6 +34,68 @@ PYL_CHECK_LABELS = {
     "htf_30m": "Нет пробоя high/low 4H (15m TF)",
     "side_from_pivot": "LH → шорт, HL → лонг",
 }
+
+PYL1_MANDATORY_5 = (
+    "turnover_ok",
+    "hour_range_ok",
+    "pivot_left",
+    "structure_bias",
+    "trend_ok",
+    "side_from_pivot",
+)
+
+PYL1_CHECK_LABELS = {
+    **PYL_CHECK_LABELS,
+    "hour_range_ok": f"Размах цены за час ≥ {config.PAPER_PYL1_HOUR_RANGE_PCT:g}%",
+    "structure_bias": "2 верха и 2 низа в одну сторону (рост → лонг, спад → шорт)",
+    "trend_ok": "Нет двойного ослабления структуры против стороны",
+}
+
+
+def _last_two_prices(points: list[dict]) -> tuple[float, float] | None:
+    if len(points) < 2:
+        return None
+    return float(points[-2]["price"]), float(points[-1]["price"])
+
+
+def structure_bias_two_pivots(peaks: list[dict], troughs: list[dict]) -> str:
+    """up | down | mixed — по двум последним pivot high и low на TF."""
+    pp = _last_two_prices(peaks)
+    tt = _last_two_prices(troughs)
+    if pp is None or tt is None:
+        return "mixed"
+    p0, p1 = pp
+    t0, t1 = tt
+    if p1 > p0 and t1 > t0:
+        return "up"
+    if p1 < p0 and t1 < t0:
+        return "down"
+    return "mixed"
+
+
+def entry_trend_allows(side: str, peaks: list[dict], troughs: list[dict]) -> bool:
+    """Лонг: запрет если новый min ниже prev и последний max ниже prev. Шорт — зеркально."""
+    pp = _last_two_prices(peaks)
+    tt = _last_two_prices(troughs)
+    if pp is None or tt is None:
+        return False
+    prev_p, lp = pp
+    prev_t, lt = tt
+    if side == "long":
+        return not (lt < prev_t and lp < prev_p)
+    if side == "short":
+        return not (lp > prev_p and lt > prev_t)
+    return False
+
+
+def side_matches_structure_bias(side: str | None, bias: str) -> bool:
+    if not side or bias == "mixed":
+        return False
+    if bias == "up":
+        return side == "long"
+    if bias == "down":
+        return side == "short"
+    return False
 
 
 def mandatory_for_interval(interval: str) -> tuple[str, ...]:
@@ -159,3 +221,62 @@ def evaluate_pyl(state: SymbolState, now_ms: int, prev_snap: dict | None = None)
     return evaluate_htf_pivot_entry(
         state, now_ms, prev_snap, PYL_INTERVAL, kind="pyl", variant=config.PAPER_PYL_VARIANT
     )
+
+
+def evaluate_pyl1(state: SymbolState, now_ms: int, prev_snap: dict | None = None) -> dict:
+    del prev_snap
+    base = evaluate_htf_pivot_entry(
+        state,
+        now_ms,
+        None,
+        PYL_INTERVAL,
+        kind="pyl1",
+        variant=config.PAPER_PYL1_VARIANT,
+    )
+    snap = snapshot_pivot_levels(state, PYL_INTERVAL, now_ms)
+    peaks = list((snap or {}).get("peaks") or base.get("metrics", {}).get("peaks") or [])
+    troughs = list((snap or {}).get("troughs") or base.get("metrics", {}).get("troughs") or [])
+    side = base.get("side")
+    hr = hour_range_pct(state, now_ms)
+    hour_ok = hr is not None and hr + 1e-12 >= config.PAPER_PYL1_HOUR_RANGE_PCT
+    bias = structure_bias_two_pivots(peaks, troughs)
+    trend_ok = bool(side) and entry_trend_allows(str(side), peaks, troughs)
+    struct_ok = side_matches_structure_bias(side, bias)
+
+    checks = dict(base.get("checks") or {})
+    checks["hour_range_ok"] = _check(
+        hour_ok,
+        f"{hr:.2f}%" if hr is not None else "нет данных",
+        f"≥ {config.PAPER_PYL1_HOUR_RANGE_PCT:g}% за час",
+    )
+    bias_label = {"up": "рост (лонг)", "down": "спад (шорт)", "mixed": "смешано"}.get(bias, bias)
+    checks["structure_bias"] = _check(
+        struct_ok,
+        bias_label if side else "—",
+        "2 верха и 2 низа растут → лонг; падают → шорт; смешано — пропуск",
+    )
+    checks["trend_ok"] = _check(
+        trend_ok if side else False,
+        "да" if trend_ok else ("—" if not side else "нет"),
+        "нет двойного ослабления против стороны",
+    )
+
+    mandatory = PYL1_MANDATORY_5
+    failed = [k for k in mandatory if not checks[k]["ok"]]
+    passed = not failed
+    out = dict(base)
+    out["checks"] = checks
+    out["failed"] = failed
+    out["passed"] = passed
+    out["passed_count"] = len(mandatory) - len(failed)
+    out["score"] = 92.0 if passed else 25.0
+    out["grade"] = grade_for(out["score"])
+    out["variants"] = [config.PAPER_PYL1_VARIANT] if passed else []
+    out["side"] = side if passed else None
+    metrics = dict(out.get("metrics") or {})
+    metrics["hour_range_pct"] = round(float(hr), 2) if hr is not None else None
+    metrics["structure_bias"] = bias
+    metrics["peaks"] = peaks[-3:]
+    metrics["troughs"] = troughs[-3:]
+    out["metrics"] = metrics
+    return out

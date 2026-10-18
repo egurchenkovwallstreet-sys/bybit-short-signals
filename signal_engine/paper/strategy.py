@@ -46,9 +46,18 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
+from signal_engine.vacuum_lh import hour_range_pct
 from signal_engine.paper.m5_htf import opposite_appeared, opposite_pivot_exit_signal, symbols_waiting_htf_second_bar
 from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, symbols_waiting_second_bar
-from signal_engine.paper.pyl_detect import PYL_CHECK_LABELS, PYL_MANDATORY, evaluate_htf_pivot_entry, evaluate_pyl
+from signal_engine.paper.pyl_detect import (
+    PYL1_CHECK_LABELS,
+    PYL1_MANDATORY_5,
+    PYL_CHECK_LABELS,
+    PYL_MANDATORY,
+    evaluate_htf_pivot_entry,
+    evaluate_pyl,
+    evaluate_pyl1,
+)
 from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
 from signal_engine.paper.vac_detect import VAC_CHECK_LABELS, VAC_MANDATORY, evaluate_vac
@@ -245,6 +254,8 @@ class PaperStrategy:
         self._impulse_used_bars: dict[tuple[str, str], int] = {}
         self._pyl_prev_snap: dict[str, dict] = {}
         self._pyl_watch: list[dict] = []
+        self._pyl1_prev_snap: dict[str, dict] = {}
+        self._pyl1_watch: list[dict] = []
         self._vac_used_bars: dict[tuple[str, str], int] = {}
         self._vac_watch: list[dict] = []
         self._vps_prev_snap: dict[tuple[str, str], dict] = {}
@@ -574,13 +585,19 @@ class PaperStrategy:
         if config.PAPER_SC10_VARIANT in VARIANTS:
             self._evaluate_sc10(states, now_ms)
         self._evaluate_impulse(states, now_ms)
-        if config.PAPER_PYL_VARIANT in VARIANTS or config.PAPER_VPS5_VARIANT in VARIANTS:
+        if (
+            config.PAPER_PYL_VARIANT in VARIANTS
+            or config.PAPER_PYL1_VARIANT in VARIANTS
+            or config.PAPER_VPS5_VARIANT in VARIANTS
+        ):
             self._refresh_five_min_arm(states, now_ms)
         if config.PAPER_VPS15_VARIANT in VARIANTS:
             self._refresh_fifteen_min_arm(states, now_ms)
         if pivots:
             if config.PAPER_PYL_VARIANT in VARIANTS:
                 self._evaluate_pyl(states, now_ms)
+            if config.PAPER_PYL1_VARIANT in VARIANTS:
+                self._evaluate_pyl1(states, now_ms)
             if config.PAPER_VAC_VARIANT in VARIANTS:
                 self._evaluate_vac(states, now_ms)
             self._evaluate_vps_variants(states, now_ms)
@@ -1896,7 +1913,7 @@ class PaperStrategy:
         opens = {
             symbol
             for variant, symbol in self.trades
-            if variant in (config.PAPER_PYL_VARIANT, config.PAPER_VPS5_VARIANT)
+            if variant in (config.PAPER_PYL_VARIANT, config.PAPER_PYL1_VARIANT, config.PAPER_VPS5_VARIANT)
         }
         if self._confirm_arm and now_ms < self._confirm_arm_at + 30_000:
             self._confirm_arm |= opens
@@ -1921,30 +1938,60 @@ class PaperStrategy:
         return self._pivot_entry_window(entry, now_ms, config.PAPER_PYL_INTERVAL)
 
     def _evaluate_pyl(self, states: dict[str, SymbolState], now_ms: int) -> None:
-        variant = config.PAPER_PYL_VARIANT
+        self._evaluate_bab_pivot_desk(
+            config.PAPER_PYL_VARIANT,
+            evaluate_pyl,
+            self._pyl_prev_snap,
+            "pyl",
+            lambda w: setattr(self, "_pyl_watch", w),
+        )
+
+    def _evaluate_pyl1(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        self._evaluate_bab_pivot_desk(
+            config.PAPER_PYL1_VARIANT,
+            evaluate_pyl1,
+            self._pyl1_prev_snap,
+            "pyl1",
+            lambda w: setattr(self, "_pyl1_watch", w),
+        )
+
+    def _evaluate_bab_pivot_desk(
+        self,
+        variant: str,
+        evaluate_fn,
+        prev_snaps: dict[str, dict],
+        eval_key: str,
+        set_watch,
+    ) -> None:
         if variant not in VARIANTS:
             return
         interval = config.PAPER_PYL_INTERVAL
+        trade_kind = "pyl1" if variant == config.PAPER_PYL1_VARIANT else "pyl"
         watch: list[dict] = []
+        pyl1 = variant == config.PAPER_PYL1_VARIANT
         for symbol, state in states.items():
             if not state.last_price:
                 continue
-            prev = self._pyl_prev_snap.get(symbol)
+            track = True
+            if pyl1:
+                hr_gate = hour_range_pct(state, now_ms)
+                track = hr_gate is not None and hr_gate + 1e-12 >= config.PAPER_PYL1_HOUR_RANGE_PCT
+            prev = prev_snaps.get(symbol)
             snap = snapshot_pivot_levels(state, interval, now_ms)
             if snap is not None:
-                self._pyl_prev_snap[symbol] = snap
-            ev_data = evaluate_pyl(state, now_ms, prev)
+                prev_snaps[symbol] = snap
+            ev_data = evaluate_fn(state, now_ms, prev)
             ev_clean = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
             pc = int(ev_clean.get("passed_count") or 0)
             side = ev_clean.get("side")
             fresh = self._five_min_entry_window(ev_clean, now_ms)
-            if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
+            if track and (pc > 0 or (ev_clean.get("metrics") or {}).get("peaks")):
                 watch.append(
                     {
                         "symbol": symbol,
                         "passed_count": pc,
                         "failed": list(ev_clean.get("failed") or []),
-                        "eval": {"pyl": ev_clean},
+                        "eval": {eval_key: ev_clean},
                         "grade": ev_clean.get("grade"),
                         "score": ev_clean.get("score"),
                         "ready": fresh,
@@ -1974,20 +2021,30 @@ class PaperStrategy:
                         balance = self.balances[variant]
                         margin = balance * config.PAPER_MARGIN_PCT / 100.0
                         if margin > 0 and balance - self.used_margin(variant) >= margin:
-                            self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms)
+                            self._open_pyl_trade(
+                                variant, symbol, state, ev_clean, margin, now_ms, kind=trade_kind
+                            )
                 continue
-            if not fresh:
+            if not track or not fresh or not ev_clean.get("passed"):
                 continue
             balance = self.balances[variant]
             margin = balance * config.PAPER_MARGIN_PCT / 100.0
             if margin <= 0 or balance - self.used_margin(variant) < margin:
                 continue
-            self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms)
+            self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms, kind=trade_kind)
         watch.sort(key=lambda r: (-int(r["passed_count"]), r["symbol"]))
-        self._pyl_watch = watch[:100]
+        set_watch(watch[:100])
 
     def _open_pyl_trade(
-        self, variant: str, symbol: str, state: SymbolState, entry: dict, margin: float, now_ms: int
+        self,
+        variant: str,
+        symbol: str,
+        state: SymbolState,
+        entry: dict,
+        margin: float,
+        now_ms: int,
+        *,
+        kind: str = "pyl",
     ) -> None:
         price = float(state.last_price)
         m = entry.get("metrics") or {}
@@ -2012,7 +2069,7 @@ class PaperStrategy:
                 "symbol": symbol,
                 "variant": variant,
                 "candidate_id": None,
-                "kind": "pyl",
+                "kind": kind,
                 "status": "open",
                 "opened_at": now_ms,
                 "entry_price": price,
@@ -2040,7 +2097,7 @@ class PaperStrategy:
             id=trade_id,
             variant=variant,
             symbol=symbol,
-            kind="pyl",
+            kind=kind,
             pos=pos,
             score=float(entry.get("score") or 0),
             grade=str(entry.get("grade") or "C"),
@@ -2690,6 +2747,9 @@ class PaperStrategy:
             "pyl_check_labels": PYL_CHECK_LABELS,
             "pyl_mandatory": list(PYL_MANDATORY),
             "pyl_watch": list(self._pyl_watch),
+            "pyl1_check_labels": PYL1_CHECK_LABELS,
+            "pyl1_mandatory": list(PYL1_MANDATORY_5),
+            "pyl1_watch": list(self._pyl1_watch),
             "vac_check_labels": VAC_CHECK_LABELS,
             "vac_mandatory": list(VAC_MANDATORY),
             "vac_watch": list(self._vac_watch),

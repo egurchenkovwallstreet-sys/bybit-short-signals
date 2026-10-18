@@ -42,7 +42,7 @@
   const MINI_CHART_VARIANTS = { mt2c: true };
   const GRAF_VARIANTS = { graf: true };
   const DPS_VARIANTS = { dps: true };
-  const PYL_VARIANTS = { pyl: true };
+  const PYL_VARIANTS = { pyl: true, pyl1: true };
   const VAC_VARIANTS = { vac: true };
   const VPS_VARIANTS = { vps15: true, vps5: true, vps: true };
   function vpsChartInterval(v) {
@@ -135,6 +135,7 @@
     if (paper.variant === "sc10") return paper.data.sc10_check_labels || {};
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_check_labels || {};
     if (paper.variant === "c3") return paper.data.c3_check_labels || {};
+    if (paper.variant === "pyl1") return paper.data.pyl1_check_labels || {};
     if (PYL_VARIANTS[paper.variant]) return paper.data.pyl_check_labels || {};
     if (VAC_VARIANTS[paper.variant]) return paper.data.vac_check_labels || {};
     if (VPS_VARIANTS[paper.variant]) return paper.data.vps_check_labels || {};
@@ -154,6 +155,7 @@
     if (paper.variant === "sc10") return paper.data.sc10_mandatory || [];
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_mandatory || [];
     if (paper.variant === "c3") return paper.data.c3_mandatory || [];
+    if (paper.variant === "pyl1") return paper.data.pyl1_mandatory || [];
     if (PYL_VARIANTS[paper.variant]) return paper.data.pyl_mandatory || [];
     if (VAC_VARIANTS[paper.variant]) return paper.data.vac_mandatory || [];
     if (VPS_VARIANTS[paper.variant]) return paper.data.vps_mandatory || [];
@@ -169,7 +171,7 @@
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
-  const DESK_VARIANTS = { pyl: true, vps5: true, vps15: true };
+  const DESK_VARIANTS = { pyl: true, pyl1: true, vps5: true, vps15: true };
   function variants() {
     return (paper.data && paper.data.test_variants) || (paper.data && paper.data.variants) || ["t20", "p10", "t20p", "mlnp", "mt2", "graf"];
   }
@@ -191,6 +193,7 @@
     const ev = (r && r.eval) || {};
     if (paper.variant === "e5s" || paper.variant === "e5p") return ev.e5s || ev;
     if (paper.variant === "c3") return ev.c3 || { checks: {}, passed_count: undefined, failed: [] };
+    if (paper.variant === "pyl1") return ev.pyl1 || { checks: {}, passed_count: undefined, failed: [] };
     if (PYL_VARIANTS[paper.variant]) return ev.pyl || { checks: {}, passed_count: undefined, failed: [] };
     if (VAC_VARIANTS[paper.variant]) return ev.vac || { checks: {}, passed_count: undefined, failed: [] };
     if (VPS_VARIANTS[paper.variant]) {
@@ -830,18 +833,21 @@
     }
     if (PYL_VARIANTS[paper.variant]) {
       if (section) section.hidden = false;
-      const rows = (paper.data && paper.data.pyl_watch) || [];
+      const vk = paper.variant === "pyl1" ? "pyl1" : "pyl";
+      const rows = (paper.data && paper.data[`${vk}_watch`]) || [];
       const total = mandatory().length;
       if (!rows.length) {
         table.innerHTML =
-          '<tbody><tr><td class="quiet">Нет сигналов: ждём экстремум 5м своей 15м, слабее предыдущей 15м и без пробоя 30м.</td></tr></tbody>';
+          paper.variant === "pyl1"
+            ? '<tbody><tr><td class="quiet">Нет монет с размахом ≥3% за час или подходящей структурой 5m.</td></tr></tbody>'
+            : '<tbody><tr><td class="quiet">Нет сигналов: ждём LH/HL L15–L30 на 5m, вход на 3-й свече.</td></tr></tbody>';
         return;
       }
       table.innerHTML = `<thead><tr>
       <th>Монета</th><th>Условия</th><th>Не хватает</th><th>Сторона</th><th>Pivot</th><th>Готово</th><th>Сила</th>
     </tr></thead><tbody>${rows
         .map((r) => {
-          const ev = (r.eval && r.eval.pyl) || {};
+          const ev = (r.eval && r.eval[vk]) || {};
           const m = ev.metrics || {};
           const failed = (r.failed || []).map((k) => labels()[k] || k);
           return `<tr class="clickable" data-pyl-symbol="${esc(r.symbol)}">
@@ -1090,7 +1096,10 @@
     const L = labels();
     const m = ev.metrics || {};
     const p = m.pump || {};
-    const pylOnly = PYL_VARIANTS[paper.variant] || (p.kind === "pyl" && paper.variant === "pyl");
+    const pylOnly =
+      PYL_VARIANTS[paper.variant] ||
+      (p.kind === "pyl" && paper.variant === "pyl") ||
+      (p.kind === "pyl1" && paper.variant === "pyl1");
     const vacOnly = VAC_VARIANTS[paper.variant] || (p.kind === "vac" && paper.variant === "vac");
     const vpsOnly =
       VPS_VARIANTS[paper.variant] ||
