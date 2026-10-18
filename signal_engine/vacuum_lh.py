@@ -130,35 +130,18 @@ def _pivot_broken_by_price(segment: list[Bar], p: dict, kind: str, confirm_right
     return False
 
 
-def _superseded_in_gap(
-    segment: list[Bar], raw: list[dict], active: list[dict], min_gap: int
-) -> list[dict]:
-    """Raw pivot в кластере (< min_gap), но не попал в active после filter_pivots_min_bar_gap."""
-    active_keys = {_pivot_key_raw(p) for p in active}
-    active_bi = [_pivot_bar_index(segment, p) for p in active]
-    out: list[dict] = []
-    for p in raw:
-        if _pivot_key_raw(p) in active_keys:
-            continue
-        bi = _pivot_bar_index(segment, p)
-        if bi < 0:
-            continue
-        if any(abi >= 0 and abs(bi - abi) < min_gap for abi in active_bi):
-            out.append(p)
-    return out
-
-
 def _split_peaks_active_ghost(
     segment: list[Bar], pl: int, pl_max: int, pr: int, min_gap: int
 ) -> tuple[list[dict], list[dict]]:
+    from signal_engine.swing_highs import filter_pivots_min_bar_gap_split
+
     raw = pivot_highs_floating_left(segment, pl, pl_max, pr)
-    filtered = filter_pivots_min_bar_gap(raw, min_gap, kind="peak")
+    filtered, gap_replaced = filter_pivots_min_bar_gap_split(raw, min_gap, kind="peak")
     confirm = config.VACUUM_LH_PIVOT_RIGHT
     active = [p for p in filtered if not _pivot_broken_by_price(segment, p, "peak", confirm)]
     broken = [p for p in filtered if _pivot_broken_by_price(segment, p, "peak", confirm)]
-    superseded = _superseded_in_gap(segment, raw, active, min_gap)
     ghost_map: dict[tuple[int, float], dict] = {}
-    for p in broken + superseded:
+    for p in broken + gap_replaced:
         ghost_map[_pivot_key_raw(p)] = p
     return active, list(ghost_map.values())
 
@@ -166,16 +149,28 @@ def _split_peaks_active_ghost(
 def _split_troughs_active_ghost(
     segment: list[Bar], pl: int, pl_max: int, pr: int, min_gap: int
 ) -> tuple[list[dict], list[dict]]:
+    from signal_engine.swing_highs import filter_pivots_min_bar_gap_split
+
     raw = pivot_lows_floating_left(segment, pl, pl_max, pr)
-    filtered = filter_pivots_min_bar_gap(raw, min_gap, kind="trough")
+    filtered, gap_replaced = filter_pivots_min_bar_gap_split(raw, min_gap, kind="trough")
     confirm = config.VACUUM_LH_PIVOT_RIGHT
     active = [p for p in filtered if not _pivot_broken_by_price(segment, p, "trough", confirm)]
     broken = [p for p in filtered if _pivot_broken_by_price(segment, p, "trough", confirm)]
-    superseded = _superseded_in_gap(segment, raw, active, min_gap)
     ghost_map: dict[tuple[int, float], dict] = {}
-    for p in broken + superseded:
+    for p in broken + gap_replaced:
         ghost_map[_pivot_key_raw(p)] = p
     return active, list(ghost_map.values())
+
+
+# На графике — не весь lookback, иначе 5m за 14d забит «мёртвыми» pivot.
+_VACUUM_CHART_GHOST_MAX = 16
+
+
+def _trim_chart_ghosts(ghost: list[dict]) -> list[dict]:
+    if len(ghost) <= _VACUUM_CHART_GHOST_MAX:
+        return ghost
+    ghost = sorted(ghost, key=lambda p: int(p.get("time") or 0))
+    return ghost[-_VACUUM_CHART_GHOST_MAX:]
 
 
 def _filtered_pivot_highs(segment: list[Bar], pl: int, pl_max: int, pr: int) -> list[dict]:
@@ -241,7 +236,7 @@ def ghost_anchor_peaks(bars: list[Bar], interval: str, now_ms: int) -> list[dict
     pl = config.VACUUM_LH_PIVOT_LEFT
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = config.VACUUM_LH_PIVOT_RIGHT
-    ghost = _ghost_pivot_highs(segment, pl, pl_max, pr)
+    ghost = _trim_chart_ghosts(_ghost_pivot_highs(segment, pl, pl_max, pr))
     ghost.sort(key=lambda p: int(p["time"]))
     return project_peaks_to_chart(ghost, interval)
 
@@ -253,7 +248,7 @@ def ghost_anchor_troughs(bars: list[Bar], interval: str, now_ms: int) -> list[di
     pl = config.VACUUM_LH_PIVOT_LEFT
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     pr = config.VACUUM_LH_PIVOT_RIGHT
-    ghost = _ghost_pivot_lows(segment, pl, pl_max, pr)
+    ghost = _trim_chart_ghosts(_ghost_pivot_lows(segment, pl, pl_max, pr))
     ghost.sort(key=lambda p: int(p["time"]))
     return project_troughs_to_chart(ghost, interval)
 

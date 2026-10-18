@@ -1810,8 +1810,7 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
     chartInterval,
   );
   const pivotMarkers = vacuumPivotSeriesMarkers(runtime, peaks || [], troughs || [], chartInterval);
-  const tradeMarkers = sym ? vacuumTradeSeriesMarkers(runtime, sym, chartInterval) : [];
-  const merged = [...ghostMarkers, ...pivotMarkers, ...tradeMarkers].sort(
+  const merged = [...ghostMarkers, ...pivotMarkers].sort(
     (a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time),
   );
   try {

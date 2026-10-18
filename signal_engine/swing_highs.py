@@ -169,12 +169,15 @@ def _pivot_strength_rank(p: dict, kind: str) -> tuple[int, float]:
     return (ls, -price)
 
 
-def filter_pivots_min_bar_gap(pivots: list[dict], min_gap: int, *, kind: str) -> list[dict]:
-    """Pivot одного типа не ближе min_gap свечей; в кластере — сильнее left (15–30), затем экстремум."""
+def _filter_pivots_min_bar_gap_impl(
+    pivots: list[dict], min_gap: int, *, kind: str
+) -> tuple[list[dict], list[dict]]:
+    """kept + pivot, вытесненные сильнейшим соседом в кластере (< min_gap)."""
     if min_gap < 1 or not pivots:
-        return list(pivots)
+        return list(pivots), []
     ordered = sorted(pivots, key=lambda p: int(p.get("bar_index", 0)))
     kept: list[dict] = []
+    replaced: list[dict] = []
     for p in ordered:
         bi = int(p.get("bar_index", 0))
         if not kept:
@@ -183,10 +186,30 @@ def filter_pivots_min_bar_gap(pivots: list[dict], min_gap: int, *, kind: str) ->
         last = kept[-1]
         if bi - int(last.get("bar_index", 0)) < min_gap:
             if _pivot_strength_rank(p, kind) > _pivot_strength_rank(last, kind):
+                replaced.append(last)
                 kept[-1] = p
         else:
             kept.append(p)
+    return kept, replaced
+
+
+def filter_pivots_min_bar_gap(pivots: list[dict], min_gap: int, *, kind: str) -> list[dict]:
+    """Pivot одного типа не ближе min_gap свечей; в кластере — сильнее left (15–30), затем экстремум."""
+    kept, _ = _filter_pivots_min_bar_gap_impl(pivots, min_gap, kind=kind)
     return kept
+
+
+def pivot_gap_replaced(pivots: list[dict], min_gap: int, *, kind: str) -> list[dict]:
+    """В кластере проигравший pivot (заменён более сильным)."""
+    _, replaced = _filter_pivots_min_bar_gap_impl(pivots, min_gap, kind=kind)
+    return replaced
+
+
+def filter_pivots_min_bar_gap_split(
+    pivots: list[dict], min_gap: int, *, kind: str
+) -> tuple[list[dict], list[dict]]:
+    """Отфильтрованные pivot и вытесненные в кластере (< min_gap)."""
+    return _filter_pivots_min_bar_gap_impl(pivots, min_gap, kind=kind)
 
 
 def pivot_lows_floating_left_indexed(
