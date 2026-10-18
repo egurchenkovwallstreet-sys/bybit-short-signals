@@ -177,8 +177,8 @@ class Hub:
                 client.pump_strategy_interval = interval
                 client.force_pump_strategy_detail = True
         elif kind == "select_vacuum_lh":
-            symbol = str(message.get("symbol") or "")
-            if symbol in self.cache.vacuum_lh_by_symbol:
+            symbol = str(message.get("symbol") or "").strip().upper()
+            if len(symbol) >= 2:
                 client.vacuum_lh_symbol = symbol
                 client.force_vacuum_lh_detail = True
         elif kind == "vacuum_lh_interval":

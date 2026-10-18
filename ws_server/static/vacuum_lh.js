@@ -717,9 +717,15 @@ function vacuumTailFresh(candles, interval) {
   return ms >= Math.floor(Date.now() / step) * step;
 }
 
+function vacuumPivotCount(entry) {
+  if (!entry) return 0;
+  return (entry.anchorPeaks?.length || 0) + (entry.anchorTroughs?.length || 0);
+}
+
 function vacuumSeriesSkipFetch(symbol, interval) {
   const entry = vacuumSeriesEntry(symbol, interval);
   if (!entry?.pivotsReady || !entry.candles?.length) return false;
+  if (vacuumPivotCount(entry) < 1) return false;
   if (!vacuumTailFresh(entry.candles, interval)) return false;
   return !!(entry.historyComplete || entry.candles.length >= vacuumNeedBars(interval));
 }
@@ -764,10 +770,11 @@ async function loadVacuumChartDisplay(resetScale) {
   if (!symbol) return;
   await ensureVacuumPaper();
   const closedP = fetchVacuumSymbolClosedIfNeeded(symbol);
-  if (paintVacuumChartFromBuffer(resetScale)) {
+  const canUseBuffer =
+    vacuumSeriesSkipFetch(symbol, interval) && paintVacuumChartFromBuffer(resetScale);
+  if (canUseBuffer) {
     await closedP;
     vacuumChartRedraw();
-    if (!vacuumSeriesSkipFetch(symbol, interval)) void refreshVacuumVisibleChart();
     scheduleVacuumSeriesWarm();
     return;
   }
@@ -776,7 +783,9 @@ async function loadVacuumChartDisplay(resetScale) {
     return;
   }
   const seq = ++vacuumLhState._loadSeq;
-  const [payload] = await Promise.all([vacuumFetchShared(symbol, interval, false), closedP]);
+  const entry = vacuumSeriesEntry(symbol, interval);
+  const tail = !!(entry?.historyComplete || (entry?.candles?.length || 0) >= 48);
+  const [payload] = await Promise.all([vacuumFetchShared(symbol, interval, tail), closedP]);
   if (!vacuumLoadStillValid(seq, symbol)) {
     if (payload?.candles?.length) vacuumStoreSeries(symbol, interval, payload);
     return;
@@ -811,7 +820,7 @@ function vacuumStoreSeries(symbol, interval, payload) {
     chainTroughs: payload.troughs || [],
     at: Date.now(),
     historyComplete: !!(payload.history_complete || prev?.historyComplete),
-    pivotsReady: Array.isArray(payload.anchor_peaks) && Array.isArray(payload.anchor_troughs),
+    pivotsReady: payload.pivots_ready === true,
   });
   const bucket = window.boardChart?.getAssetBucket?.(symbol);
   if (bucket?.intervals) {
@@ -1220,8 +1229,25 @@ function patchVacuumLivePrice() {
   if (priceEl) priceEl.textContent = String(live);
 }
 
+function vacuumApplyDetailSeries(detail) {
+  if (!detail?.signal?.symbol) return;
+  const sym = detail.signal.symbol;
+  const iv = String(detail.interval || vacuumLhState.chartInterval);
+  if (!detail.candles?.length) return;
+  vacuumStoreSeries(sym, iv, {
+    candles: detail.candles,
+    anchor_peaks: detail.anchor_peaks || [],
+    anchor_troughs: detail.anchor_troughs || [],
+    peaks: detail.peaks || [],
+    troughs: detail.troughs || [],
+    pivots_ready: true,
+    history_complete: false,
+  });
+}
+
 function mergeVacuumDetail(data) {
   if (!data) return;
+  vacuumApplyDetailSeries(data);
   const prev = vacuumLhState.detail || {};
   const prevSignal = prev.signal;
   vacuumLhState.detail = {
@@ -1389,14 +1415,20 @@ function renderVacuumLhInfo() {
   const row = vacuumLhState.detail?.signal || findVacuumRow(sym) || {};
   const detail = vacuumLhState.detail;
   const chartTf = labelTf(vacuumLhState.chartInterval);
+  const chainPeaks = getVacuumChainPeaks();
+  const chainTroughs = getVacuumChainTroughs();
   const peaks =
     detail && String(detail.interval) === String(vacuumLhState.chartInterval) && detail.peaks?.length
       ? detail.peaks
-      : row.peaks || [];
+      : chainPeaks.length
+        ? chainPeaks
+        : row.peaks || [];
   const troughs =
     detail && String(detail.interval) === String(vacuumLhState.chartInterval) && detail.troughs?.length
       ? detail.troughs
-      : row.troughs || [];
+      : chainTroughs.length
+        ? chainTroughs
+        : row.troughs || [];
   const lhTf = chartTf;
   const peakList = peaks
     .map((p) => formatVacuumInfoPivot(p, "LH", lhTf))

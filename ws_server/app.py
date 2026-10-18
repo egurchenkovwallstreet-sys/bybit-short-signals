@@ -328,6 +328,7 @@ def _kline_reply(
         payload["anchor_troughs"] = packed["anchor_troughs"]
         payload["peaks"] = packed["peaks"]
         payload["troughs"] = packed["troughs"]
+        payload["pivots_ready"] = True
     return payload
 
 

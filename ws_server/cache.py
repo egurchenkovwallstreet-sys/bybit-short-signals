@@ -243,13 +243,13 @@ class MarketCache:
     def vacuum_lh_detail(self, symbol: str, chart_interval: str = "60") -> dict[str, Any] | None:
         from signal_engine.vacuum_lh import chart_pivots_from_candles, union_pivot_points
 
+        candles = list(self.klines.get((symbol, chart_interval), []) or [])
         signal = self.vacuum_lh_by_symbol.get(symbol)
+        scanned = (self.vacuum_lh_chart_pivots.get(str(chart_interval)) or {}).get(symbol)
+        if not signal and not scanned and not candles:
+            return None
         if not signal:
-            scanned = (self.vacuum_lh_chart_pivots.get(str(chart_interval)) or {}).get(symbol)
-            if not scanned:
-                return None
             signal = {"symbol": symbol, "lh_interval": chart_interval}
-        candles = self.klines.get((symbol, chart_interval), [])
         sig = dict(signal)
         live = self.mark_price.get(symbol)
         if live is not None:
