@@ -486,6 +486,21 @@ function renderVacuumTfControls() {
   }
 }
 
+function vacuumPivotNativeInterval(p) {
+  return p?.lh_interval ?? p?.hl_interval ?? null;
+}
+
+/** На графике TF — только pivot этого TF, не с младших/старших. */
+function vacuumFilterPivotsForChart(points, chartInterval) {
+  const iv = String(chartInterval || "");
+  if (!iv) return points || [];
+  return (points || []).filter((p) => {
+    const native = vacuumPivotNativeInterval(p);
+    if (native == null || native === "") return true;
+    return String(native) === iv;
+  });
+}
+
 function vacuumPivotKey(p) {
   return `${p.time_ms}:${p.price}`;
 }
@@ -584,23 +599,29 @@ function vacuumChartAnchors(symbol, interval, kind) {
   const ready = !!(series?.pivotsReady || Array.isArray(fromScan) || Array.isArray(fromDetail));
   const chainField = kind === "trough" ? "troughs" : "peaks";
   const chain = vacuumChainPoints(symbol, interval, chainField);
-  const anchors = vacuumUnionPivots([fromSeries, fromScan, fromDetail]);
-  if (anchors.length) return vacuumApplyChain(anchors, chain);
-  if (chain.length) return chain;
+  const anchors = vacuumFilterPivotsForChart(
+    vacuumUnionPivots([fromSeries, fromScan, fromDetail]),
+    interval,
+  );
+  const chainIv = vacuumFilterPivotsForChart(chain, interval);
+  if (anchors.length) return vacuumApplyChain(anchors, chainIv);
+  if (chainIv.length) return chainIv;
   if (ready) return [];
   return [];
 }
 
 function getVacuumChainPeaks() {
   const sym = vacuumLhState.selected;
+  const iv = vacuumLhState.chartInterval;
   if (!sym) return [];
-  return vacuumChainPoints(sym, vacuumLhState.chartInterval, "peaks");
+  return vacuumFilterPivotsForChart(vacuumChainPoints(sym, iv, "peaks"), iv);
 }
 
 function getVacuumChainTroughs() {
   const sym = vacuumLhState.selected;
+  const iv = vacuumLhState.chartInterval;
   if (!sym) return [];
-  return vacuumChainPoints(sym, vacuumLhState.chartInterval, "troughs");
+  return vacuumFilterPivotsForChart(vacuumChainPoints(sym, iv, "troughs"), iv);
 }
 
 function getVacuumChartPeaks() {
@@ -621,8 +642,8 @@ function getVacuumGhostPeaks() {
   if (!sym) return [];
   const series = vacuumSeriesEntry(sym, iv);
   const detail = vacuumDetailList("ghost_peaks");
-  if (Array.isArray(detail) && detail.length) return detail;
-  return series?.ghostPeaks || [];
+  if (Array.isArray(detail) && detail.length) return vacuumFilterPivotsForChart(detail, iv);
+  return vacuumFilterPivotsForChart(series?.ghostPeaks || [], iv);
 }
 
 function getVacuumGhostTroughs() {
@@ -631,8 +652,8 @@ function getVacuumGhostTroughs() {
   if (!sym) return [];
   const series = vacuumSeriesEntry(sym, iv);
   const detail = vacuumDetailList("ghost_troughs");
-  if (Array.isArray(detail) && detail.length) return detail;
-  return series?.ghostTroughs || [];
+  if (Array.isArray(detail) && detail.length) return vacuumFilterPivotsForChart(detail, iv);
+  return vacuumFilterPivotsForChart(series?.ghostTroughs || [], iv);
 }
 
 function requestVacuumChartAnchors(interval) {
@@ -1019,6 +1040,18 @@ async function refreshVacuumVisibleChart() {
 async function switchVacuumChartTf(interval) {
   if (!vacuumLhState.selected || vacuumLhState.chartInterval === interval) return;
   vacuumLhState.chartInterval = interval;
+  if (vacuumLhState.detail && String(vacuumLhState.detail.interval) !== String(interval)) {
+    vacuumLhState.detail = {
+      ...vacuumLhState.detail,
+      interval,
+      anchor_peaks: [],
+      anchor_troughs: [],
+      ghost_peaks: [],
+      ghost_troughs: [],
+      peaks: [],
+      troughs: [],
+    };
+  }
   requestVacuumChartAnchors(interval);
   if (VACUUM_LIST_TF.some(([c]) => c === interval) && vacuumLhState.lhInterval !== interval) {
     vacuumLhState.lhInterval = interval;
@@ -1279,22 +1312,46 @@ function mergeVacuumDetail(data) {
   vacuumApplyDetailSeries(data);
   const prev = vacuumLhState.detail || {};
   const prevSignal = prev.signal;
+  const chartIv = String(data.interval ?? prev.interval ?? vacuumLhState.chartInterval ?? "");
+  const ivChanged = data.interval != null && String(data.interval) !== String(prev.interval);
+  const mergeAnchors = (field, incoming) => {
+    if (incoming == null) return ivChanged ? [] : prev[field];
+    if (ivChanged) return vacuumFilterPivotsForChart(incoming, chartIv);
+    return vacuumFilterPivotsForChart(
+      vacuumFreezeAnchorList(prev[field], incoming),
+      chartIv,
+    );
+  };
   vacuumLhState.detail = {
     ...prev,
     ...data,
     signal: data.signal || prevSignal,
-    anchor_peaks:
-      data.anchor_peaks != null
-        ? vacuumFreezeAnchorList(prev.anchor_peaks, data.anchor_peaks)
-        : prev.anchor_peaks,
-    anchor_troughs:
-      data.anchor_troughs != null
-        ? vacuumFreezeAnchorList(prev.anchor_troughs, data.anchor_troughs)
-        : prev.anchor_troughs,
-    ghost_peaks: data.ghost_peaks ?? prev.ghost_peaks,
-    ghost_troughs: data.ghost_troughs ?? prev.ghost_troughs,
-    peaks: data.peaks ?? prev.peaks,
-    troughs: data.troughs ?? prev.troughs,
+    anchor_peaks: mergeAnchors("anchor_peaks", data.anchor_peaks),
+    anchor_troughs: mergeAnchors("anchor_troughs", data.anchor_troughs),
+    ghost_peaks:
+      data.ghost_peaks != null
+        ? vacuumFilterPivotsForChart(data.ghost_peaks, chartIv)
+        : ivChanged
+          ? []
+          : vacuumFilterPivotsForChart(prev.ghost_peaks, chartIv),
+    ghost_troughs:
+      data.ghost_troughs != null
+        ? vacuumFilterPivotsForChart(data.ghost_troughs, chartIv)
+        : ivChanged
+          ? []
+          : vacuumFilterPivotsForChart(prev.ghost_troughs, chartIv),
+    peaks:
+      data.peaks != null
+        ? vacuumFilterPivotsForChart(data.peaks, chartIv)
+        : ivChanged
+          ? []
+          : vacuumFilterPivotsForChart(prev.peaks, chartIv),
+    troughs:
+      data.troughs != null
+        ? vacuumFilterPivotsForChart(data.troughs, chartIv)
+        : ivChanged
+          ? []
+          : vacuumFilterPivotsForChart(prev.troughs, chartIv),
   };
 }
 
