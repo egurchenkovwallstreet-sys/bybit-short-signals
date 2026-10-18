@@ -290,11 +290,39 @@ class M5HtfGateTest(unittest.TestCase):
         self.assertIsNone(
             opposite_pivot_exit_signal(state, peak_ts + 2 * STEP + 1_000, "long", base, "5")
         )
-        self.assertIsNotNone(
-            opposite_pivot_exit_signal(state, peak_ts + 3 * STEP, "long", base, "5")
-        )
+        exit_snap = {
+            "interval": "5",
+            "peaks": [{"time_ms": peak_ts, "price": 12.0, "left_strength": 30}],
+            "troughs": [],
+        }
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=exit_snap):
+            self.assertIsNotNone(
+                opposite_pivot_exit_signal(state, peak_ts + 3 * STEP, "long", base, "5")
+            )
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "short", peak_ts, "5"))
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "long", now_ms + 11_000, "5"))
+
+
+class Bab5OppositeExitTest(unittest.TestCase):
+    def test_exit_uses_anchor_trough_like_chart(self) -> None:
+        base = _aligned_base()
+        trough_ts = base + 20 * STEP
+        opened_at = base + 10 * STEP
+        confirm_at = second_bar_close_ms(trough_ts, "5")
+        state = SymbolState("XUSDT", last_price=10.0, turnover_24h_usdt=2_000_000.0)
+        state.bars_htf["5"] = _bars(base, [12.0] * 30, [9.0] * 30)
+        snap = {
+            "interval": "5",
+            "peaks": [{"time_ms": base + 10 * STEP, "price": 12.0, "left_strength": 28}],
+            "troughs": [{"time_ms": trough_ts, "price": 9.5, "left_strength": 30}],
+        }
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels", return_value=snap):
+            early = opposite_pivot_exit_signal(state, confirm_at - 1_000, "short", opened_at, "5")
+            hit = opposite_pivot_exit_signal(state, confirm_at + 5_000, "short", opened_at, "5")
+        self.assertIsNone(early)
+        self.assertIsNotNone(hit)
+        self.assertEqual(hit["side"], "long")
+        self.assertEqual(hit["pivot_time_ms"], trough_ts)
 
 
 class Vps15OppositeExitTest(unittest.TestCase):

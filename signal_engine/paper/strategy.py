@@ -1986,8 +1986,11 @@ class PaperStrategy:
         trade_kind = "pyl1" if variant == config.PAPER_PYL1_VARIANT else "pyl"
         watch: list[dict] = []
         pyl1 = variant == config.PAPER_PYL1_VARIANT
-        for symbol, state in states.items():
-            if not state.last_price:
+        open_symbols = {t.symbol for t in self.trades.values() if t.variant == variant}
+        scan_symbols = sorted(set(states.keys()) | open_symbols)
+        for symbol in scan_symbols:
+            state = states.get(symbol)
+            if state is None or not state.last_price:
                 continue
             track = True
             if pyl1:

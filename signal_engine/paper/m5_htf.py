@@ -283,8 +283,11 @@ def opposite_pivot_exit_signal(
     opened_at_ms: int,
     interval: str = "5",
 ) -> dict | None:
-    """БАБЛОСОС: выход, когда у противоположного pivot закрылась 2-я свеча справа."""
-    hit = opposite_appeared(state, now_ms, open_side, opened_at_ms, interval)
+    """БАБЛОСОС: выход по противоп. TZ-pivot (как на графике LH/HL), после 2-й свечи справа."""
+    if interval == "5":
+        hit = opposite_anchor_pivot_exit(state, now_ms, open_side, opened_at_ms, interval)
+    else:
+        hit = opposite_appeared(state, now_ms, open_side, opened_at_ms, interval)
     if not hit:
         return None
     if int(now_ms) < second_bar_close_ms(int(hit["pivot_time_ms"]), interval):
