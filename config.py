@@ -779,8 +779,6 @@ VACUUM_LH_PIVOT_LEFT_MAX = _env_int("VACUUM_LH_PIVOT_LEFT_MAX", 30)
 VACUUM_LH_PIVOT_RIGHT = _env_int("VACUUM_LH_PIVOT_RIGHT", 2)
 # Между двумя pivot-high или двумя pivot-low на одном TF — не меньше N закрытых свечей.
 VACUUM_LH_PIVOT_MIN_GAP = _env_int("VACUUM_LH_PIVOT_MIN_GAP", 30)
-# 5m: между подтверждённым pivot и следующим противоположным — не меньше N свечей.
-VACUUM_LH_OPPOSITE_MIN_BARS = _env_int("VACUUM_LH_OPPOSITE_MIN_BARS", 20)
 VACUUM_LH_LIVE_INTERVAL = "15"
 VACUUM_LH_LOOKBACK_DAYS = _env_int("VACUUM_LH_LOOKBACK_DAYS", 14)
 VACUUM_LH_MIN_1H_BARS = _env_int("VACUUM_LH_MIN_1H_BARS", 24)

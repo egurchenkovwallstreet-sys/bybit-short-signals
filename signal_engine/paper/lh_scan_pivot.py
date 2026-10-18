@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import config
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars
 from signal_engine.vacuum_lh import (
@@ -23,40 +22,6 @@ M5_STEP_MS = 300_000
 def pivot_has_two_right_bars(index: dict[int, Bar], pivot_ts: int, step: int = M5_STEP_MS) -> bool:
     ts = int(pivot_ts)
     return index.get(ts + step) is not None and index.get(ts + 2 * step) is not None
-
-
-def last_confirmed_opposite_pivot_ts(
-    snap: dict,
-    pivot_kind: str,
-    before_ts: int,
-    index: dict[int, Bar],
-    *,
-    step: int = M5_STEP_MS,
-) -> int | None:
-    """Последний подтверждённый pivot противоположного типа строго раньше before_ts."""
-    want_peak = pivot_kind == "trough"
-    points = list((snap.get("peaks") if want_peak else snap.get("troughs")) or [])
-    ref: int | None = None
-    for p in points:
-        ts = int(p.get("time_ms") or p.get("time") or 0)
-        if ts <= 0 or ts >= int(before_ts):
-            continue
-        if not pivot_has_two_right_bars(index, ts, step):
-            continue
-        if ref is None or ts > ref:
-            ref = ts
-    return ref
-
-
-def opposite_pivot_spacing_ok(ref_ts: int | None, pivot_ts: int, interval: str) -> bool:
-    if interval != "5":
-        return True
-    if ref_ts is None:
-        return True
-    min_bars = config.VACUUM_LH_OPPOSITE_MIN_BARS
-    if min_bars < 1:
-        return True
-    return (int(pivot_ts) - int(ref_ts)) // M5_STEP_MS >= min_bars
 
 
 def snapshot_pivot_levels(state: SymbolState, interval: str, now_ms: int) -> dict | None:

@@ -2019,14 +2019,8 @@ class PaperStrategy:
             if open_key in self.trades:
                 trade = self.trades[open_key]
                 closed_side = trade.pos.side
-                entry_pivot_ts = int((trade.entry.get("metrics") or {}).get("pivot_time_ms") or 0) or None
                 exit_hit = opposite_pivot_exit_signal(
-                    state,
-                    now_ms,
-                    closed_side,
-                    trade.pos.opened_at,
-                    interval,
-                    ref_pivot_ts=entry_pivot_ts,
+                    state, now_ms, closed_side, trade.pos.opened_at, interval
                 )
                 if exit_hit:
                     opp_ts = int(exit_hit["pivot_time_ms"])
@@ -2298,14 +2292,8 @@ class PaperStrategy:
                     else:
                         opp_exit = None
                         confirmed_exit = bool(fresh and side and side != closed_side)
-                        entry_pivot_ts = int((trade.entry.get("metrics") or {}).get("pivot_time_ms") or 0) or None
                         raw_exit = opposite_appeared(
-                            state,
-                            now_ms,
-                            closed_side,
-                            trade.pos.opened_at,
-                            interval,
-                            ref_pivot_ts=entry_pivot_ts,
+                            state, now_ms, closed_side, trade.pos.opened_at, interval
                         )
                     if raw_exit or confirmed_exit:
                         self._close_trade(trade, "opposite_pivot", state, now_ms)
