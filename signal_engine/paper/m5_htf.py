@@ -7,7 +7,12 @@
 from __future__ import annotations
 
 import config
-from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
+from signal_engine.paper.lh_scan_pivot import (
+    last_confirmed_opposite_pivot_ts,
+    opposite_pivot_spacing_ok,
+    pivot_has_two_right_bars,
+    snapshot_pivot_levels,
+)
 from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, second_bar_close_ms
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
@@ -165,9 +170,12 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
         ls = _pivot_left_strength(p)
         if ls is None or not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
-        if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
+        if not pivot_has_two_right_bars(index, ts, step):
             continue
         if interval == "5":
+            ref = last_confirmed_opposite_pivot_ts(snap, "peak", ts, index, step=step)
+            if not opposite_pivot_spacing_ok(ref, ts, interval):
+                continue
             candidates.append((ls, ts, "short"))
         elif qualify_htf_pivot(index, ts, "short", interval) == "ok":
             candidates.append((ls, ts, "short"))
@@ -176,9 +184,12 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
         ls = _pivot_left_strength(p)
         if ls is None or not _pivot_in_entry_window(ts, now_ms, interval, step):
             continue
-        if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
+        if not pivot_has_two_right_bars(index, ts, step):
             continue
         if interval == "5":
+            ref = last_confirmed_opposite_pivot_ts(snap, "trough", ts, index, step=step)
+            if not opposite_pivot_spacing_ok(ref, ts, interval):
+                continue
             candidates.append((ls, ts, "long"))
         elif qualify_htf_pivot(index, ts, "long", interval) == "ok":
             candidates.append((ls, ts, "long"))
@@ -282,9 +293,13 @@ def opposite_pivot_exit_signal(
     open_side: str,
     opened_at_ms: int,
     interval: str = "5",
+    *,
+    ref_pivot_ts: int | None = None,
 ) -> dict | None:
     """БАБЛОСОС: выход, когда у противоположного pivot закрылась 2-я свеча справа."""
-    hit = opposite_appeared(state, now_ms, open_side, opened_at_ms, interval)
+    hit = opposite_appeared(
+        state, now_ms, open_side, opened_at_ms, interval, ref_pivot_ts=ref_pivot_ts
+    )
     if not hit:
         return None
     if int(now_ms) < second_bar_close_ms(int(hit["pivot_time_ms"]), interval):
@@ -298,6 +313,8 @@ def opposite_anchor_pivot_exit(
     open_side: str,
     opened_at_ms: int,
     interval: str,
+    *,
+    ref_pivot_ts: int | None = None,
 ) -> dict | None:
     """Противоп. TZ-pivot (как на графике LH/HL): vps15 — только в 10 с после 2-й свечи."""
     if open_side not in ("long", "short"):
@@ -319,11 +336,18 @@ def opposite_anchor_pivot_exit(
         ls = _pivot_left_strength(p)
         if ls is None:
             continue
-        if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
+        if not pivot_has_two_right_bars(index, ts, step):
             continue
         confirmed_at = second_bar_close_ms(ts, interval)
         if confirmed_at <= opened or confirmed_at > int(now_ms):
             continue
+        if interval == "5":
+            ref = ref_pivot_ts
+            if ref is None:
+                kind = "peak" if want == "short" else "trough"
+                ref = last_confirmed_opposite_pivot_ts(snap, kind, ts, index, step=step)
+            if not opposite_pivot_spacing_ok(ref, ts, interval):
+                continue
         if interval == "15" and not just_confirmed(
             ts, now_ms, interval, slack_ms=config.PAPER_VPS15_EXIT_CONFIRM_SLACK_MS
         ):
@@ -342,12 +366,17 @@ def opposite_appeared(
     open_side: str,
     opened_at_ms: int,
     interval: str = "5",
+    *,
+    ref_pivot_ts: int | None = None,
 ) -> dict | None:
     """Противоположный L15–L30, вторая свеча которого закрылась уже после входа."""
     if open_side not in ("long", "short"):
         return None
     want = "short" if open_side == "long" else "long"
     bars = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
+    step = _BAR_STEP.get(interval) or M5
+    index = _index(bars)
+    snap = snapshot_pivot_levels(state, interval, now_ms) if interval == "5" else None
     left = config.VACUUM_LH_PIVOT_LEFT
     left_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     right = config.VACUUM_LH_PIVOT_RIGHT
@@ -363,6 +392,13 @@ def opposite_appeared(
         confirmed_at = second_bar_close_ms(ts, interval)
         if confirmed_at > int(now_ms) or confirmed_at <= opened:
             continue
+        if interval == "5":
+            ref = ref_pivot_ts
+            if ref is None and snap is not None:
+                kind = "peak" if want == "short" else "trough"
+                ref = last_confirmed_opposite_pivot_ts(snap, kind, ts, index, step=step)
+            if not opposite_pivot_spacing_ok(ref, ts, interval):
+                continue
         if hit is None or ts > int(hit["pivot_time_ms"]):
             hit = {
                 "side": want,

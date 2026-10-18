@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import config
-from signal_engine.paper.lh_scan_pivot import signal_from_pivot_diff
+from signal_engine.paper.lh_scan_pivot import opposite_pivot_spacing_ok, signal_from_pivot_diff
 from signal_engine.paper.pivot_clock import (
     batch_has_closed_bar,
     entry_on_third_bar,
@@ -270,26 +270,54 @@ class M5HtfGateTest(unittest.TestCase):
 
     def test_any_opposite_pivot_closes_without_15m_confirmation(self) -> None:
         base = _aligned_base()
-        highs = [20.0] + [10.0] * 15 + [12.0, 11.0, 11.0]
-        bars = _bars(base, highs, [9.0] * len(highs))
-        peak_ts = base + 16 * STEP
+        n = 35
+        highs = [10.0] * n
+        lows = [9.0] * n
+        trough_idx = 5
+        peak_idx = 26
+        lows[trough_idx] = 8.5
+        highs[peak_idx] = 12.0
+        highs[peak_idx + 1] = 11.0
+        highs[peak_idx + 2] = 11.0
+        bars = _bars(base, highs, lows)
+        trough_ts = base + trough_idx * STEP
+        peak_ts = base + peak_idx * STEP
         now_ms = peak_ts + 3 * STEP + 500
         state = SymbolState("XUSDT", last_price=11.0, turnover_24h_usdt=2_000_000.0)
         state.bars_htf["5"] = bars
         pyl = evaluate_pyl(state, now_ms, None)
         self.assertFalse(pyl["passed"])
-        hit = opposite_appeared(state, now_ms + 11_000, "long", peak_ts, "5")
+        hit = opposite_appeared(
+            state,
+            now_ms + 11_000,
+            "long",
+            trough_ts,
+            "5",
+            ref_pivot_ts=trough_ts,
+        )
         self.assertIsNotNone(hit)
         self.assertEqual(hit["side"], "short")
         self.assertEqual(hit["pivot_time_ms"], peak_ts)
         self.assertIsNone(
-            opposite_pivot_exit_signal(state, peak_ts + 2 * STEP + 1_000, "long", base, "5")
+            opposite_pivot_exit_signal(
+                state, peak_ts + 2 * STEP + 1_000, "long", base, "5", ref_pivot_ts=trough_ts
+            )
         )
         self.assertIsNotNone(
-            opposite_pivot_exit_signal(state, peak_ts + 3 * STEP, "long", base, "5")
+            opposite_pivot_exit_signal(
+                state, peak_ts + 3 * STEP, "long", base, "5", ref_pivot_ts=trough_ts
+            )
         )
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "short", peak_ts, "5"))
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "long", now_ms + 11_000, "5"))
+
+
+class OppositePivotSpacingTest(unittest.TestCase):
+    def test_five_min_requires_twenty_bars_between_opposite(self) -> None:
+        t0 = 1_000_000
+        self.assertTrue(opposite_pivot_spacing_ok(t0, t0 + 20 * STEP, "5"))
+        self.assertFalse(opposite_pivot_spacing_ok(t0, t0 + 19 * STEP, "5"))
+        self.assertTrue(opposite_pivot_spacing_ok(t0, t0 + 100 * STEP, "15"))
 
 
 class Vps15OppositeExitTest(unittest.TestCase):
