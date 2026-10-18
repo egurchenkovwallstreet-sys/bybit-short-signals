@@ -1365,25 +1365,54 @@ function ensureVacuumLhMarkerHooks(runtime) {
   }
 }
 
-function vacuumMarkerBarTime(runtime, p, iv) {
+function vacuumChartIv(runtime) {
+  return vacuumLhState.chartInterval || runtime?._chartInterval || "5";
+}
+
+function vacuumEventBarTime(runtime, utcMs, iv) {
   const BC = window.boardChart;
-  const tMs = p.time_chart_ms ?? p.time_ms ?? p.time_15m_ms;
-  if (!tMs || !BC?.candleTime) return null;
-  const wantSec = BC.barTimeToSec(BC.candleTime(tMs, iv));
-  const step = BC.INTERVAL_SEC?.[iv] || 900;
-  const bars = runtime._lastBars || [];
-  let best = null;
-  let bestDist = step + 1;
+  const ms = Number(utcMs);
+  if (!ms || !BC?.candleTime) return null;
+  const stepSec = BC.INTERVAL_SEC?.[iv] || 900;
+  const stepMs = stepSec * 1000;
+  const bars = runtime?._lastBars || [];
+  if (!bars.length) return null;
   for (const b of bars) {
-    const bs = BC.barTimeToSec(b.time);
-    const d = Math.abs(bs - wantSec);
+    const start = BC.barUtcStartMs(b, iv);
+    if (ms >= start && ms < start + stepMs) return b.time;
+  }
+  const wantSec = BC.barTimeToSec(BC.candleTime(ms, iv));
+  let best = null;
+  let bestDist = stepSec + 1;
+  for (const b of bars) {
+    const d = Math.abs(BC.barTimeToSec(b.time) - wantSec);
     if (d < bestDist) {
       bestDist = d;
       best = b.time;
     }
   }
-  if (best != null && bestDist <= step) return best;
+  if (best != null && bestDist <= stepSec) return best;
   return null;
+}
+
+function vacuumMarkerBarTime(runtime, p, iv) {
+  const tMs = p.time_chart_ms ?? p.time_ms ?? p.time_15m_ms;
+  if (!tMs) return null;
+  return vacuumEventBarTime(runtime, tMs, iv);
+}
+
+function vacuumTradeEntryMs(trade) {
+  const opened = Number(trade.opened_at);
+  const entry = trade.entry || trade.entry_json || {};
+  const m = entry.metrics || {};
+  const pivot = Number(m.pivot_time_ms);
+  const chartIv = vacuumChartIv(vacuumLhState.chart);
+  const tradeIv = m.interval || (trade.variant === "vps15" ? "15" : "5");
+  if (!(pivot > 0) || chartIv !== tradeIv) return opened;
+  const BC = window.boardChart;
+  const stepMs = (BC?.INTERVAL_SEC?.[tradeIv] || 300) * 1000;
+  if (tradeIv === "15") return pivot + 2 * stepMs;
+  return pivot + 3 * stepMs;
 }
 
 function vacuumMarkerTimeKey(time) {
@@ -1435,6 +1464,43 @@ function vacuumLhPivotMarkers(runtime, points, chartInterval, kind, chainKeys) {
   return markers;
 }
 
+function vacuumTradeChartMarkers(runtime, symbol, chartInterval) {
+  const iv = chartInterval || vacuumChartIv(runtime);
+  const markers = [];
+  for (const trade of vacuumSymbolTrades(symbol)) {
+    const side = vacuumTradeSide(trade);
+    if (side !== "long" && side !== "short") continue;
+    const entryMs = vacuumTradeEntryMs(trade);
+    const barTime = vacuumEventBarTime(runtime, entryMs, iv);
+    if (!barTime) continue;
+    const long = side === "long";
+    markers.push({
+      time: barTime,
+      position: long ? "belowBar" : "aboveBar",
+      color: long ? "#16a34a" : "#dc2626",
+      shape: long ? "arrowUp" : "arrowDown",
+      text: long ? "L" : "S",
+      _rank: 2500,
+    });
+    if (!trade._open && trade.closed_at) {
+      const exitBar = vacuumEventBarTime(runtime, Number(trade.closed_at), iv);
+      if (exitBar) {
+        const exitPx = Number(trade.exit_price || trade.last_price);
+        const plus = vacuumTradePlus(vacuumTradePnl(trade, exitPx));
+        markers.push({
+          time: exitBar,
+          position: long ? "aboveBar" : "belowBar",
+          color: plus ? "#16a34a" : "#dc2626",
+          shape: "square",
+          text: plus ? "✓" : "✕",
+          _rank: 2400,
+        });
+      }
+    }
+  }
+  return markers;
+}
+
 function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   if (!runtime?.series) return;
   clearVacuumLhOverlays(runtime);
@@ -1442,9 +1508,11 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   runtime._vacuumTroughLines = [];
   const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
   const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
+  const sym = vacuumLhState.selected;
   const raw = [
     ...vacuumLhPivotMarkers(runtime, peaks || [], chartInterval, "peak", chainPeakKeys),
     ...vacuumLhPivotMarkers(runtime, troughs || [], chartInterval, "trough", chainTroughKeys),
+    ...(sym ? vacuumTradeChartMarkers(runtime, sym, chartInterval) : []),
   ];
   const byTime = new Map();
   for (const m of raw) {
@@ -1594,46 +1662,12 @@ function ensureVacuumTradeOverlayEl() {
 }
 
 function vacuumTimeToX(runtime, ms) {
-  const BC = window.boardChart;
-  const bars = runtime?._lastBars;
-  if (!runtime?.chart || !bars?.length || !ms || !BC?.barTimeToSec) return null;
-  const target = Number(ms) / 1000;
-  if (!Number.isFinite(target)) return null;
-  const scale = runtime.chart.timeScale();
-  const secs = bars.map((b) => BC.barTimeToSec(b.time));
-  const xAt = (idx) => {
-    const x = scale.timeToCoordinate(bars[idx].time);
-    return x == null || Number.isNaN(x) ? null : x;
-  };
-  const pxPerSec = (i0, i1) => {
-    const x0 = xAt(i0);
-    const x1 = xAt(i1);
-    const span = secs[i1] - secs[i0];
-    if (x0 == null || x1 == null || !(span > 0)) return null;
-    return { x0, sec0: secs[i0], px: (x1 - x0) / span };
-  };
-  const last = secs.length - 1;
-  if (target <= secs[0]) {
-    if (last < 1) return xAt(0);
-    const step = pxPerSec(0, 1);
-    return step ? step.x0 + (target - step.sec0) * step.px : xAt(0);
-  }
-  if (target >= secs[last]) {
-    if (last < 1) return xAt(last);
-    const step = pxPerSec(last - 1, last);
-    if (!step) return xAt(last);
-    const xLast = xAt(last);
-    return xLast == null ? null : xLast + (target - secs[last]) * step.px;
-  }
-  let lo = 0;
-  let hi = last;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (secs[mid] < target) lo = mid + 1;
-    else hi = mid;
-  }
-  const step = pxPerSec(lo - 1, lo);
-  return step ? step.x0 + (target - step.sec0) * step.px : xAt(lo);
+  if (!runtime?.chart) return null;
+  const iv = vacuumChartIv(runtime);
+  const barTime = vacuumEventBarTime(runtime, ms, iv);
+  if (barTime == null) return null;
+  const x = runtime.chart.timeScale().timeToCoordinate(barTime);
+  return x == null || Number.isNaN(x) ? null : x;
 }
 
 function vacuumMarkOnScreen(x, hostW) {
@@ -1651,7 +1685,7 @@ function vacuumEntryArrow(runtime, trade, hostW) {
   if (side !== "long" && side !== "short") return "";
   const entry = Number(trade.entry_price);
   const long = side === "long";
-  const x = vacuumTimeToX(runtime, trade.opened_at);
+  const x = vacuumTimeToX(runtime, vacuumTradeEntryMs(trade));
   const y = runtime.series.priceToCoordinate(entry);
   if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
   const shift = long ? "translate(-50%, 2px)" : "translate(-50%, calc(-100% - 2px))";
@@ -1708,17 +1742,11 @@ function drawVacuumTradeOverlay(runtime) {
   for (const trade of trades) {
     const entry = Number(trade.entry_price);
     if (!(entry > 0) || !trade.opened_at) continue;
-    const arrow = vacuumEntryArrow(runtime, trade, hostW);
-    if (arrow) parts.push(arrow);
-    if (!trade._open) {
-      const mark = vacuumExitMark(runtime, trade, hostW);
-      if (mark) parts.push(mark);
-      continue;
-    }
+    if (!trade._open) continue;
     const current = vacuumTradeCurrentPrice(trade, live);
     const money = vacuumTradePnl(trade, current);
     hud.push(vacuumTradeHudCard(trade, money));
-    const left = vacuumTimeToX(runtime, trade.opened_at);
+    const left = vacuumTimeToX(runtime, vacuumTradeEntryMs(trade));
     const right = vacuumTimeToX(runtime, nowMs);
     const worst = vacuumTradeWorstPrice(trade);
     if (left == null || right == null || !(current > 0) || !(worst > 0)) continue;
@@ -1742,8 +1770,13 @@ function ensureVacuumTradeClock() {
   vacuumLhState._tradeClock = setInterval(() => {
     const rt = vacuumLhState.chart;
     if (!vacuumLhState.selected || !rt?._lastBars?.length) return;
-    if (!vacuumSymbolTrades(vacuumLhState.selected).some((t) => t._open)) return;
-    drawVacuumTradeOverlay(rt);
+    if (!vacuumSymbolTrades(vacuumLhState.selected).length) return;
+    drawVacuumLhOverlays(
+      rt,
+      getVacuumChartPeaks(),
+      getVacuumChartTroughs(),
+      vacuumLhState.chartInterval,
+    );
   }, 1000);
 }
 
