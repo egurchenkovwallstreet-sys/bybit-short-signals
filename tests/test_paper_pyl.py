@@ -351,21 +351,14 @@ class Vps15OppositeExitTest(unittest.TestCase):
             mid = (highs[i] + lows[i]) / 2
             bars15.append(Bar(base + i * step, mid, highs[i], lows[i], mid, 1.0))
         opened_at = entry_peak + step
-        confirm_at = second_bar_close_ms(opp_trough, "15")
+        confirm_at = confirm_bar_close_ms(opp_trough, "15", 1)
         state = SymbolState("XUSDT", last_price=99.0, turnover_24h_usdt=2_000_000.0)
         state.bars_htf["15"] = bars15
-        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels") as snap_fn:
-            snap_fn.return_value = {
-                "peaks": [{"time_ms": entry_peak, "price": 105.0, "left_strength": 17}],
-                "troughs": [{"time_ms": opp_trough, "price": 94.0, "left_strength": 21}],
-            }
-            inside = opposite_anchor_pivot_exit(state, confirm_at + 2_000, "short", opened_at, "15")
-            still = opposite_anchor_pivot_exit(state, confirm_at + 90_000, "short", opened_at, "15")
-            outside = opposite_anchor_pivot_exit(state, confirm_at + 130_000, "short", opened_at, "15")
+        inside = opposite_anchor_pivot_exit(state, confirm_at + 2_000, "short", opened_at, "15")
+        late = opposite_anchor_pivot_exit(state, confirm_at + 11_000, "short", opened_at, "15")
         self.assertIsNotNone(inside)
         self.assertEqual(inside["side"], "long")
-        self.assertIsNotNone(still)
-        self.assertIsNone(outside)
+        self.assertIsNone(late)
 
 
 class PivotConfirmClockTest(unittest.TestCase):

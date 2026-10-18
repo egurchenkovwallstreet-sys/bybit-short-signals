@@ -65,14 +65,18 @@ def just_confirmed(
     return close_at <= now < close_at + slack
 
 
-def vps15_entry_confirmed(pivot_time_ms: int, now_ms: int) -> bool:
-    """Окно входа Пылесос 15: 10 с после 1-й закрытой 15m справа."""
+def vps15_pivot_confirmed(pivot_time_ms: int, now_ms: int) -> bool:
+    """Пылесос 15: 10 с после закрытия 1-й 15m справа (вход и выход)."""
     return just_confirmed(
         pivot_time_ms,
         now_ms,
         "15",
         right=config.PAPER_VPS15_ENTRY_PIVOT_RIGHT,
     )
+
+
+def vps15_entry_confirmed(pivot_time_ms: int, now_ms: int) -> bool:
+    return vps15_pivot_confirmed(pivot_time_ms, now_ms)
 
 
 def first_bar_waiting(pivot_time_ms: int, now_ms: int, interval: str = "5") -> bool:

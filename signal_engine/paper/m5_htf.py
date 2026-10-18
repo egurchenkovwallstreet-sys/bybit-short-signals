@@ -1,7 +1,7 @@
 """TZ-pivot L15–L30 (left_strength), 2 справа.
 
 5m (pyl/vps5): LH/HL без 15m/30m; в окне 3-й свечи — кандидат с max left_strength.
-15m (vps15): LH/HL L15–L30; вход 10 с после 1-й закрытой 15m справа.
+15m (vps15): LH/HL L15–L30; вход/выход 10 с после 1-й закрытой 15m справа, затем re-enter.
 """
 
 from __future__ import annotations
@@ -13,10 +13,12 @@ from signal_engine.paper.lh_scan_pivot import (
     snapshot_pivot_levels,
 )
 from signal_engine.paper.pivot_clock import (
+    confirm_bar_close_ms,
     entry_on_third_bar,
     just_confirmed,
     second_bar_close_ms,
     vps15_entry_confirmed,
+    vps15_pivot_confirmed,
 )
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
@@ -347,6 +349,48 @@ def opposite_pivot_exit_signal(
     return hit
 
 
+def _opposite_vps15_one_bar_exit(
+    state: SymbolState,
+    now_ms: int,
+    open_side: str,
+    opened_at_ms: int,
+) -> dict | None:
+    """Противоп. pivot L15–L30, 1 закрытая 15m справа, окно 10 с (как вход)."""
+    if open_side not in ("long", "short"):
+        return None
+    want = "short" if open_side == "long" else "long"
+    bars = closed_bars(state.bars_htf.get("15") or [], "15", now_ms)
+    if len(bars) < 12:
+        return None
+    index = _index(bars)
+    left = config.VACUUM_LH_PIVOT_LEFT
+    left_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    right = config.PAPER_VPS15_ENTRY_PIVOT_RIGHT
+    opened = int(opened_at_ms)
+    points = (
+        pivot_highs_floating_left(bars, left, left_max, right)
+        if want == "short"
+        else pivot_lows_floating_left(bars, left, left_max, right)
+    )
+    hit: dict | None = None
+    for point in points:
+        ts = int(point["time"])
+        ls = _pivot_left_strength(point)
+        if ls is None or not pivot_has_one_right_bar(index, ts, M15):
+            continue
+        confirmed_at = confirm_bar_close_ms(ts, "15", right)
+        if confirmed_at <= opened or confirmed_at > int(now_ms):
+            continue
+        if not vps15_pivot_confirmed(ts, now_ms):
+            continue
+        if hit is None or ts > int(hit["pivot_time_ms"]):
+            bar = index.get(ts)
+            if bar is None:
+                continue
+            hit = _pack(bar, want, ls)
+    return hit
+
+
 def opposite_anchor_pivot_exit(
     state: SymbolState,
     now_ms: int,
@@ -354,9 +398,11 @@ def opposite_anchor_pivot_exit(
     opened_at_ms: int,
     interval: str,
 ) -> dict | None:
-    """Противоп. TZ-pivot (как на графике LH/HL): vps15 — только в 10 с после 2-й свечи."""
+    """Противоп. TZ-pivot: vps15 — 1×15m справа и 10 с; 5m — 2×5m (snap LH/HL)."""
     if open_side not in ("long", "short"):
         return None
+    if interval == "15":
+        return _opposite_vps15_one_bar_exit(state, now_ms, open_side, opened_at_ms)
     step = _BAR_STEP.get(interval)
     if step is None:
         return None
@@ -378,10 +424,6 @@ def opposite_anchor_pivot_exit(
             continue
         confirmed_at = second_bar_close_ms(ts, interval)
         if confirmed_at <= opened or confirmed_at > int(now_ms):
-            continue
-        if interval == "15" and not just_confirmed(
-            ts, now_ms, interval, slack_ms=config.PAPER_VPS15_EXIT_CONFIRM_SLACK_MS
-        ):
             continue
         if hit is None or ts > int(hit["pivot_time_ms"]):
             bar = index.get(ts)

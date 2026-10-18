@@ -2395,7 +2395,13 @@ class PaperStrategy:
                         )
                     if raw_exit or confirmed_exit:
                         self._close_trade(trade, "opposite_pivot", state, now_ms)
-                        reenter = confirmed_exit and ev_data.get("passed") and side and side != closed_side
+                        reenter = (
+                            confirmed_exit
+                            and ev_data.get("passed")
+                            and side
+                            and side != closed_side
+                            and (fresh if interval == "15" else True)
+                        )
                         if reenter:
                             balance = self.balances[variant]
                             margin = balance * config.PAPER_MARGIN_PCT / 100.0
