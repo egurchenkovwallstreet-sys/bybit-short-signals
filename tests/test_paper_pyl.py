@@ -317,9 +317,11 @@ class Vps15OppositeExitTest(unittest.TestCase):
                 "troughs": [{"time_ms": opp_trough, "price": 94.0, "left_strength": 21}],
             }
             inside = opposite_anchor_pivot_exit(state, confirm_at + 2_000, "short", opened_at, "15")
-            outside = opposite_anchor_pivot_exit(state, confirm_at + 12_000, "short", opened_at, "15")
+            still = opposite_anchor_pivot_exit(state, confirm_at + 90_000, "short", opened_at, "15")
+            outside = opposite_anchor_pivot_exit(state, confirm_at + 130_000, "short", opened_at, "15")
         self.assertIsNotNone(inside)
         self.assertEqual(inside["side"], "long")
+        self.assertIsNotNone(still)
         self.assertIsNone(outside)
 
 

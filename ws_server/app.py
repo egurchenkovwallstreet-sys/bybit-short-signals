@@ -100,6 +100,16 @@ async def paper_candidates(limit: int = 300) -> dict[str, Any]:
     return {"rows": rows}
 
 
+@app.post("/api/paper/trades/{trade_id}/close")
+async def paper_close_trade(trade_id: int) -> dict[str, Any]:
+    if trade_id < 1:
+        raise HTTPException(status_code=400, detail="некорректный id")
+    ok = await asyncio.to_thread(paper_db.request_manual_close, trade_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="открытая сделка не найдена")
+    return {"ok": True, "trade_id": trade_id}
+
+
 @app.get("/api/vacuum-lh/board")
 async def vacuum_lh_board(interval: str = config.VACUUM_LH_DEFAULT_INTERVAL) -> dict[str, Any]:
     if interval not in config.VACUUM_LH_INTERVALS:

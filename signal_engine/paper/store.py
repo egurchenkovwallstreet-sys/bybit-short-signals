@@ -206,6 +206,37 @@ class PaperStore:
         )
         self.db.commit()
 
+    _MANUAL_CLOSE_KEY = "manual_close_queue"
+
+    def enqueue_manual_close(self, trade_id: int) -> None:
+        import json
+
+        raw = self.get_kv(self._MANUAL_CLOSE_KEY)
+        ids: list[int] = json.loads(raw) if raw else []
+        tid = int(trade_id)
+        if tid not in ids:
+            ids.append(tid)
+        self.set_kv(self._MANUAL_CLOSE_KEY, json.dumps(ids))
+
+    def drain_manual_closes(self) -> list[int]:
+        import json
+
+        raw = self.get_kv(self._MANUAL_CLOSE_KEY)
+        if not raw:
+            return []
+        self.set_kv(self._MANUAL_CLOSE_KEY, "[]")
+        try:
+            return [int(x) for x in json.loads(raw)]
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+
+    def trade_is_open(self, trade_id: int) -> bool:
+        row = self.db.execute(
+            "SELECT 1 FROM paper_trades WHERE id = ? AND status = 'open' LIMIT 1",
+            (int(trade_id),),
+        ).fetchone()
+        return row is not None
+
     # --- сделки ---
 
     def insert_trade(self, row: dict[str, Any]) -> int:

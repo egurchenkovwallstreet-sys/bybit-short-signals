@@ -325,6 +325,8 @@ PAPER_PYL_STOP_ROE = _env_float("PAPER_PYL_STOP_ROE", 5.0)
 # БАБЛОСОС 1: только монеты с размахом цены за час ≥ этого порога (%).
 PAPER_PYL1_HOUR_RANGE_PCT = _env_float("PAPER_PYL1_HOUR_RANGE_PCT", 2.0)
 PAPER_PIVOT_CONFIRM_SLACK_MS = _env_int("PAPER_PIVOT_CONFIRM_SLACK_MS", 10_000)
+# Пылесос 15: окно закрытия по противоп. pivot (вход по-прежнему 10 с).
+PAPER_VPS15_EXIT_CONFIRM_SLACK_MS = _env_int("PAPER_VPS15_EXIT_CONFIRM_SLACK_MS", 120_000)
 PAPER_PIVOT_CONFIRM_FETCH_LIMIT = _env_int("PAPER_PIVOT_CONFIRM_FETCH_LIMIT", 8)
 PAPER_PIVOT_CONFIRM_PARALLEL = _env_int("PAPER_PIVOT_CONFIRM_PARALLEL", 8)
 # vac — прежний трейл pyl (не путать с bab):

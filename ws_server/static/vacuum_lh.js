@@ -308,6 +308,13 @@ function initVacuumLhTab() {
         setVacuumListTf(listTf.dataset.vacListTf);
         return;
       }
+      const closeBtn = target.closest("[data-vac-paper-close]");
+      if (closeBtn?.dataset.vacPaperClose) {
+        event.preventDefault();
+        event.stopPropagation();
+        void vacuumManualCloseTrade(Number(closeBtn.dataset.vacPaperClose));
+        return;
+      }
       const deskRow = target.closest("[data-vac-desk-symbol]");
       if (deskRow?.dataset.vacDeskSymbol) {
         event.preventDefault();
@@ -380,9 +387,16 @@ function setVacuumMode(mode) {
 
 async function ensureVacuumPaper() {
   if (vacuumLhState.paper) return;
+  await fetchVacuumPaperSnapshot();
+}
+
+async function fetchVacuumPaperSnapshot() {
   try {
     const res = await fetch("/api/paper/snapshot");
-    if (res.ok) vacuumLhState.paper = await res.json();
+    if (res.ok) {
+      vacuumLhState.paper = await res.json();
+      onVacuumPaper(vacuumLhState.paper);
+    }
   } catch (_err) {
     /* ignore */
   }
@@ -1628,7 +1642,11 @@ function vacuumTradeHudCard(trade, money) {
   const dollars = Number.isFinite(money.pnl)
     ? `${money.pnl >= 0 ? "+" : "−"}$${Math.abs(money.pnl).toFixed(2)}`
     : "—";
-  return `<div class="vacuum-trade-pnl ${tone}"><span class="vacuum-trade-hud-name">${name}</span><br>${vacuumFmtSigned(money.roe, 1, "%")}<br>${dollars}</div>`;
+  const closeBtn =
+    trade._open && trade.id
+      ? `<br><button type="button" class="paper-btn vac-paper-close-btn" data-vac-paper-close="${trade.id}">Закрыть</button>`
+      : "";
+  return `<div class="vacuum-trade-pnl ${tone}"><span class="vacuum-trade-hud-name">${name}</span><br>${vacuumFmtSigned(money.roe, 1, "%")}<br>${dollars}${closeBtn}</div>`;
 }
 
 function vacuumFmtSigned(n, digits, suffix) {
@@ -1772,7 +1790,26 @@ function vacuumExitLabel(reason) {
   if (reason === "trailing_stop") return "стоп";
   if (reason === "liquidation") return "ликвидация";
   if (reason === "opposite_pivot") return "противоположный";
+  if (reason === "manual") return "вручную";
   return reason || "—";
+}
+
+async function vacuumManualCloseTrade(tradeId) {
+  if (!Number.isFinite(tradeId) || tradeId < 1) return;
+  if (!window.confirm("Закрыть сделку по текущей цене?")) return;
+  try {
+    const res = await fetch(`/api/paper/trades/${tradeId}/close`, { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      window.alert(body.detail || "Не удалось закрыть");
+      return;
+    }
+    await fetchVacuumPaperSnapshot();
+    void fetchVacuumDeskClosed(true);
+    if (vacuumDeskVisible()) renderVacuumDesk();
+  } catch (_err) {
+    window.alert("Ошибка сети");
+  }
 }
 
 function vacuumClosedStats(rows) {
@@ -2012,7 +2049,7 @@ function renderVacuumDesk() {
       vacuumLhState.mode === "vps5"
         ? "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие: противоп. pivot после 2-й 5m справа. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
         : vacuumLhState.mode === "vps15"
-          ? "15m pivot L15–L30 + 1H/4H. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 10 с. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
+          ? "15m pivot L15–L30 + 1H/4H. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 2 мин. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
           : vacuumLhState.mode === "pyl1"
             ? "Как БАБЛОСОС + размах ≥2% за час. 2 верха и 2 низа растут → только лонг; падают → только шорт; смешано — пропуск. Стоп ±5% от пивота."
             : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие после 2-й 5m у противоп. pivot. Стоп ±5% от свечи пивота.";
@@ -2027,7 +2064,7 @@ function renderVacuumDesk() {
   const openTable = document.getElementById("vacuum-desk-open");
   if (openTable) {
     openTable.innerHTML = opens.length
-      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th>Цена</th><th>Стоп</th><th>P&L</th></tr></thead><tbody>${opens
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th>Цена</th><th>Стоп</th><th>P&L</th><th></th></tr></thead><tbody>${opens
           .map(
             (t) => `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
           <td><b>${t.symbol}</b></td>
@@ -2036,6 +2073,7 @@ function renderVacuumDesk() {
           <td>${t.last_price}</td>
           <td>${t.stop_price}</td>
           ${vacuumPnlTd(t.pnl_usd)}
+          <td><button type="button" class="paper-btn vac-paper-close-btn" data-vac-paper-close="${t.id}">Закрыть</button></td>
         </tr>`,
           )
           .join("")}</tbody>`

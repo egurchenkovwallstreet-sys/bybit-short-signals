@@ -64,3 +64,17 @@ def candidates(limit: int) -> list[dict[str, Any]]:
         return list_candidates(conn, limit)
     finally:
         conn.close()
+
+
+def request_manual_close(trade_id: int) -> bool:
+    from signal_engine.paper.store import PaperStore
+
+    store = PaperStore(config.PAPER_SQLITE_PATH)
+    store.open()
+    try:
+        if not store.trade_is_open(trade_id):
+            return False
+        store.enqueue_manual_close(trade_id)
+        return True
+    finally:
+        store.close()

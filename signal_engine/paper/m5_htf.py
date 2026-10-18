@@ -324,7 +324,9 @@ def opposite_anchor_pivot_exit(
         confirmed_at = second_bar_close_ms(ts, interval)
         if confirmed_at <= opened or confirmed_at > int(now_ms):
             continue
-        if interval == "15" and not just_confirmed(ts, now_ms, interval):
+        if interval == "15" and not just_confirmed(
+            ts, now_ms, interval, slack_ms=config.PAPER_VPS15_EXIT_CONFIRM_SLACK_MS
+        ):
             continue
         if hit is None or ts > int(hit["pivot_time_ms"]):
             bar = index.get(ts)

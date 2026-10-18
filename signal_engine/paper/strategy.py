@@ -564,6 +564,7 @@ class PaperStrategy:
 
     def scan(self, states: dict[str, SymbolState], now_ms: int, *, pivots: bool = True) -> dict:
         btc_4h = btc_change_4h(states.get(config.PAPER_BTC_SYMBOL), now_ms)
+        self._process_manual_closes(states, now_ms)
         self._refresh_peaks(states, now_ms)
         if config.PAPER_LT20_VARIANT in VARIANTS:
             self._refresh_growth_peaks(states, now_ms)
@@ -780,6 +781,17 @@ class PaperStrategy:
                 cand.note = "вторая нога: новый пик"
                 self.peak_snapshots[symbol] = (cand.pump.peak_price, cand.pump.peak_ts)
 
+    def _process_manual_closes(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        for trade_id in self.store.drain_manual_closes():
+            trade = next((t for t in self.trades.values() if t.id == trade_id), None)
+            if trade is None:
+                continue
+            state = states.get(trade.symbol)
+            if state is None or not state.last_price:
+                continue
+            trade.pos.last_price = float(state.last_price)
+            self._close_trade(trade, "manual", state, now_ms)
+
     def _update_trades(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for trade in list(self.trades.values()):
             state = states.get(trade.symbol)
@@ -811,7 +823,7 @@ class PaperStrategy:
     def _close_trade(self, trade: OpenTrade, reason: str, state: SymbolState, now_ms: int) -> None:
         pos = trade.pos
         variant = trade.variant
-        if reason == "opposite_pivot" and state.last_price:
+        if reason in ("opposite_pivot", "manual") and state.last_price:
             pos.last_price = float(state.last_price)
         result = pos.close_result(reason)
         balance_before_close = self.balances[variant]

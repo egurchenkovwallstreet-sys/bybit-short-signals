@@ -22,7 +22,7 @@
 
   const KIND = { short: "Короткий", long: "Длинный" };
   const TRIGGER = { "4h": "≤4 ч", "24h": "24 ч", "7d": "7 д", "14d": "14 д" };
-  const EXIT = { trailing_stop: "Трейлинг-стоп", liquidation: "Ликвидация" };
+  const EXIT = { trailing_stop: "Трейлинг-стоп", liquidation: "Ликвидация", manual: "Вручную", opposite_pivot: "Противоп. pivot" };
   const SCORE_PARTS = {
     ema: "Пробои EMA",
     double_top: "Двойная вершина",
@@ -683,15 +683,46 @@
 
   // --- таблицы ---
 
+  async function paperManualClose(tradeId) {
+    if (!Number.isFinite(tradeId) || tradeId < 1) return;
+    if (!window.confirm("Закрыть сделку по текущей цене?")) return;
+    try {
+      const res = await fetch(`/api/paper/trades/${tradeId}/close`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        window.alert(body.detail || "Не удалось закрыть");
+        return;
+      }
+      paper.closed = [];
+      paper.closedVariant = "";
+      try {
+        const snap = await fetch("/api/paper/snapshot");
+        if (snap.ok) onSnapshot(await snap.json());
+        else render();
+      } catch (_e) {
+        render();
+      }
+    } catch (_err) {
+      window.alert("Ошибка сети");
+    }
+  }
+
   function bindRows(table, type) {
     table.querySelectorAll("tr[data-id]").forEach((tr) => {
-      tr.addEventListener("click", () => {
+      tr.addEventListener("click", (ev) => {
+        if (ev.target.closest("[data-paper-close]")) return;
         const id = Number(tr.dataset.id);
         const same = paper.selected && paper.selected.type === type && paper.selected.id === id;
         paper.selected = same ? null : { type, id };
         paper.chartKey = "";
         render();
         if (!same) document.getElementById("paper-detail")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+    table.querySelectorAll("[data-paper-close]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        void paperManualClose(Number(btn.dataset.paperClose));
       });
     });
   }
@@ -710,7 +741,7 @@
     }
     table.innerHTML = `<thead><tr>
       <th>Монета</th><th>Памп</th><th>Условий</th><th>Вход</th><th>Цена входа</th><th>Текущая</th><th>Изм. цены</th>
-      <th>Стоп</th><th>Лучшая</th><th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Маржа</th><th>Funding</th><th>Сила</th><th>В сделке</th>
+      <th>Стоп</th><th>Лучшая</th><th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Маржа</th><th>Funding</th><th>Сила</th><th>В сделке</th><th></th>
     </tr></thead><tbody>${rows
       .map(
         (r) => `<tr class="clickable${isSel("open", r.id)}" data-id="${r.id}">
@@ -730,6 +761,7 @@
         <td>${usd(r.funding_paid, 4)}</td>
         <td class="grade-${r.grade}">${r.grade} · ${num(r.score, 1)}</td>
         <td>${dur(r.duration_min)}</td>
+        <td><button type="button" class="paper-btn" data-paper-close="${r.id}">Закрыть</button></td>
       </tr>`,
       )
       .join("")}</tbody>`;

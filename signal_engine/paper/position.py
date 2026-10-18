@@ -856,7 +856,7 @@ class Position:
             price = self.liq_price
             exit_fee = 0.0
             pnl = -self.margin - self.entry_fee + self.funding_paid
-        elif reason == "opposite_pivot":
+        elif reason in ("opposite_pivot", "manual"):
             price = self.last_price if self.last_price > 0 else self.stop_price
             exit_fee = self.exit_fee(price)
             pnl = self.gross_pnl(price) - self.entry_fee - exit_fee + self.funding_paid
