@@ -653,13 +653,15 @@ function candleTimeSec(raw) {
 }
 
 function candleTimeForChart(raw, interval) {
+  const BC = window.boardChart;
+  if (BC?.candleTime) return BC.candleTime(raw, interval);
   const sec = candleTimeSec(raw);
   if (!sec) return 0;
   if (interval === "D") {
     const d = new Date(sec * 1000);
     return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
   }
-  return sec;
+  return sec + 3 * 3600;
 }
 
 async function ensureCandles(symbol, interval, detail) {

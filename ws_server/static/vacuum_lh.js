@@ -1318,7 +1318,7 @@ function renderVacuumLhInfo() {
       <h3>${sym}</h3>
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
-    <p>График <strong>${chartTf}</strong>: маркеры экстремумов (слева 15–30, справа 2, разнос ≥30). Список ${lhTf}.</p>
+    <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): маркеры экстремумов (слева 15–30, справа 2, разнос ≥30). Список ${lhTf}.</p>
     <p>Цена: <strong data-vac-live="price">${row.last_price ?? "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>

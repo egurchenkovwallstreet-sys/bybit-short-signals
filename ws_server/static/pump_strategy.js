@@ -378,6 +378,8 @@ function updatePumpStrategyLiveFields() {
 }
 
 function candleTimeForPsc(raw, interval) {
+  const BC = window.boardChart;
+  if (BC?.candleTime) return BC.candleTime(raw, interval);
   const n = Number(raw);
   if (!n || Number.isNaN(n)) return 0;
   const sec = n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
@@ -385,7 +387,7 @@ function candleTimeForPsc(raw, interval) {
     const d = new Date(sec * 1000);
     return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
   }
-  return sec;
+  return sec + 3 * 3600;
 }
 
 function drawPumpStrategyCandles(candles, interval, resetScale) {

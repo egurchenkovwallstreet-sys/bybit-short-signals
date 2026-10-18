@@ -14,6 +14,8 @@ window.boardChart = {
   FETCH_BARS: 300,
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
+  /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
+  CHART_MSK_OFFSET_SEC: 3 * 3600,
   PREFETCH_CONCURRENCY: 1,
   PREFETCH_COOLDOWN_MS: 90_000,
   _assetCache: new Map(),
@@ -497,13 +499,23 @@ window.boardChart = {
     return n > 1e12 ? n : n * 1000;
   },
 
+  barUtcStartMs(bar, interval) {
+    const BC = window.boardChart;
+    if (bar._utcSec) return bar._utcSec * 1000;
+    const sec = BC.barTimeToSec(bar.time);
+    if (interval !== "D" && typeof bar.time !== "object") {
+      return (sec - BC.CHART_MSK_OFFSET_SEC) * 1000;
+    }
+    return sec * 1000;
+  },
+
   aggregateLiqByBar(bars, liquidations, interval) {
     const BC = window.boardChart;
     const stepMs = (BC.INTERVAL_SEC[interval] || 3600) * 1000;
     const meta = (bars || []).map((b, idx) => {
-      const startMs = BC.barTimeToSec(b.time) * 1000;
+      const startMs = BC.barUtcStartMs(b, interval);
       const next = bars[idx + 1];
-      const endMs = next ? BC.barTimeToSec(next.time) * 1000 : startMs + stepMs;
+      const endMs = next ? BC.barUtcStartMs(next, interval) : startMs + stepMs;
       return { key: BC.barTimeKey(b.time), time: b.time, startMs, endMs };
     });
     const map = new Map();
@@ -1455,6 +1467,7 @@ window.boardChart = {
     runtime.chart = LightweightCharts.createChart(container, {
       layout: { background: { color: "#10141b" }, textColor: "#c5d0de" },
       grid: { vertLines: { color: "#222a36" }, horzLines: { color: "#222a36" } },
+      localization: { locale: "ru-RU" },
       ...BC.chartInteractionDefaults(),
     });
     runtime.series = runtime.chart.addCandlestickSeries({
@@ -1480,15 +1493,22 @@ window.boardChart = {
     requestAnimationFrame(resize);
   },
 
-  candleTime(raw, interval) {
+  utcSecFromRaw(raw) {
     const n = Number(raw);
     if (!n || Number.isNaN(n)) return 0;
-    const sec = n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+    return n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+  },
+
+  /** UTC timestamp → time для lightweight-charts (ось в MSK для intraday). */
+  candleTime(raw, interval) {
+    const BC = window.boardChart;
+    const sec = BC.utcSecFromRaw(raw);
+    if (!sec) return 0;
     if (interval === "D") {
       const d = new Date(sec * 1000);
       return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
     }
-    return sec;
+    return sec + BC.CHART_MSK_OFFSET_SEC;
   },
 
   drawCandles(runtime, candles, interval, resetScale, chartElId, livePrice) {
@@ -1504,12 +1524,15 @@ window.boardChart = {
     }
     const byTime = new Map();
     for (const candle of candles || []) {
-      const time = window.boardChart.candleTime(candle.timestamp ?? candle.time, interval);
-      if (!time) continue;
+      const raw = candle.timestamp ?? candle.time;
+      const sec = BC.utcSecFromRaw(raw);
+      const time = BC.candleTime(raw, interval);
+      if (!time || !sec) continue;
       const close = Number(candle.close);
       if (Number.isNaN(close)) continue;
       byTime.set(typeof time === "object" ? JSON.stringify(time) : String(time), {
         time,
+        _utcSec: sec,
         open: Number(candle.open),
         high: Number(candle.high),
         low: Number(candle.low),
