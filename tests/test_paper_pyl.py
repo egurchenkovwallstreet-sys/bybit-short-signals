@@ -34,6 +34,7 @@ from signal_engine.paper.pyl_detect import (
     evaluate_pyl,
     pyl1_range_expanding,
     pyl1_structure_allows_entry,
+    _btc_same_side_ok,
     structure_bias_two_pivots,
 )
 from signal_engine.swing_highs import closed_bars
@@ -79,6 +80,13 @@ class Pyl1StructureTest(unittest.TestCase):
         troughs_down = [{"price": 9.0}, {"price": 8.0}]
         self.assertEqual(structure_bias_two_pivots(peaks_down, troughs_down), "down")
         self.assertEqual(structure_bias_two_pivots(peaks_up, troughs_down), "mixed")
+
+    def test_btc_same_side_filter(self) -> None:
+        self.assertTrue(_btc_same_side_ok("long", 0.12))
+        self.assertTrue(_btc_same_side_ok("short", -0.05))
+        self.assertFalse(_btc_same_side_ok("long", -0.01))
+        self.assertFalse(_btc_same_side_ok("short", 0.01))
+        self.assertFalse(_btc_same_side_ok("long", None))
 
     def test_pyl1_range_expanding(self) -> None:
         peaks = [{"price": 10.0}, {"price": 11.0}]

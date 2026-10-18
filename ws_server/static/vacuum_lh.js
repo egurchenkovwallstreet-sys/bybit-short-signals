@@ -45,19 +45,20 @@ const VACUUM_DESK = [
   ["scan", "Сканер"],
   ["pyl", "БАБЛОСОС"],
   ["pyl1", "БАБЛОСОС 1"],
+  ["pylbtc", "БАБЛОСОС+BTC"],
   ["vps5", "Пылесос 5"],
   ["vps15", "Пылесос 15"],
 ];
 
-const VACUUM_TRADE_VARIANTS = ["pyl", "pyl1", "vps5", "vps15"];
+const VACUUM_TRADE_VARIANTS = ["pyl", "pyl1", "pylbtc", "vps5", "vps15"];
 
 function vacuumIsDeskMode(mode = vacuumLhState.mode) {
-  return mode === "pyl" || mode === "pyl1" || mode === "vps5" || mode === "vps15";
+  return mode === "pyl" || mode === "pyl1" || mode === "pylbtc" || mode === "vps5" || mode === "vps15";
 }
 
 function vacuumDeskChartInterval(mode = vacuumLhState.mode) {
   if (mode === "vps15") return "15";
-  if (mode === "pyl" || mode === "pyl1" || mode === "vps5") return "5";
+  if (mode === "pyl" || mode === "pyl1" || mode === "pylbtc" || mode === "vps5") return "5";
   return vacuumLhState.lhInterval;
 }
 
@@ -65,7 +66,7 @@ const vacuumLhState = {
   mode: "scan",
   paper: null,
   closed: [],
-  closedMap: { pyl: [], pyl1: [], vps5: [], vps15: [] },
+  closedMap: { pyl: [], pyl1: [], pylbtc: [], vps5: [], vps15: [] },
   symbolClosed: {},
   series: new Map(),
   scanPivots: {},
@@ -1888,6 +1889,7 @@ function vacuumDeskVariant() {
   if (vacuumLhState.mode === "vps5") return "vps5";
   if (vacuumLhState.mode === "vps15") return "vps15";
   if (vacuumLhState.mode === "pyl1") return "pyl1";
+  if (vacuumLhState.mode === "pylbtc") return "pylbtc";
   return "pyl";
 }
 
@@ -2004,6 +2006,7 @@ function vacuumDeskWatch() {
   if (vacuumLhState.mode === "vps5") return data.vps5_watch || [];
   if (vacuumLhState.mode === "vps15") return data.vps15_watch || [];
   if (vacuumLhState.mode === "pyl1") return data.pyl1_watch || [];
+  if (vacuumLhState.mode === "pylbtc") return data.pylbtc_watch || [];
   return data.pyl_watch || [];
 }
 
@@ -2075,15 +2078,19 @@ function renderVacuumDesk() {
           ? "Пылесос 15"
           : vacuumLhState.mode === "pyl1"
             ? "БАБЛОСОС 1"
-            : "БАБЛОСОС";
+            : vacuumLhState.mode === "pylbtc"
+              ? "БАБЛОСОС+BTC"
+              : "БАБЛОСОС";
     const rule =
       vacuumLhState.mode === "vps5"
         ? "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие: противоп. pivot после 2-й 5m справа. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
         : vacuumLhState.mode === "vps15"
-          ? "15m pivot L15–L30 + 1H/4H. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 2 мин. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
+          ? "15m pivot L15–L30. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 2 мин. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
           : vacuumLhState.mode === "pyl1"
             ? "Как БАБЛОСОС + размах ≥2% за час. Запрет при расширении (high↑ и low↓). Лонг: min выше prev; шорт: max ниже prev. Стоп ±5% от пивота."
-            : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
+            : vacuumLhState.mode === "pylbtc"
+              ? "Как БАБЛОСОС + BTC за 5 мин в сторону сделки (лонг — рост, шорт — падение). Стоп ±5% ROE от pivot."
+              : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>

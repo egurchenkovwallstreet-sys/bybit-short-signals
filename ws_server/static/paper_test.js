@@ -36,13 +36,13 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", vac: "#e9c46a", vps15: "#2a9d8f", vps5: "#48cae4", vps: "#2a9d8f", i5: "#9b5de5", i15: "#f15bb5" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", pylbtc: "#2a9d8f", vac: "#e9c46a", vps15: "#2a9d8f", vps5: "#48cae4", vps: "#2a9d8f", i5: "#9b5de5", i15: "#f15bb5" };
   const PLUS_VARIANTS = { t20p: true, p10p: true, mlnp: true };
   const MINI_VARIANTS = { mt1: true, mt2: true };
   const MINI_CHART_VARIANTS = { mt2c: true };
   const GRAF_VARIANTS = { graf: true };
   const DPS_VARIANTS = { dps: true };
-  const PYL_VARIANTS = { pyl: true, pyl1: true };
+  const PYL_VARIANTS = { pyl: true, pyl1: true, pylbtc: true };
   const VAC_VARIANTS = { vac: true };
   const VPS_VARIANTS = { vps15: true, vps5: true, vps: true };
   function vpsChartInterval(v) {
@@ -136,6 +136,7 @@
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_check_labels || {};
     if (paper.variant === "c3") return paper.data.c3_check_labels || {};
     if (paper.variant === "pyl1") return paper.data.pyl1_check_labels || {};
+    if (paper.variant === "pylbtc") return paper.data.pylbtc_check_labels || {};
     if (PYL_VARIANTS[paper.variant]) return paper.data.pyl_check_labels || {};
     if (VAC_VARIANTS[paper.variant]) return paper.data.vac_check_labels || {};
     if (VPS_VARIANTS[paper.variant]) return paper.data.vps_check_labels || {};
@@ -156,6 +157,7 @@
     if (paper.variant === "e5s" || paper.variant === "e5p") return paper.data.e5s_mandatory || [];
     if (paper.variant === "c3") return paper.data.c3_mandatory || [];
     if (paper.variant === "pyl1") return paper.data.pyl1_mandatory || [];
+    if (paper.variant === "pylbtc") return paper.data.pylbtc_mandatory || [];
     if (PYL_VARIANTS[paper.variant]) return paper.data.pyl_mandatory || [];
     if (VAC_VARIANTS[paper.variant]) return paper.data.vac_mandatory || [];
     if (VPS_VARIANTS[paper.variant]) return paper.data.vps_mandatory || [];
@@ -171,7 +173,7 @@
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
-  const DESK_VARIANTS = { pyl: true, pyl1: true, vps5: true, vps15: true };
+  const DESK_VARIANTS = { pyl: true, pyl1: true, pylbtc: true, vps5: true, vps15: true };
   function variants() {
     return (paper.data && paper.data.test_variants) || (paper.data && paper.data.variants) || ["t20", "p10", "t20p", "mlnp", "mt2", "graf"];
   }
@@ -194,6 +196,7 @@
     if (paper.variant === "e5s" || paper.variant === "e5p") return ev.e5s || ev;
     if (paper.variant === "c3") return ev.c3 || { checks: {}, passed_count: undefined, failed: [] };
     if (paper.variant === "pyl1") return ev.pyl1 || { checks: {}, passed_count: undefined, failed: [] };
+    if (paper.variant === "pylbtc") return ev.pylbtc || { checks: {}, passed_count: undefined, failed: [] };
     if (PYL_VARIANTS[paper.variant]) return ev.pyl || { checks: {}, passed_count: undefined, failed: [] };
     if (VAC_VARIANTS[paper.variant]) return ev.vac || { checks: {}, passed_count: undefined, failed: [] };
     if (VPS_VARIANTS[paper.variant]) {
@@ -865,7 +868,8 @@
     }
     if (PYL_VARIANTS[paper.variant]) {
       if (section) section.hidden = false;
-      const vk = paper.variant === "pyl1" ? "pyl1" : "pyl";
+      const vk =
+        paper.variant === "pyl1" ? "pyl1" : paper.variant === "pylbtc" ? "pylbtc" : "pyl";
       const rows = (paper.data && paper.data[`${vk}_watch`]) || [];
       const total = mandatory().length;
       if (!rows.length) {
@@ -1131,7 +1135,8 @@
     const pylOnly =
       PYL_VARIANTS[paper.variant] ||
       (p.kind === "pyl" && paper.variant === "pyl") ||
-      (p.kind === "pyl1" && paper.variant === "pyl1");
+      (p.kind === "pyl1" && paper.variant === "pyl1") ||
+      (p.kind === "pylbtc" && paper.variant === "pylbtc");
     const vacOnly = VAC_VARIANTS[paper.variant] || (p.kind === "vac" && paper.variant === "vac");
     const vpsOnly =
       VPS_VARIANTS[paper.variant] ||
