@@ -215,7 +215,9 @@ class Evaluation:
 
     @property
     def entry_blocked(self) -> list[str]:
-        return paper_entry_blocks(self.metrics)
+        blocked = paper_entry_blocks(self.metrics)
+        blocked.extend(paper_t20_p10_tri_blocks(self.metrics, self.checks))
+        return blocked
 
     def qualifies(self, variant: str) -> bool:
         if self.entry_blocked:
@@ -388,10 +390,17 @@ def find_pump(
     v14 = _valley(bars4h, peak_ts, 14 * 24 * HOUR_MS)
     growth = {"4h": _growth(peak, v4h), "24h": _growth(peak, v24), "7d": _growth(peak, v7d), "14d": _growth(peak, v14)}
 
-    floor_4h = config.PAPER_SHORT_4H_MIN_PCT if floors is None else floors["4h"]
-    floor_24h = config.PAPER_SHORT_24H_MIN_PCT if floors is None else floors["24h"]
-    floor_7d = config.PAPER_LONG_7D_MIN_PCT if floors is None else floors["7d"]
-    floor_14d = config.PAPER_LONG_14D_MIN_PCT if floors is None else floors["14d"]
+    if floors is None:
+        scale = config.PAPER_PUMP_FLOOR_SCALE
+        floor_4h = config.PAPER_SHORT_4H_MIN_PCT * scale
+        floor_24h = config.PAPER_SHORT_24H_MIN_PCT * scale
+        floor_7d = config.PAPER_LONG_7D_MIN_PCT * scale
+        floor_14d = config.PAPER_LONG_14D_MIN_PCT * scale
+    else:
+        floor_4h = floors["4h"]
+        floor_24h = floors["24h"]
+        floor_7d = floors["7d"]
+        floor_14d = floors["14d"]
     since_peak = now_ms - peak_ts
     choice: tuple[str, str, Bar, float] | None = None
     if since_peak <= config.PAPER_SHORT_LIFETIME_HOURS * HOUR_MS:
@@ -612,6 +621,22 @@ def _drawdown_pct(metrics: dict) -> float | None:
     if math.isnan(value) or math.isinf(value):
         return None
     return value
+
+
+def paper_t20_p10_tri_blocks(metrics: dict, checks: dict) -> list[str]:
+    """t20/p10: без stall не входить при позднем, глубоком откате или триггере 7d."""
+    stall = (checks.get("stall") or {}).get("ok")
+    if stall:
+        return []
+    pump = metrics.get("pump") or {}
+    since = metrics.get("since_peak_min")
+    drawdown = _drawdown_pct(metrics)
+    trigger = str(pump.get("trigger") or "")
+    late = since is not None and since > config.PAPER_TRI_NO_STALL_SINCE_PEAK_MIN
+    deep = drawdown is not None and drawdown > config.PAPER_TRI_NO_STALL_DRAWDOWN_PCT
+    if late or deep or trigger == "7d":
+        return ["tri_no_stall"]
+    return []
 
 
 def paper_entry_blocks(metrics: dict) -> list[str]:
