@@ -270,6 +270,8 @@ class MarketCache:
             "candles": candles,
             "anchor_peaks": anchor_peaks,
             "anchor_troughs": anchor_troughs,
+            "ghost_peaks": list(packed.get("ghost_peaks") or scanned.get("ghost_peaks") or []),
+            "ghost_troughs": list(packed.get("ghost_troughs") or scanned.get("ghost_troughs") or []),
             "peaks": packed.get("peaks") or scanned.get("peaks") or [],
             "troughs": packed.get("troughs") or scanned.get("troughs") or [],
             "anchor_days": config.VACUUM_LH_LOOKBACK_DAYS,

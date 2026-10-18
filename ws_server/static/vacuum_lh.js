@@ -615,6 +615,26 @@ function getVacuumChartTroughs() {
   return vacuumChartAnchors(sym, vacuumLhState.chartInterval, "trough");
 }
 
+function getVacuumGhostPeaks() {
+  const sym = vacuumLhState.selected;
+  const iv = vacuumLhState.chartInterval;
+  if (!sym) return [];
+  const series = vacuumSeriesEntry(sym, iv);
+  const detail = vacuumDetailList("ghost_peaks");
+  if (Array.isArray(detail) && detail.length) return detail;
+  return series?.ghostPeaks || [];
+}
+
+function getVacuumGhostTroughs() {
+  const sym = vacuumLhState.selected;
+  const iv = vacuumLhState.chartInterval;
+  if (!sym) return [];
+  const series = vacuumSeriesEntry(sym, iv);
+  const detail = vacuumDetailList("ghost_troughs");
+  if (Array.isArray(detail) && detail.length) return detail;
+  return series?.ghostTroughs || [];
+}
+
 function requestVacuumChartAnchors(interval) {
   if (window.signalSocket?.readyState === WebSocket.OPEN) {
     window.signalSocket.send(
@@ -821,6 +841,8 @@ function vacuumStoreSeries(symbol, interval, payload) {
     anchorTroughs,
     frozenAnchorPeaks: anchorPeaks,
     frozenAnchorTroughs: anchorTroughs,
+    ghostPeaks: payload.ghost_peaks || [],
+    ghostTroughs: payload.ghost_troughs || [],
     chainPeaks: payload.peaks || [],
     chainTroughs: payload.troughs || [],
     at: Date.now(),
@@ -1243,6 +1265,8 @@ function vacuumApplyDetailSeries(detail) {
     candles: detail.candles,
     anchor_peaks: detail.anchor_peaks || [],
     anchor_troughs: detail.anchor_troughs || [],
+    ghost_peaks: detail.ghost_peaks || [],
+    ghost_troughs: detail.ghost_troughs || [],
     peaks: detail.peaks || [],
     troughs: detail.troughs || [],
     pivots_ready: true,
@@ -1267,6 +1291,8 @@ function mergeVacuumDetail(data) {
       data.anchor_troughs != null
         ? vacuumFreezeAnchorList(prev.anchor_troughs, data.anchor_troughs)
         : prev.anchor_troughs,
+    ghost_peaks: data.ghost_peaks ?? prev.ghost_peaks,
+    ghost_troughs: data.ghost_troughs ?? prev.ghost_troughs,
     peaks: data.peaks ?? prev.peaks,
     troughs: data.troughs ?? prev.troughs,
   };
@@ -1547,7 +1573,7 @@ function vacuumMarkerTimeKey(time) {
   return BC?.barTimeKey ? BC.barTimeKey(time) : String(time);
 }
 
-function vacuumPivotMarkHtml(runtime, p, chartInterval, kind, inChain, i, hostW) {
+function vacuumPivotMarkHtml(runtime, p, chartInterval, kind, inChain, i, hostW, ghost) {
   const price = Number(p.price);
   if (!price) return "";
   const iv = chartInterval || vacuumLhState.chartInterval || "60";
@@ -1567,18 +1593,50 @@ function vacuumPivotMarkHtml(runtime, p, chartInterval, kind, inChain, i, hostW)
   const lHtml = ls ? `<span class="vac-mark-l">L${ls}</span>` : "";
   const tfHtml = inChain && n >= 2 ? `<span class="vac-mark-tf">×${n}</span>` : "";
   const arrow = trough ? "▲" : "▼";
-  return `<div class="vac-chart-mark pivot ${kind} ${tone}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}"><span class="vac-mark-arrow">${arrow}</span><span class="vac-mark-label">${head}</span>${lHtml}${tfHtml}</div>`;
+  const ghostCls = ghost ? " ghost" : "";
+  const headGhost = ghost ? prefix : head;
+  return `<div class="vac-chart-mark pivot ${kind}${ghostCls} ${ghost ? "" : tone}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}"><span class="vac-mark-arrow">${arrow}</span><span class="vac-mark-label">${headGhost}</span>${lHtml}${tfHtml}</div>`;
 }
 
-function vacuumPivotMarksHtml(runtime, points, chartInterval, kind, chainKeys) {
+function vacuumPivotMarksHtml(runtime, points, chartInterval, kind, chainKeys, ghost) {
   const hostW = runtime?.chart ? document.getElementById("vacuum-trade-overlay")?.clientWidth || 0 : 0;
   const parts = [];
   (points || []).forEach((p, i) => {
-    const inChain = chainKeys?.has(vacuumPivotKey(p));
-    const html = vacuumPivotMarkHtml(runtime, p, chartInterval, kind, inChain, i, hostW);
+    const inChain = !ghost && chainKeys?.has(vacuumPivotKey(p));
+    const html = vacuumPivotMarkHtml(runtime, p, chartInterval, kind, inChain, i, hostW, ghost);
     if (html) parts.push(html);
   });
   return parts.join("");
+}
+
+function vacuumGhostSeriesMarker(p, chartInterval, kind, runtime) {
+  const barTime = vacuumMarkerBarTime(runtime, p, chartInterval);
+  if (barTime == null) return null;
+  const ls = vacuumLeftStrength(p);
+  const prefix = kind === "trough" ? "HL" : "LH";
+  const lsTag = ls ? ` L${ls}` : "";
+  const long = kind === "trough";
+  return {
+    time: barTime,
+    position: long ? "belowBar" : "aboveBar",
+    color: "#e2e8f0",
+    shape: "circle",
+    text: `${prefix}${lsTag}`,
+    _rank: 80,
+  };
+}
+
+function vacuumGhostSeriesMarkers(runtime, peaks, troughs, chartInterval) {
+  const raw = [];
+  (peaks || []).forEach((p) => {
+    const m = vacuumGhostSeriesMarker(p, chartInterval, "peak", runtime);
+    if (m) raw.push(m);
+  });
+  (troughs || []).forEach((p) => {
+    const m = vacuumGhostSeriesMarker(p, chartInterval, "trough", runtime);
+    if (m) raw.push(m);
+  });
+  return raw;
 }
 
 function vacuumPivotSeriesMarker(p, chartInterval, kind, inChain, i, runtime) {
@@ -1688,9 +1746,15 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
   const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
   const sym = vacuumLhState.selected;
+  const ghostMarkers = vacuumGhostSeriesMarkers(
+    runtime,
+    getVacuumGhostPeaks(),
+    getVacuumGhostTroughs(),
+    chartInterval,
+  );
   const pivotMarkers = vacuumPivotSeriesMarkers(runtime, peaks || [], troughs || [], chartInterval);
   const tradeMarkers = sym ? vacuumTradeSeriesMarkers(runtime, sym, chartInterval) : [];
-  const merged = [...pivotMarkers, ...tradeMarkers].sort(
+  const merged = [...ghostMarkers, ...pivotMarkers, ...tradeMarkers].sort(
     (a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time),
   );
   try {
@@ -1699,8 +1763,10 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
     /* ignore */
   }
   runtime._vacPivotMarksHtml =
-    vacuumPivotMarksHtml(runtime, peaks || [], chartInterval, "peak", chainPeakKeys) +
-    vacuumPivotMarksHtml(runtime, troughs || [], chartInterval, "trough", chainTroughKeys);
+    vacuumPivotMarksHtml(runtime, getVacuumGhostPeaks(), chartInterval, "peak", new Set(), true) +
+    vacuumPivotMarksHtml(runtime, getVacuumGhostTroughs(), chartInterval, "trough", new Set(), true) +
+    vacuumPivotMarksHtml(runtime, peaks || [], chartInterval, "peak", chainPeakKeys, false) +
+    vacuumPivotMarksHtml(runtime, troughs || [], chartInterval, "trough", chainTroughKeys, false);
   drawVacuumTradeOverlay(runtime);
   scheduleVacuumChartMarksLayout();
 }

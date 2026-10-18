@@ -326,6 +326,8 @@ def _kline_reply(
         packed = chart_pivots_from_candles(candles, interval, now_ms)
         payload["anchor_peaks"] = packed["anchor_peaks"]
         payload["anchor_troughs"] = packed["anchor_troughs"]
+        payload["ghost_peaks"] = packed.get("ghost_peaks") or []
+        payload["ghost_troughs"] = packed.get("ghost_troughs") or []
         payload["peaks"] = packed["peaks"]
         payload["troughs"] = packed["troughs"]
         payload["pivots_ready"] = True

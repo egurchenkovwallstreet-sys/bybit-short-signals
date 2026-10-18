@@ -246,6 +246,22 @@ body {
   opacity: 0.88;
 }
 
+.vac-chart-mark.pivot.ghost,
+.vac-chart-mark.pivot.ghost .vac-mark-arrow,
+.vac-chart-mark.pivot.ghost .vac-mark-label,
+.vac-chart-mark.pivot.ghost .vac-mark-l {
+  color: rgba(255, 255, 255, 0.72);
+  opacity: 0.85;
+}
+
+.vac-chart-mark.pivot.ghost {
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+
 .vac-chart-mark.entry {
   padding: 2px 5px;
   border-radius: 4px;
