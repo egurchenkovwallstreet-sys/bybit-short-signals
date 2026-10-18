@@ -109,7 +109,9 @@ def _pyl1_structure_detail(side: str | None, peaks: list[dict], troughs: list[di
 
 
 def mandatory_for_interval(interval: str) -> tuple[str, ...]:
-    return PYL_MANDATORY_5 if interval == "5" else PYL_MANDATORY_15
+    if interval in ("5", "15"):
+        return PYL_MANDATORY_5
+    return PYL_MANDATORY_15
 
 
 def _htf_check_labels(interval: str) -> tuple[str, str]:
@@ -136,7 +138,7 @@ def evaluate_htf_pivot_entry(
     side_ok = signal is not None and signal.get("side") in ("short", "long")
     ls = int(signal.get("left_strength") or 0) if signal else 0
 
-    if interval == "5":
+    if interval in ("5", "15"):
         checks = {
             "turnover_ok": _check(
                 turnover_ok,

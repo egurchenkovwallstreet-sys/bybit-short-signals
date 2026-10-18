@@ -1,7 +1,7 @@
 """TZ-pivot L15–L30 (left_strength), 2 справа.
 
 5m (pyl/vps5): LH/HL без 15m/30m; в окне 3-й свечи — кандидат с max left_strength.
-15m (vps15): + HTF 1H/4H; вход 10 с после 2-й 15m справа.
+15m (vps15): LH/HL L15–L30 как на 5m, без 1H/4H; вход 10 с после 2-й 15m справа.
 """
 
 from __future__ import annotations
@@ -148,7 +148,7 @@ def _pivot_in_entry_window(ts: int, now_ms: int, interval: str, step: int) -> bo
 
 
 def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dict | None:
-    """Pivot L15–L30 + 2 справа; 5m — без 15m/30m, приоритет max left_strength."""
+    """Pivot L15–L30 + 2 справа; 5m/15m без HTF-фильтра, приоритет max left_strength."""
     step = _BAR_STEP.get(interval)
     if step is None:
         return None
@@ -167,7 +167,7 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
             continue
         if not pivot_has_two_right_bars(index, ts, step):
             continue
-        if interval == "5":
+        if interval in ("5", "15"):
             candidates.append((ls, ts, "short"))
         elif qualify_htf_pivot(index, ts, "short", interval) == "ok":
             candidates.append((ls, ts, "short"))
@@ -178,7 +178,7 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
             continue
         if not pivot_has_two_right_bars(index, ts, step):
             continue
-        if interval == "5":
+        if interval in ("5", "15"):
             candidates.append((ls, ts, "long"))
         elif qualify_htf_pivot(index, ts, "long", interval) == "ok":
             candidates.append((ls, ts, "long"))
@@ -193,9 +193,9 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
 
 
 def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") -> str:
-    """Причина по TZ-pivot в окне входа (5m — L15–L30, 15m — + HTF)."""
-    if interval == "5":
-        return "ok" if htf_pivot_setup(state, now_ms, "5") else "no_bar"
+    """Причина по TZ-pivot в окне входа (L15–L30, без HTF на 5m/15m)."""
+    if interval in ("5", "15"):
+        return "ok" if htf_pivot_setup(state, now_ms, interval) else "no_bar"
     step = _BAR_STEP.get(interval)
     if step is None:
         return "no_bar"
@@ -224,7 +224,7 @@ def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") ->
 
 
 def htf_pivot_setup(state: SymbolState, now_ms: int, interval: str) -> dict | None:
-    """TZ-pivot в окне входа; 5m — max L15–L30, 15m — + HTF."""
+    """TZ-pivot в окне входа; 5m/15m — max L15–L30 без HTF."""
     if not _meets_turnover(state):
         return None
     return _setup_from_tz_pivots(state, now_ms, interval)
