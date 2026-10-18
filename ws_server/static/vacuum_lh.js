@@ -541,9 +541,11 @@ function vacuumUnionPivots(lists) {
 }
 
 function vacuumApplyChain(anchors, chain) {
-  if (!chain?.length) return anchors;
+  const base = anchors || [];
+  if (!chain?.length) return base;
+  if (!base.length) return chain;
   const byKey = new Map(chain.map((point) => [vacuumPivotKey(point), point]));
-  return anchors.map((point) => {
+  return base.map((point) => {
     const hit = byKey.get(vacuumPivotKey(point));
     if (!hit) return point;
     return {
@@ -581,9 +583,12 @@ function vacuumChartAnchors(symbol, interval, kind) {
   const fromDetail = vacuumDetailList(kind === "trough" ? "anchor_troughs" : "anchor_peaks");
   const ready = !!(series?.pivotsReady || Array.isArray(fromScan) || Array.isArray(fromDetail));
   const chainField = kind === "trough" ? "troughs" : "peaks";
+  const chain = vacuumChainPoints(symbol, interval, chainField);
   const anchors = vacuumUnionPivots([fromSeries, fromScan, fromDetail]);
-  if (anchors.length || ready) return vacuumApplyChain(anchors, vacuumChainPoints(symbol, interval, chainField));
-  return vacuumChainPoints(symbol, interval, chainField);
+  if (anchors.length) return vacuumApplyChain(anchors, chain);
+  if (chain.length) return chain;
+  if (ready) return [];
+  return [];
 }
 
 function getVacuumChainPeaks() {
