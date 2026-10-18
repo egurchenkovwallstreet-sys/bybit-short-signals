@@ -40,6 +40,8 @@ const VACUUM_BUFFER_TF = VACUUM_CHART_TF.map(([c]) => c);
 const VACUUM_MIN_BARS = 8;
 const VACUUM_SERIES_BARS = 300;
 const VACUUM_LOAD_CONCURRENCY = 2;
+/** Последние закрытые на стол/график — не полная история. */
+const VACUUM_CLOSED_LIMIT = 20;
 
 const VACUUM_DESK = [
   ["scan", "Сканер"],
@@ -1802,7 +1804,7 @@ async function fetchVacuumSymbolClosed(symbol) {
       VACUUM_TRADE_VARIANTS.map(async (variant) => {
         const q = new URLSearchParams({
           status: "closed",
-          limit: "2000",
+          limit: String(VACUUM_CLOSED_LIMIT),
           variant,
           symbol,
         });
@@ -2102,7 +2104,9 @@ async function fetchVacuumDeskClosed(force) {
   try {
     const pairs = await Promise.all(
       VACUUM_TRADE_VARIANTS.map(async (variant) => {
-        const res = await fetch(`/api/paper/trades?status=closed&limit=2000&variant=${encodeURIComponent(variant)}`);
+        const res = await fetch(
+          `/api/paper/trades?status=closed&limit=${VACUUM_CLOSED_LIMIT}&variant=${encodeURIComponent(variant)}`,
+        );
         if (!res.ok) return [variant, []];
         const body = await res.json();
         return [variant, body.rows || []];
