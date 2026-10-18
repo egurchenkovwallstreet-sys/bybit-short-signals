@@ -75,9 +75,9 @@ def max_drawdown_pct() -> float:
     return config.PUMP_UNIFIED_MAX_DRAWDOWN_PCT
 
 
-def should_remove_after_peak_drawdown(state: SymbolState, peak_price: float) -> bool:
+def should_remove_after_peak_drawdown(state: SymbolState | None, peak_price: float) -> bool:
     """Убрать карточку: текущая цена отстаёт от пика пампа не меньше чем на порог %."""
-    if peak_price <= 0:
+    if state is None or peak_price <= 0:
         return False
     price = state.last_price
     if price is None or price <= 0:

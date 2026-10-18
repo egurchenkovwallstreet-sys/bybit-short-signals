@@ -331,11 +331,18 @@ function initVacuumLhTab() {
     void fetchVacuumLhBoard();
   }
   applyVacuumInterval(vacuumLhState.lhInterval);
+  if (vacuumLhState.selected) {
+    openVacuumLhChart();
+    if (vacuumLhState.chart?._lastBars?.length) {
+      patchVacuumLivePrice();
+      drawVacuumTradeOverlay(vacuumLhState.chart);
+      requestAnimationFrame(resizeVacuumChartNow);
+    } else {
+      void loadVacuumChartDisplay(true);
+    }
+  }
   renderVacuumLhBoard();
-  if (vacuumLhState.selected && vacuumLhState.chart?._lastBars?.length) {
-    patchVacuumLivePrice();
-    drawVacuumTradeOverlay(vacuumLhState.chart);
-  } else if (vacuumDeskVisible()) {
+  if (!vacuumLhState.selected && vacuumDeskVisible()) {
     renderVacuumDesk();
   }
 }
@@ -1083,6 +1090,7 @@ function openVacuumLhChart() {
   setVacuumDetailOpen(true);
   mountVacuumChart();
   renderVacuumLhInfo();
+  requestAnimationFrame(resizeVacuumChartNow);
 }
 
 function closeVacuumLhChart() {

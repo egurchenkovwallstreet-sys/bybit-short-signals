@@ -2000,6 +2000,8 @@ class PaperStrategy:
 
     def _evaluate_pyl(self, states: dict[str, SymbolState], now_ms: int) -> None:
         self._evaluate_bab_pivot_desk(
+            states,
+            now_ms,
             config.PAPER_PYL_VARIANT,
             evaluate_pyl,
             self._pyl_prev_snap,
@@ -2009,6 +2011,8 @@ class PaperStrategy:
 
     def _evaluate_pyl1(self, states: dict[str, SymbolState], now_ms: int) -> None:
         self._evaluate_bab_pivot_desk(
+            states,
+            now_ms,
             config.PAPER_PYL1_VARIANT,
             evaluate_pyl1,
             self._pyl1_prev_snap,
@@ -2018,6 +2022,8 @@ class PaperStrategy:
 
     def _evaluate_bab_pivot_desk(
         self,
+        states: dict[str, SymbolState],
+        now_ms: int,
         variant: str,
         evaluate_fn,
         prev_snaps: dict[str, dict],
