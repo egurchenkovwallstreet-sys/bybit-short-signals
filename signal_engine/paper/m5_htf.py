@@ -1,14 +1,23 @@
 """TZ-pivot L15–L30 (left_strength), 2 справа.
 
 5m (pyl/vps5): LH/HL без 15m/30m; в окне 3-й свечи — кандидат с max left_strength.
-15m (vps15): LH/HL L15–L30 как на 5m, без 1H/4H; вход 10 с после 2-й 15m справа.
+15m (vps15): LH/HL L15–L30; вход 10 с после 1-й закрытой 15m справа.
 """
 
 from __future__ import annotations
 
 import config
-from signal_engine.paper.lh_scan_pivot import pivot_has_two_right_bars, snapshot_pivot_levels
-from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, second_bar_close_ms
+from signal_engine.paper.lh_scan_pivot import (
+    pivot_has_one_right_bar,
+    pivot_has_two_right_bars,
+    snapshot_pivot_levels,
+)
+from signal_engine.paper.pivot_clock import (
+    entry_on_third_bar,
+    just_confirmed,
+    second_bar_close_ms,
+    vps15_entry_confirmed,
+)
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
 from signal_engine.vacuum_lh import _meets_turnover
@@ -144,14 +153,57 @@ def _pivot_in_entry_window(ts: int, now_ms: int, interval: str, step: int) -> bo
     del step
     if interval == "5":
         return entry_on_third_bar(ts, now_ms, "5")
+    if interval == "15":
+        return vps15_entry_confirmed(ts, now_ms)
     return int(now_ms) >= second_bar_close_ms(ts, interval)
 
 
+def _setup_vps15_entry(state: SymbolState, now_ms: int) -> dict | None:
+    """Пылесос 15: pivot L15–L30, 1 закрытая 15m справа, окно 10 с."""
+    step = M15
+    if not _meets_turnover(state):
+        return None
+    bars = closed_bars(state.bars_htf.get("15") or [], "15", now_ms)
+    if len(bars) < 12:
+        return None
+    index = _index(bars)
+    left = config.VACUUM_LH_PIVOT_LEFT
+    left_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    right = config.PAPER_VPS15_ENTRY_PIVOT_RIGHT
+    candidates: list[tuple[int, int, str]] = []
+    for point in pivot_highs_floating_left(bars, left, left_max, right):
+        ts = int(point["time"])
+        ls = _pivot_left_strength(point)
+        if ls is None or not vps15_entry_confirmed(ts, now_ms):
+            continue
+        if not pivot_has_one_right_bar(index, ts, step):
+            continue
+        candidates.append((ls, ts, "short"))
+    for point in pivot_lows_floating_left(bars, left, left_max, right):
+        ts = int(point["time"])
+        ls = _pivot_left_strength(point)
+        if ls is None or not vps15_entry_confirmed(ts, now_ms):
+            continue
+        if not pivot_has_one_right_bar(index, ts, step):
+            continue
+        candidates.append((ls, ts, "long"))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    ls, ts, side = candidates[0]
+    bar = index.get(ts)
+    if bar is None:
+        return None
+    return _pack(bar, side, ls)
+
+
 def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dict | None:
-    """Pivot L15–L30 + 2 справа; 5m/15m без HTF-фильтра, приоритет max left_strength."""
+    """Pivot L15–L30; 5m — 2 справа; 15m vps15 — 1 справа для входа."""
     step = _BAR_STEP.get(interval)
     if step is None:
         return None
+    if interval == "15":
+        return _setup_vps15_entry(state, now_ms)
     snap = snapshot_pivot_levels(state, interval, now_ms)
     if not snap:
         return None

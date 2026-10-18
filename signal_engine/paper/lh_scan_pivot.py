@@ -24,6 +24,11 @@ def pivot_has_two_right_bars(index: dict[int, Bar], pivot_ts: int, step: int = M
     return index.get(ts + step) is not None and index.get(ts + 2 * step) is not None
 
 
+def pivot_has_one_right_bar(index: dict[int, Bar], pivot_ts: int, step: int) -> bool:
+    ts = int(pivot_ts)
+    return index.get(ts + step) is not None
+
+
 def snapshot_pivot_levels(state: SymbolState, interval: str, now_ms: int) -> dict | None:
     if not _meets_turnover(state):
         return None

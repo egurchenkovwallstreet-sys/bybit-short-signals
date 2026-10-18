@@ -10,12 +10,14 @@ import config
 from signal_engine.paper.lh_scan_pivot import signal_from_pivot_diff
 from signal_engine.paper.pivot_clock import (
     batch_has_closed_bar,
+    confirm_bar_close_ms,
     entry_on_third_bar,
     first_bar_waiting,
     just_confirmed,
     second_bar_close_ms,
     symbols_waiting_second_bar,
     third_bar_close_ms,
+    vps15_entry_confirmed,
     third_bar_open_ms,
 )
 from signal_engine.paper.position import Position, bab_pivot_stop_price, price_for_roe
@@ -374,6 +376,14 @@ class PivotConfirmClockTest(unittest.TestCase):
         self.assertTrue(just_confirmed(pivot, close_at + 1_000, "15"))
         self.assertFalse(just_confirmed(pivot, close_at + 11_000, "15"))
         self.assertTrue(first_bar_waiting(pivot, close_at - 1_000, "15"))
+
+    def test_vps15_entry_after_one_right_bar(self) -> None:
+        pivot = T0 - (T0 % 900_000)
+        entry_close = confirm_bar_close_ms(pivot, "15", 1)
+        self.assertEqual(entry_close, pivot + 2 * 900_000)
+        self.assertFalse(vps15_entry_confirmed(pivot, entry_close - 1))
+        self.assertTrue(vps15_entry_confirmed(pivot, entry_close + 1_000))
+        self.assertFalse(vps15_entry_confirmed(pivot, entry_close + 11_000))
 
     def test_five_min_entry_on_third_bar_only(self) -> None:
         pivot = T0

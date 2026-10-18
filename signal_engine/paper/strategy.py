@@ -53,7 +53,12 @@ from signal_engine.paper.m5_htf import (
     opposite_pivot_exit_signal,
     symbols_waiting_htf_second_bar,
 )
-from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, symbols_waiting_second_bar
+from signal_engine.paper.pivot_clock import (
+    entry_on_third_bar,
+    just_confirmed,
+    symbols_waiting_second_bar,
+    vps15_entry_confirmed,
+)
 from signal_engine.paper.pyl_detect import (
     PYL1_CHECK_LABELS,
     PYL1_MANDATORY_5,
@@ -1978,6 +1983,8 @@ class PaperStrategy:
             return False
         if interval == "5":
             return entry_on_third_bar(int(pivot_time), now_ms, "5")
+        if interval == "15":
+            return vps15_entry_confirmed(int(pivot_time), now_ms)
         return just_confirmed(int(pivot_time), now_ms, interval)
 
     def _five_min_entry_window(self, entry: dict, now_ms: int) -> bool:

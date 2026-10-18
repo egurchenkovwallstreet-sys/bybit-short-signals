@@ -1,7 +1,7 @@
-"""Часы pivot: 5m вход на 3-й свече справа; 15m — 10 с после 2-й подтверждающей.
+"""Часы pivot: 5m вход на 3-й свече справа; vps15 — 10 с после 1-й 15m справа.
 
 БАБЛОСОС / Пылесос 5: вход только пока открыта 3-я 5m после экстремума.
-Пылесос 15: вход в 10 с после закрытия 2-й 15m справа от экстремума.
+Пылесос 15: вход в 10 с после закрытия 1-й 15m справа от экстремума.
 """
 
 from __future__ import annotations
@@ -18,11 +18,15 @@ def bar_step_ms(interval: str) -> int:
     return _STEP.get(interval, 300_000)
 
 
-def second_bar_close_ms(pivot_time_ms: int, interval: str = "5") -> int:
-    """Момент закрытия второй свечи справа от экстремума (open экстремума + 3 шага)."""
+def confirm_bar_close_ms(pivot_time_ms: int, interval: str, right: int) -> int:
+    """Закрытие right-й свечи справа от экстремума."""
     step = bar_step_ms(interval)
-    right = config.VACUUM_LH_PIVOT_RIGHT
-    return int(pivot_time_ms) + (right + 1) * step
+    return int(pivot_time_ms) + (int(right) + 1) * step
+
+
+def second_bar_close_ms(pivot_time_ms: int, interval: str = "5") -> int:
+    """Момент закрытия второй свечи справа (график / выход vps15)."""
+    return confirm_bar_close_ms(pivot_time_ms, interval, config.VACUUM_LH_PIVOT_RIGHT)
 
 
 def third_bar_open_ms(pivot_time_ms: int, interval: str = "5") -> int:
@@ -45,12 +49,30 @@ def entry_on_third_bar(pivot_time_ms: int, now_ms: int, interval: str = "5") -> 
     return start <= now < end
 
 
-def just_confirmed(pivot_time_ms: int, now_ms: int, interval: str = "5", slack_ms: int | None = None) -> bool:
-    """Вторая свеча уже закрылась, и с этого момента прошло меньше slack."""
+def just_confirmed(
+    pivot_time_ms: int,
+    now_ms: int,
+    interval: str = "5",
+    slack_ms: int | None = None,
+    *,
+    right: int | None = None,
+) -> bool:
+    """Подтверждающая свеча закрылась, с этого момента прошло меньше slack."""
     slack = config.PAPER_PIVOT_CONFIRM_SLACK_MS if slack_ms is None else slack_ms
-    close_at = second_bar_close_ms(pivot_time_ms, interval)
+    r = config.VACUUM_LH_PIVOT_RIGHT if right is None else int(right)
+    close_at = confirm_bar_close_ms(pivot_time_ms, interval, r)
     now = int(now_ms)
     return close_at <= now < close_at + slack
+
+
+def vps15_entry_confirmed(pivot_time_ms: int, now_ms: int) -> bool:
+    """Окно входа Пылесос 15: 10 с после 1-й закрытой 15m справа."""
+    return just_confirmed(
+        pivot_time_ms,
+        now_ms,
+        "15",
+        right=config.PAPER_VPS15_ENTRY_PIVOT_RIGHT,
+    )
 
 
 def first_bar_waiting(pivot_time_ms: int, now_ms: int, interval: str = "5") -> bool:
@@ -74,11 +96,16 @@ def batch_has_closed_bar(candles: list[dict], close_ms: int, now_ms: int, step: 
 
 
 def symbols_waiting_second_bar(states: dict[str, SymbolState], now_ms: int, interval: str = "5") -> set[str]:
-    """Монеты, у которых экстремум уже выдержал одну закрытую свечу справа."""
+    """Монеты, которым скоро нужна свеча для подтверждения pivot (5m — 2-я справа, 15m — 1-я)."""
     pl = config.VACUUM_LH_PIVOT_LEFT
     pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
     need = _min_bars(interval)
     out: set[str] = set()
+    entry_right = (
+        config.PAPER_VPS15_ENTRY_PIVOT_RIGHT if interval == "15" else 1
+    )
+    slack = config.PAPER_PIVOT_CONFIRM_SLACK_MS
+    step = bar_step_ms(interval)
     for symbol, state in states.items():
         if not state.last_price or not _meets_turnover(state):
             continue
@@ -86,12 +113,20 @@ def symbols_waiting_second_bar(states: dict[str, SymbolState], now_ms: int, inte
         if len(bars) < need:
             continue
         closed = closed_bars(bars, interval, now_ms)
-        if len(closed) < pl + 2:
+        if len(closed) < pl + entry_right + 1:
             continue
-        points = pivot_highs_floating_left(closed, pl, pl_max, 1)
-        points.extend(pivot_lows_floating_left(closed, pl, pl_max, 1))
+        points = pivot_highs_floating_left(closed, pl, pl_max, entry_right)
+        points.extend(pivot_lows_floating_left(closed, pl, pl_max, entry_right))
         for point in points:
-            if first_bar_waiting(int(point["time"]), now_ms, interval):
+            ts = int(point["time"])
+            if interval == "5":
+                if first_bar_waiting(ts, now_ms, interval):
+                    out.add(symbol)
+                    break
+                continue
+            first_open = ts + step
+            first_close = confirm_bar_close_ms(ts, interval, entry_right)
+            if first_open <= int(now_ms) < first_close + slack:
                 out.add(symbol)
                 break
     return out
