@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import config
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
-from signal_engine.paper.pivot_clock import entry_on_third_bar, second_bar_close_ms
+from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, second_bar_close_ms
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_floating_left, pivot_lows_floating_left
 from signal_engine.vacuum_lh import _meets_turnover
@@ -289,6 +289,48 @@ def opposite_pivot_exit_signal(
         return None
     if int(now_ms) < second_bar_close_ms(int(hit["pivot_time_ms"]), interval):
         return None
+    return hit
+
+
+def opposite_anchor_pivot_exit(
+    state: SymbolState,
+    now_ms: int,
+    open_side: str,
+    opened_at_ms: int,
+    interval: str,
+) -> dict | None:
+    """Противоп. TZ-pivot (как на графике LH/HL): vps15 — только в 10 с после 2-й свечи."""
+    if open_side not in ("long", "short"):
+        return None
+    step = _BAR_STEP.get(interval)
+    if step is None:
+        return None
+    want = "short" if open_side == "long" else "long"
+    snap = snapshot_pivot_levels(state, interval, now_ms)
+    if not snap:
+        return None
+    bars = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
+    index = _index(bars)
+    points = list(snap.get("peaks") if want == "short" else snap.get("troughs") or [])
+    opened = int(opened_at_ms)
+    hit: dict | None = None
+    for p in points:
+        ts = int(p["time_ms"])
+        ls = _pivot_left_strength(p)
+        if ls is None:
+            continue
+        if index.get(ts + step) is None or index.get(ts + 2 * step) is None:
+            continue
+        confirmed_at = second_bar_close_ms(ts, interval)
+        if confirmed_at <= opened or confirmed_at > int(now_ms):
+            continue
+        if interval == "15" and not just_confirmed(ts, now_ms, interval):
+            continue
+        if hit is None or ts > int(hit["pivot_time_ms"]):
+            bar = index.get(ts)
+            if bar is None:
+                continue
+            hit = _pack(bar, want, ls)
     return hit
 
 

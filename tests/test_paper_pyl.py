@@ -23,6 +23,7 @@ from signal_engine.paper.m5_htf import (
     htf_pivot_setup,
     htf_second_bar_pending,
     m5_htf_setup,
+    opposite_anchor_pivot_exit,
     opposite_appeared,
     opposite_pivot_exit_signal,
     qualify_m5_pivot,
@@ -289,6 +290,37 @@ class M5HtfGateTest(unittest.TestCase):
         )
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "short", peak_ts, "5"))
         self.assertIsNone(opposite_appeared(state, now_ms + 11_000, "long", now_ms + 11_000, "5"))
+
+
+class Vps15OppositeExitTest(unittest.TestCase):
+    def test_closes_in_ten_seconds_after_opposite_anchor_trough(self) -> None:
+        step = 900_000
+        base = T0 - (T0 % (6 * step))
+        n = 40
+        highs = [100.0] * n
+        lows = [98.0] * n
+        highs[10] = 105.0
+        lows[20] = 94.0
+        entry_peak = base + 10 * step
+        opp_trough = base + 20 * step
+        bars15: list[Bar] = []
+        for i in range(n):
+            mid = (highs[i] + lows[i]) / 2
+            bars15.append(Bar(base + i * step, mid, highs[i], lows[i], mid, 1.0))
+        opened_at = entry_peak + step
+        confirm_at = second_bar_close_ms(opp_trough, "15")
+        state = SymbolState("XUSDT", last_price=99.0, turnover_24h_usdt=2_000_000.0)
+        state.bars_htf["15"] = bars15
+        with patch("signal_engine.paper.m5_htf.snapshot_pivot_levels") as snap_fn:
+            snap_fn.return_value = {
+                "peaks": [{"time_ms": entry_peak, "price": 105.0, "left_strength": 17}],
+                "troughs": [{"time_ms": opp_trough, "price": 94.0, "left_strength": 21}],
+            }
+            inside = opposite_anchor_pivot_exit(state, confirm_at + 2_000, "short", opened_at, "15")
+            outside = opposite_anchor_pivot_exit(state, confirm_at + 12_000, "short", opened_at, "15")
+        self.assertIsNotNone(inside)
+        self.assertEqual(inside["side"], "long")
+        self.assertIsNone(outside)
 
 
 class PivotConfirmClockTest(unittest.TestCase):

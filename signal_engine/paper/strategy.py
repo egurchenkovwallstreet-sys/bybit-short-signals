@@ -47,7 +47,12 @@ from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, e
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.vacuum_lh import hour_range_pct
-from signal_engine.paper.m5_htf import opposite_appeared, opposite_pivot_exit_signal, symbols_waiting_htf_second_bar
+from signal_engine.paper.m5_htf import (
+    opposite_anchor_pivot_exit,
+    opposite_appeared,
+    opposite_pivot_exit_signal,
+    symbols_waiting_htf_second_bar,
+)
 from signal_engine.paper.pivot_clock import entry_on_third_bar, just_confirmed, symbols_waiting_second_bar
 from signal_engine.paper.pyl_detect import (
     PYL1_CHECK_LABELS,
@@ -2266,17 +2271,22 @@ class PaperStrategy:
                     trade = self.trades[open_key]
                     closed_side = trade.pos.side
                     side = ev_data.get("side") or m.get("side")
-                    confirmed_exit = bool(fresh and side and side != closed_side)
-                    raw_exit = (
-                        opposite_appeared(
+                    if interval == "15":
+                        opp_exit = opposite_anchor_pivot_exit(
                             state, now_ms, closed_side, trade.pos.opened_at, interval
                         )
-                        if interval == "5"
-                        else None
-                    )
+                        raw_exit = None
+                        confirmed_exit = opp_exit is not None
+                    else:
+                        opp_exit = None
+                        confirmed_exit = bool(fresh and side and side != closed_side)
+                        raw_exit = opposite_appeared(
+                            state, now_ms, closed_side, trade.pos.opened_at, interval
+                        )
                     if raw_exit or confirmed_exit:
                         self._close_trade(trade, "opposite_pivot", state, now_ms)
-                        if confirmed_exit:
+                        reenter = confirmed_exit and ev_data.get("passed") and side and side != closed_side
+                        if reenter:
                             balance = self.balances[variant]
                             margin = balance * config.PAPER_MARGIN_PCT / 100.0
                             if margin > 0 and balance - self.used_margin(variant) >= margin:
