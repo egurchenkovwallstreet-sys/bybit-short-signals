@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import config
 from signal_engine.paper.detect import _check, _r, grade_for
+from signal_engine.paper.vacuum_senior_gate import vacuum_senior_allows_entry
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars, pivot_highs_indexed
 
@@ -11,12 +12,14 @@ VAC_MANDATORY = (
     "structure_acb",
     "bearish_at_b",
     "bearish_after_b",
+    "senior_tf_trend",
 )
 
 VAC_CHECK_LABELS = {
     "structure_acb": "A (max) → C (min) → B (max), B ниже A",
     "bearish_at_b": "Свеча B закрылась медвежьей (close < open)",
     "bearish_after_b": "Следующая после B — тоже медвежья, вход на её close",
+    "senior_tf_trend": "15m: LH↓ для шорта (2 pivot, mixed→3)",
 }
 
 
@@ -108,6 +111,13 @@ def evaluate_vac(state: SymbolState, now_ms: int) -> dict:
             "close < open на свече после B",
         ),
     }
+
+    senior_ok, senior_detail = vacuum_senior_allows_entry(state, now_ms, "5", "short")
+    checks["senior_tf_trend"] = _check(
+        senior_ok,
+        senior_detail,
+        VAC_CHECK_LABELS["senior_tf_trend"],
+    )
 
     failed = [k for k in VAC_MANDATORY if not checks[k]["ok"]]
     passed = not failed

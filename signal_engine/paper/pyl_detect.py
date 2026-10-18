@@ -6,6 +6,7 @@ import config
 from signal_engine.paper.detect import _check, grade_for
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.m5_htf import htf_pivot_setup, newest_pivot_reason
+from signal_engine.paper.vacuum_senior_gate import vacuum_senior_allows_entry
 from signal_engine.state import SymbolState
 from signal_engine.paper.sc10_detect import btc_move_pct
 from signal_engine.vacuum_lh import _meets_turnover, hour_range_pct
@@ -16,6 +17,7 @@ PYL_MANDATORY_5 = (
     "turnover_ok",
     "pivot_left",
     "side_from_pivot",
+    "senior_tf_trend",
 )
 
 PYL_MANDATORY_15 = (
@@ -34,6 +36,7 @@ PYL_CHECK_LABELS = {
     "htf_15m": "Экстремум 1H и слабее предыдущего 1H (15m TF)",
     "htf_30m": "Нет пробоя high/low 4H (15m TF)",
     "side_from_pivot": "LH → шорт, HL → лонг",
+    "senior_tf_trend": "Старший TF: LH↓ только шорт, HL↑ только лонг (2 pivot, mixed→3)",
 }
 
 PYL1_MANDATORY_5 = (
@@ -42,12 +45,14 @@ PYL1_MANDATORY_5 = (
     "pivot_left",
     "structure_ok",
     "side_from_pivot",
+    "senior_tf_trend",
 )
 
 PYLBTC_MANDATORY_5 = (
     "turnover_ok",
     "pivot_left",
     "side_from_pivot",
+    "senior_tf_trend",
     "btc_same_side",
 )
 
@@ -151,6 +156,13 @@ def evaluate_htf_pivot_entry(
     side_ok = signal is not None and signal.get("side") in ("short", "long")
     ls = int(signal.get("left_strength") or 0) if signal else 0
 
+    side = signal.get("side") if signal else None
+    senior_ok, senior_detail = (
+        vacuum_senior_allows_entry(state, now_ms, interval, str(side))
+        if side_ok and side in ("short", "long")
+        else (False, "—")
+    )
+
     if interval in ("5", "15"):
         checks = {
             "turnover_ok": _check(
@@ -167,6 +179,11 @@ def evaluate_htf_pivot_entry(
                 side_ok,
                 signal.get("side") if signal else "—",
                 "LH → шорт, HL → лонг",
+            ),
+            "senior_tf_trend": _check(
+                senior_ok,
+                senior_detail,
+                PYL_CHECK_LABELS["senior_tf_trend"],
             ),
         }
     else:
