@@ -1459,11 +1459,7 @@ function clearVacuumLhOverlays(runtime) {
   if (!runtime?.series) return;
   runtime._vacuumPeakLines = [];
   runtime._vacuumTroughLines = [];
-  try {
-    runtime.series.setMarkers([]);
-  } catch (_e) {
-    /* ignore */
-  }
+  runtime._vacPivotMarksHtml = "";
   const ov = document.getElementById("vacuum-trade-overlay");
   if (ov) ov.innerHTML = "";
 }
@@ -1519,8 +1515,15 @@ function vacuumEventBarTime(runtime, utcMs, iv) {
   return null;
 }
 
+function vacuumPivotTimeMs(p) {
+  let t = Number(p?.time_chart_ms ?? p?.time_ms ?? p?.time_15m_ms ?? p?.time);
+  if (!t) return 0;
+  if (t < 1e12) t *= 1000;
+  return t;
+}
+
 function vacuumMarkerBarTime(runtime, p, iv) {
-  const tMs = p.time_chart_ms ?? p.time_ms ?? p.time_15m_ms;
+  const tMs = vacuumPivotTimeMs(p);
   if (!tMs) return null;
   return vacuumEventBarTime(runtime, tMs, iv);
 }
@@ -1578,25 +1581,128 @@ function vacuumPivotMarksHtml(runtime, points, chartInterval, kind, chainKeys) {
   return parts.join("");
 }
 
+function vacuumPivotSeriesMarker(p, chartInterval, kind, inChain, i, runtime) {
+  const barTime = vacuumMarkerBarTime(runtime, p, chartInterval);
+  if (barTime == null) return null;
+  const ls = vacuumLeftStrength(p);
+  const n = vacuumPivotMatchCount(p);
+  const prefix = kind === "trough" ? "HL" : "LH";
+  const head = inChain ? `${prefix}${p.index || i + 1}` : prefix;
+  const lsTag = ls ? ` L${ls}` : "";
+  const tfTag = inChain && n >= 2 ? ` ×${n}` : "";
+  const long = kind === "trough";
+  return {
+    time: barTime,
+    position: long ? "belowBar" : "aboveBar",
+    color: long ? (n >= 2 ? "#67e8f9" : "#22d3ee") : n >= 2 ? "#fde047" : "#facc15",
+    shape: inChain ? "square" : "circle",
+    text: `${head}${lsTag}${tfTag}`,
+    _rank: (inChain ? 1000 : 0) + ls * 10 + n,
+  };
+}
+
+function vacuumPivotSeriesMarkers(runtime, peaks, troughs, chartInterval) {
+  const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
+  const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
+  const raw = [];
+  (peaks || []).forEach((p, i) => {
+    const m = vacuumPivotSeriesMarker(p, chartInterval, "peak", chainPeakKeys.has(vacuumPivotKey(p)), i, runtime);
+    if (m) raw.push(m);
+  });
+  (troughs || []).forEach((p, i) => {
+    const m = vacuumPivotSeriesMarker(
+      p,
+      chartInterval,
+      "trough",
+      chainTroughKeys.has(vacuumPivotKey(p)),
+      i,
+      runtime,
+    );
+    if (m) raw.push(m);
+  });
+  const byTime = new Map();
+  for (const m of raw) {
+    const k = vacuumMarkerTimeKey(m.time);
+    const prev = byTime.get(k);
+    if (!prev || (m._rank || 0) > (prev._rank || 0)) byTime.set(k, m);
+  }
+  return [...byTime.values()]
+    .map(({ _rank, ...rest }) => rest)
+    .sort((a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time));
+}
+
+function vacuumTradeSeriesMarkers(runtime, symbol, chartInterval) {
+  const iv = chartInterval || vacuumChartIv(runtime);
+  const markers = [];
+  for (const trade of vacuumSymbolTrades(symbol)) {
+    const side = vacuumTradeSide(trade);
+    if (side !== "long" && side !== "short") continue;
+    const entryMs = vacuumTradeEntryMs(trade);
+    const barTime = vacuumEventBarTime(runtime, entryMs, iv);
+    if (!barTime) continue;
+    const long = side === "long";
+    markers.push({
+      time: barTime,
+      position: long ? "belowBar" : "aboveBar",
+      color: long ? "#4ade80" : "#f87171",
+      shape: long ? "arrowUp" : "arrowDown",
+      text: long ? "L" : "S",
+      _rank: 2500,
+    });
+    const closedMs = vacuumTradeClosedMs(trade);
+    if (!trade._open && closedMs) {
+      const exitBar = vacuumEventBarTime(runtime, closedMs, iv);
+      if (exitBar) {
+        const exitPx = Number(trade.exit_price || trade.last_price);
+        const plus = vacuumTradePlus(vacuumTradePnl(trade, exitPx));
+        markers.push({
+          time: exitBar,
+          position: long ? "aboveBar" : "belowBar",
+          color: plus ? "#4ade80" : "#f87171",
+          shape: "square",
+          text: plus ? "✓" : "✕",
+          _rank: 2400,
+        });
+      }
+    }
+  }
+  return markers;
+}
+
+function scheduleVacuumChartMarksLayout() {
+  const rt = vacuumLhState.chart;
+  if (!rt?.series || !vacuumLhState.selected) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (!vacuumLhState.selected || !rt._lastBars?.length) return;
+      vacuumChartRedraw();
+    });
+  });
+}
+
 function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
   if (!runtime?.series) return;
   clearVacuumLhOverlays(runtime);
   runtime._vacuumPeakLines = [];
   runtime._vacuumTroughLines = [];
+  const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
+  const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
+  const sym = vacuumLhState.selected;
+  const pivotMarkers = vacuumPivotSeriesMarkers(runtime, peaks || [], troughs || [], chartInterval);
+  const tradeMarkers = sym ? vacuumTradeSeriesMarkers(runtime, sym, chartInterval) : [];
+  const merged = [...pivotMarkers, ...tradeMarkers].sort(
+    (a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time),
+  );
   try {
-    runtime.series.setMarkers([]);
+    runtime.series.setMarkers(merged.map(({ _rank, ...m }) => m));
   } catch (_e) {
     /* ignore */
   }
-  runtime._vacPivotMarksHtml = (() => {
-    const chainPeakKeys = new Set(getVacuumChainPeaks().map(vacuumPivotKey));
-    const chainTroughKeys = new Set(getVacuumChainTroughs().map(vacuumPivotKey));
-    return (
-      vacuumPivotMarksHtml(runtime, peaks || [], chartInterval, "peak", chainPeakKeys) +
-      vacuumPivotMarksHtml(runtime, troughs || [], chartInterval, "trough", chainTroughKeys)
-    );
-  })();
+  runtime._vacPivotMarksHtml =
+    vacuumPivotMarksHtml(runtime, peaks || [], chartInterval, "peak", chainPeakKeys) +
+    vacuumPivotMarksHtml(runtime, troughs || [], chartInterval, "trough", chainTroughKeys);
   drawVacuumTradeOverlay(runtime);
+  scheduleVacuumChartMarksLayout();
 }
 
 function resizeVacuumLhChart() {
@@ -1734,7 +1840,7 @@ function vacuumTimeToX(runtime, ms) {
 
 function vacuumMarkOnScreen(x, hostW) {
   if (x == null || Number.isNaN(x)) return false;
-  if (hostW > 0 && (x < -8 || x > hostW + 8)) return false;
+  if (hostW > 0 && (x < -120 || x > hostW + 120)) return false;
   return true;
 }
 

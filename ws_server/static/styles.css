@@ -159,9 +159,14 @@ body {
 .vacuum-trade-overlay {
   position: absolute;
   inset: 0;
-  z-index: 16;
+  z-index: 25;
   pointer-events: none;
-  overflow: hidden;
+  overflow: visible;
+}
+
+.vacuum-lh-chart-wrap .psc-candle-chart {
+  position: relative;
+  z-index: 1;
 }
 
 .vacuum-trade-box {
