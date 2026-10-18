@@ -306,7 +306,6 @@ function initVacuumLhTab() {
     if (window.boardChart?.createRuntime) {
       vacuumLhState.chart = window.boardChart.createRuntime();
     }
-    ensureVacuumTradeClock();
     ensureVacuumTradeWarm();
     document.addEventListener("keydown", (event) => {
       if (event.key !== "Escape" || !vacuumLhState.selected) return;
@@ -1810,7 +1809,8 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
     chartInterval,
   );
   const pivotMarkers = vacuumPivotSeriesMarkers(runtime, peaks || [], troughs || [], chartInterval);
-  const merged = [...ghostMarkers, ...pivotMarkers].sort(
+  const tradeMarkers = sym ? vacuumTradeSeriesMarkers(runtime, sym, chartInterval) : [];
+  const merged = [...ghostMarkers, ...pivotMarkers, ...tradeMarkers].sort(
     (a, b) => window.boardChart.barTimeToSec(a.time) - window.boardChart.barTimeToSec(b.time),
   );
   try {
@@ -1976,45 +1976,6 @@ function vacuumTradeClosedMs(trade) {
   return t < 1e12 ? t * 1000 : t;
 }
 
-function vacuumEntryArrow(runtime, trade, hostW) {
-  const side = vacuumTradeSide(trade);
-  if (side !== "long" && side !== "short") return "";
-  const entry = Number(trade.entry_price);
-  const long = side === "long";
-  const x = vacuumTimeToX(runtime, vacuumTradeEntryMs(trade));
-  const y = runtime.series.priceToCoordinate(entry);
-  if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
-  const shift = long ? "translate(-50%, 4px)" : "translate(-50%, calc(-100% - 4px))";
-  const letter = long ? "L" : "S";
-  const arrow = long ? "▲" : "▼";
-  return `<div class="vac-chart-mark entry ${long ? "long" : "short"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}" title="${long ? "Лонг" : "Шорт"}"><span class="vac-mark-arrow">${arrow}</span><span class="vac-mark-letter">${letter}</span></div>`;
-}
-
-function vacuumExitMark(runtime, trade, hostW) {
-  const closedMs = vacuumTradeClosedMs(trade);
-  if (!closedMs) return "";
-  const exitPx = Number(trade.exit_price || trade.last_price);
-  const x = vacuumTimeToX(runtime, closedMs);
-  const y = exitPx > 0 ? runtime.series.priceToCoordinate(exitPx) : null;
-  if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
-  const plus = vacuumTradePlus(vacuumTradePnl(trade, exitPx));
-  const glyph = plus ? "✓" : "✕";
-  return `<div class="vac-chart-mark exit ${plus ? "plus" : "minus"}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:translate(-50%,-50%)" title="Выход"><span class="vac-mark-glyph">${glyph}</span></div>`;
-}
-
-function vacuumTradeHudCard(trade, money) {
-  const name = VACUUM_DESK.find(([id]) => id === trade.variant)?.[1] || trade.variant || "";
-  const tone = vacuumTradePlus(money) ? "plus" : "minus";
-  const dollars = Number.isFinite(money.pnl)
-    ? `${money.pnl >= 0 ? "+" : "−"}$${Math.abs(money.pnl).toFixed(2)}`
-    : "—";
-  const closeBtn =
-    trade._open && trade.id
-      ? `<br><button type="button" class="paper-btn vac-paper-close-btn" data-vac-paper-close="${trade.id}">Закрыть</button>`
-      : "";
-  return `<div class="vacuum-trade-pnl ${tone}"><span class="vacuum-trade-hud-name">${name}</span><br>${vacuumFmtSigned(money.roe, 1, "%")}<br>${dollars}${closeBtn}</div>`;
-}
-
 function vacuumFmtSigned(n, digits, suffix) {
   if (!Number.isFinite(n)) return "—";
   const sign = n >= 0 ? "+" : "−";
@@ -2023,63 +1984,12 @@ function vacuumFmtSigned(n, digits, suffix) {
 
 function drawVacuumTradeOverlay(runtime) {
   const el = ensureVacuumTradeOverlayEl();
-  const symbol = vacuumLhState.selected;
   if (!el) return;
-  if (!runtime?.chart || !runtime.series || !symbol) {
+  if (!runtime?.chart || !runtime.series) {
     el.innerHTML = "";
     return;
   }
-  const live = vacuumChartLivePrice(runtime, symbol);
-  const trades = vacuumSymbolTrades(symbol);
-  if (!trades.length && !runtime._vacPivotMarksHtml) {
-    el.innerHTML = "";
-    return;
-  }
-  const hostW = el.clientWidth || 0;
-  const nowMs = Date.now();
-  const parts = [runtime._vacPivotMarksHtml || ""];
-  const hud = [];
-  for (const trade of trades) {
-    const entry = Number(trade.entry_price);
-    if (!(entry > 0) || !trade.opened_at) continue;
-    parts.push(vacuumEntryArrow(runtime, trade, hostW));
-    parts.push(vacuumExitMark(runtime, trade, hostW));
-    if (!trade._open) continue;
-    const current = vacuumTradeCurrentPrice(trade, live);
-    const money = vacuumTradePnl(trade, current);
-    hud.push(vacuumTradeHudCard(trade, money));
-    const left = vacuumTimeToX(runtime, vacuumTradeEntryMs(trade));
-    const right = vacuumTimeToX(runtime, nowMs);
-    const worst = vacuumTradeWorstPrice(trade);
-    if (left == null || right == null || !(current > 0) || !(worst > 0)) continue;
-    const xL = Math.min(left, right);
-    const xR = Math.max(left, right);
-    if (hostW > 0 && (xR < -8 || xL > hostW + 8)) continue;
-    const yTop = runtime.series.priceToCoordinate(Math.max(current, worst));
-    const yBot = runtime.series.priceToCoordinate(Math.min(current, worst));
-    if (yTop == null || yBot == null || Number.isNaN(yTop) || Number.isNaN(yBot)) continue;
-    const tone = vacuumTradePlus(money) ? "plus" : "minus";
-    parts.push(
-      `<div class="vacuum-trade-box ${tone}" style="left:${Math.round(xL)}px;top:${Math.round(Math.min(yTop, yBot))}px;width:${Math.round(Math.max(2, xR - xL))}px;height:${Math.round(Math.max(2, Math.abs(yBot - yTop)))}px"></div>`,
-    );
-  }
-  if (hud.length) parts.push(`<div class="vacuum-trade-hud">${hud.join("")}</div>`);
-  el.innerHTML = parts.join("");
-}
-
-function ensureVacuumTradeClock() {
-  if (vacuumLhState._tradeClock) return;
-  vacuumLhState._tradeClock = setInterval(() => {
-    const rt = vacuumLhState.chart;
-    if (!vacuumLhState.selected || !rt?._lastBars?.length) return;
-    if (!vacuumSymbolTrades(vacuumLhState.selected).length) return;
-    drawVacuumLhOverlays(
-      rt,
-      getVacuumChartPeaks(),
-      getVacuumChartTroughs(),
-      vacuumLhState.chartInterval,
-    );
-  }, 1000);
+  el.innerHTML = runtime._vacPivotMarksHtml || "";
 }
 
 async function fetchVacuumSymbolClosed(symbol) {
