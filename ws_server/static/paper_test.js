@@ -839,7 +839,7 @@
       if (!rows.length) {
         table.innerHTML =
           paper.variant === "pyl1"
-            ? '<tbody><tr><td class="quiet">Нет монет с размахом ≥3% за час или подходящей структурой 5m.</td></tr></tbody>'
+            ? '<tbody><tr><td class="quiet">Нет монет с размахом ≥2% за час или подходящей структурой 5m.</td></tr></tbody>'
             : '<tbody><tr><td class="quiet">Нет сигналов: ждём LH/HL L15–L30 на 5m, вход на 3-й свече.</td></tr></tbody>';
         return;
       }
