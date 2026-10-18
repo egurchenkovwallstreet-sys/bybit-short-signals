@@ -39,16 +39,14 @@ PYL1_MANDATORY_5 = (
     "turnover_ok",
     "hour_range_ok",
     "pivot_left",
-    "structure_bias",
-    "trend_ok",
+    "structure_ok",
     "side_from_pivot",
 )
 
 PYL1_CHECK_LABELS = {
     **PYL_CHECK_LABELS,
     "hour_range_ok": f"Размах цены за час ≥ {config.PAPER_PYL1_HOUR_RANGE_PCT:g}%",
-    "structure_bias": "2 верха и 2 низа в одну сторону (рост → лонг, спад → шорт)",
-    "trend_ok": "Нет двойного ослабления структуры против стороны",
+    "structure_ok": "Не расширение; лонг: min выше prev, шорт: max ниже prev",
 }
 
 
@@ -73,29 +71,41 @@ def structure_bias_two_pivots(peaks: list[dict], troughs: list[dict]) -> str:
     return "mixed"
 
 
-def entry_trend_allows(side: str, peaks: list[dict], troughs: list[dict]) -> bool:
-    """Лонг: запрет если новый min ниже prev и последний max ниже prev. Шорт — зеркально."""
+def pyl1_range_expanding(peaks: list[dict], troughs: list[dict]) -> bool:
+    """Запрет входа: последний high выше prev и последний low ниже prev (диапазон расширяется)."""
     pp = _last_two_prices(peaks)
     tt = _last_two_prices(troughs)
     if pp is None or tt is None:
         return False
-    prev_p, lp = pp
-    prev_t, lt = tt
-    if side == "long":
-        return not (lt < prev_t and lp < prev_p)
-    if side == "short":
-        return not (lp > prev_p and lt > prev_t)
-    return False
+    return pp[1] > pp[0] and tt[1] < tt[0]
 
 
-def side_matches_structure_bias(side: str | None, bias: str) -> bool:
-    if not side or bias == "mixed":
+def pyl1_structure_allows_entry(side: str, peaks: list[dict], troughs: list[dict]) -> bool:
+    if pyl1_range_expanding(peaks, troughs):
         return False
-    if bias == "up":
-        return side == "long"
-    if bias == "down":
-        return side == "short"
+    if side == "long":
+        tt = _last_two_prices(troughs)
+        return tt is not None and tt[1] > tt[0]
+    if side == "short":
+        pp = _last_two_prices(peaks)
+        return pp is not None and pp[1] < pp[0]
     return False
+
+
+def _pyl1_structure_detail(side: str | None, peaks: list[dict], troughs: list[dict]) -> str:
+    if not side:
+        return "—"
+    if pyl1_range_expanding(peaks, troughs):
+        return "расширение: high↑ и low↓"
+    if side == "long":
+        tt = _last_two_prices(troughs)
+        if tt is None:
+            return "нет 2 pivot low"
+        return f"min {tt[1]:g} vs {tt[0]:g}"
+    pp = _last_two_prices(peaks)
+    if pp is None:
+        return "нет 2 pivot high"
+    return f"max {pp[1]:g} vs {pp[0]:g}"
 
 
 def mandatory_for_interval(interval: str) -> tuple[str, ...]:
@@ -240,8 +250,7 @@ def evaluate_pyl1(state: SymbolState, now_ms: int, prev_snap: dict | None = None
     hr = hour_range_pct(state, now_ms)
     hour_ok = hr is not None and hr + 1e-12 >= config.PAPER_PYL1_HOUR_RANGE_PCT
     bias = structure_bias_two_pivots(peaks, troughs)
-    trend_ok = bool(side) and entry_trend_allows(str(side), peaks, troughs)
-    struct_ok = side_matches_structure_bias(side, bias)
+    struct_ok = bool(side) and pyl1_structure_allows_entry(str(side), peaks, troughs)
 
     checks = dict(base.get("checks") or {})
     checks["hour_range_ok"] = _check(
@@ -249,16 +258,10 @@ def evaluate_pyl1(state: SymbolState, now_ms: int, prev_snap: dict | None = None
         f"{hr:.2f}%" if hr is not None else "нет данных",
         f"≥ {config.PAPER_PYL1_HOUR_RANGE_PCT:g}% за час",
     )
-    bias_label = {"up": "рост (лонг)", "down": "спад (шорт)", "mixed": "смешано"}.get(bias, bias)
-    checks["structure_bias"] = _check(
+    checks["structure_ok"] = _check(
         struct_ok,
-        bias_label if side else "—",
-        "2 верха и 2 низа растут → лонг; падают → шорт; смешано — пропуск",
-    )
-    checks["trend_ok"] = _check(
-        trend_ok if side else False,
-        "да" if trend_ok else ("—" if not side else "нет"),
-        "нет двойного ослабления против стороны",
+        _pyl1_structure_detail(side, peaks, troughs),
+        PYL1_CHECK_LABELS["structure_ok"],
     )
 
     mandatory = PYL1_MANDATORY_5

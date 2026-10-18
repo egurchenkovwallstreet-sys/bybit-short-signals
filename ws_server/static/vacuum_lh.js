@@ -2051,7 +2051,7 @@ function renderVacuumDesk() {
         : vacuumLhState.mode === "vps15"
           ? "15m pivot L15–L30 + 1H/4H. Вход 10 с после 2-й 15m справа. Закрытие по противоп. pivot в 2 мин. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
           : vacuumLhState.mode === "pyl1"
-            ? "Как БАБЛОСОС + размах ≥2% за час. 2 верха и 2 низа растут → только лонг; падают → только шорт; смешано — пропуск. Стоп ±5% от пивота."
+            ? "Как БАБЛОСОС + размах ≥2% за час. Запрет при расширении (high↑ и low↓). Лонг: min выше prev; шорт: max ниже prev. Стоп ±5% от пивота."
             : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие после 2-й 5m у противоп. pivot. Стоп ±5% от свечи пивота.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>

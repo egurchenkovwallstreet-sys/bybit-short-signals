@@ -30,10 +30,10 @@ from signal_engine.paper.m5_htf import (
 )
 from signal_engine.paper.pyl_detect import (
     PYL_MANDATORY,
-    entry_trend_allows,
     evaluate_htf_pivot_entry,
     evaluate_pyl,
-    side_matches_structure_bias,
+    pyl1_range_expanding,
+    pyl1_structure_allows_entry,
     structure_bias_two_pivots,
 )
 from signal_engine.swing_highs import closed_bars
@@ -80,19 +80,24 @@ class Pyl1StructureTest(unittest.TestCase):
         self.assertEqual(structure_bias_two_pivots(peaks_down, troughs_down), "down")
         self.assertEqual(structure_bias_two_pivots(peaks_up, troughs_down), "mixed")
 
-    def test_side_matches_bias(self) -> None:
-        self.assertTrue(side_matches_structure_bias("long", "up"))
-        self.assertFalse(side_matches_structure_bias("short", "up"))
-        self.assertTrue(side_matches_structure_bias("short", "down"))
-        self.assertFalse(side_matches_structure_bias("long", "mixed"))
-
-    def test_entry_trend_forbid_double_weakness(self) -> None:
-        peaks = [{"price": 11.0}, {"price": 10.0}]
+    def test_pyl1_range_expanding(self) -> None:
+        peaks = [{"price": 10.0}, {"price": 11.0}]
         troughs = [{"price": 9.0}, {"price": 8.0}]
-        self.assertTrue(entry_trend_allows("short", peaks, troughs))
-        peaks_bad = [{"price": 11.0}, {"price": 12.0}]
-        troughs_bad = [{"price": 9.0}, {"price": 10.0}]
-        self.assertFalse(entry_trend_allows("short", peaks_bad, troughs_bad))
+        self.assertTrue(pyl1_range_expanding(peaks, troughs))
+        self.assertFalse(pyl1_range_expanding([{"price": 11.0}, {"price": 10.0}], troughs))
+        self.assertFalse(pyl1_range_expanding(peaks, [{"price": 8.0}, {"price": 9.0}]))
+
+    def test_pyl1_structure_allows_contracting(self) -> None:
+        peaks = [{"price": 11.0}, {"price": 10.0}]
+        troughs = [{"price": 8.0}, {"price": 9.0}]
+        self.assertTrue(pyl1_structure_allows_entry("short", peaks, troughs))
+        self.assertTrue(pyl1_structure_allows_entry("long", peaks, troughs))
+        expanding_peaks = [{"price": 10.0}, {"price": 11.0}]
+        expanding_troughs = [{"price": 9.0}, {"price": 8.0}]
+        self.assertFalse(pyl1_structure_allows_entry("long", expanding_peaks, expanding_troughs))
+        self.assertFalse(
+            pyl1_structure_allows_entry("short", [{"price": 11.0}, {"price": 12.0}], troughs)
+        )
 
 
 class BabStopTest(unittest.TestCase):
