@@ -5,7 +5,7 @@ from __future__ import annotations
 import config
 from signal_engine.paper.detect import _check, grade_for
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
-from signal_engine.paper.m5_htf import htf_pivot_setup, newest_pivot_reason
+from signal_engine.paper.m5_htf import htf_pivot_early_engulf_setup, htf_pivot_setup, newest_pivot_reason
 from signal_engine.paper.vacuum_senior_gate import vacuum_senior_allows_entry
 from signal_engine.state import SymbolState
 from signal_engine.paper.ma333_regime import ma333_regime_allows
@@ -147,13 +147,17 @@ def evaluate_htf_pivot_entry(
     *,
     kind: str,
     variant: str | None = None,
+    pivot_signal: dict | None = None,
 ) -> dict:
     del prev_snap
     snap = snapshot_pivot_levels(state, interval, now_ms)
     turnover_ok = _meets_turnover(state)
     mandatory = mandatory_for_interval(interval)
     reason = newest_pivot_reason(state, now_ms, interval) if turnover_ok else "no_bar"
-    signal = htf_pivot_setup(state, now_ms, interval) if turnover_ok else None
+    if pivot_signal is not None:
+        signal = pivot_signal if turnover_ok else None
+    else:
+        signal = htf_pivot_setup(state, now_ms, interval) if turnover_ok else None
     side_ok = signal is not None and signal.get("side") in ("short", "long")
     ls = int(signal.get("left_strength") or 0) if signal else 0
 
@@ -240,6 +244,10 @@ def evaluate_htf_pivot_entry(
                 "left_strength": ls,
             }
         )
+        if signal.get("entry_path"):
+            metrics["entry_path"] = signal["entry_path"]
+        if signal.get("engulf_detail"):
+            metrics["engulf_detail"] = signal["engulf_detail"]
     if snap:
         metrics["peaks"] = list(snap.get("peaks") or [])[-3:]
         metrics["troughs"] = list(snap.get("troughs") or [])[-3:]
@@ -267,6 +275,9 @@ def evaluate_pyl(state: SymbolState, now_ms: int, prev_snap: dict | None = None)
 
 
 def evaluate_333(state: SymbolState, now_ms: int, prev_snap: dict | None = None) -> dict:
+    pivot_signal = htf_pivot_setup(state, now_ms, PYL_INTERVAL)
+    if pivot_signal is None:
+        pivot_signal = htf_pivot_early_engulf_setup(state, now_ms, PYL_INTERVAL)
     base = evaluate_htf_pivot_entry(
         state,
         now_ms,
@@ -274,6 +285,7 @@ def evaluate_333(state: SymbolState, now_ms: int, prev_snap: dict | None = None)
         PYL_INTERVAL,
         kind="333",
         variant=config.PAPER_333_VARIANT,
+        pivot_signal=pivot_signal,
     )
     side = base.get("side") or (base.get("metrics") or {}).get("side")
     ma_ok, ma_detail, ma_meta = ma333_regime_allows(state, now_ms, side, PYL_INTERVAL)

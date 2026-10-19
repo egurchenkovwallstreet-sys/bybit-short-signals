@@ -160,6 +160,96 @@ def _pivot_in_entry_window(ts: int, now_ms: int, interval: str, step: int) -> bo
     return int(now_ms) >= second_bar_close_ms(ts, interval)
 
 
+def _body_range(bar: Bar) -> tuple[float, float]:
+    o, c = float(bar.open), float(bar.close)
+    return min(o, c), max(o, c)
+
+
+def _body_fully_engulfs(outer: Bar, inner: Bar) -> bool:
+    o_lo, o_hi = _body_range(outer)
+    i_lo, i_hi = _body_range(inner)
+    return o_lo <= i_lo and o_hi >= i_hi and (o_lo < i_lo or o_hi > i_hi)
+
+
+def _engulfing_first_bar(first_right: Bar, target: Bar, side: str) -> bool:
+    if side not in ("short", "long"):
+        return False
+    if not _body_fully_engulfs(first_right, target):
+        return False
+    o, c = float(first_right.open), float(first_right.close)
+    if side == "short":
+        return c < o
+    return c > o
+
+
+def htf_pivot_early_engulf_setup(state: SymbolState, now_ms: int, interval: str = "5") -> dict | None:
+    """333: 1-я 5m справа поглощает pivot или prev — вход сразу после её close (окно slack)."""
+    if interval != "5":
+        return None
+    step = M5
+    if not _meets_turnover(state):
+        return None
+    snap = snapshot_pivot_levels(state, interval, now_ms)
+    if not snap:
+        return None
+    bars = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
+    if len(bars) < 12:
+        return None
+    index = _index(bars)
+    candidates: list[tuple[int, int, str, str]] = []
+    for p in snap.get("peaks") or []:
+        ts = int(p["time_ms"])
+        ls = _pivot_left_strength(p)
+        if ls is None or not just_confirmed(ts, now_ms, "5", right=1):
+            continue
+        if not pivot_has_one_right_bar(index, ts, step):
+            continue
+        first = index.get(ts + step)
+        pivot_bar = index.get(ts)
+        prev_bar = index.get(ts - step)
+        if first is None:
+            continue
+        detail = ""
+        if pivot_bar is not None and _engulfing_first_bar(first, pivot_bar, "short"):
+            detail = "pivot"
+        elif prev_bar is not None and _engulfing_first_bar(first, prev_bar, "short"):
+            detail = "prev"
+        else:
+            continue
+        candidates.append((ls, ts, "short", detail))
+    for p in snap.get("troughs") or []:
+        ts = int(p["time_ms"])
+        ls = _pivot_left_strength(p)
+        if ls is None or not just_confirmed(ts, now_ms, "5", right=1):
+            continue
+        if not pivot_has_one_right_bar(index, ts, step):
+            continue
+        first = index.get(ts + step)
+        pivot_bar = index.get(ts)
+        prev_bar = index.get(ts - step)
+        if first is None:
+            continue
+        detail = ""
+        if pivot_bar is not None and _engulfing_first_bar(first, pivot_bar, "long"):
+            detail = "pivot"
+        elif prev_bar is not None and _engulfing_first_bar(first, prev_bar, "long"):
+            detail = "prev"
+        else:
+            continue
+        candidates.append((ls, ts, "long", detail))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    ls, ts, side, engulf_detail = candidates[0]
+    bar = index.get(ts)
+    if bar is None:
+        return None
+    out = _pack(bar, side, ls)
+    out["entry_path"] = "engulf"
+    out["engulf_detail"] = engulf_detail
+    return out
+
+
 def _setup_vps15_entry(state: SymbolState, now_ms: int) -> dict | None:
     """Пылесос 15: pivot L15–L30, 1 закрытая 15m справа, окно 10 с."""
     step = M15
@@ -243,7 +333,9 @@ def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dic
     bar = index.get(ts)
     if bar is None:
         return None
-    return _pack(bar, side, ls)
+    out = _pack(bar, side, ls)
+    out["entry_path"] = "third_bar"
+    return out
 
 
 def newest_pivot_reason(state: SymbolState, now_ms: int, interval: str = "5") -> str:

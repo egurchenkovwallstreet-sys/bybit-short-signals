@@ -2016,6 +2016,17 @@ class PaperStrategy:
             return False
         return entry_on_third_bar(int(pivot_time), now_ms, interval)
 
+    def _333_entry_window(self, entry: dict, now_ms: int) -> bool:
+        if not entry.get("passed"):
+            return False
+        metrics = entry.get("metrics") or {}
+        pivot_time = metrics.get("pivot_time_ms")
+        if not pivot_time:
+            return False
+        if metrics.get("entry_path") == "engulf":
+            return just_confirmed(int(pivot_time), now_ms, "5", right=1)
+        return entry_on_third_bar(int(pivot_time), now_ms, "5")
+
     def _process_bab_opposite_exits(self, states: dict[str, SymbolState], now_ms: int) -> None:
         specs: list[tuple[str, str, str]] = []
         if config.PAPER_PYL_VARIANT in VARIANTS:
@@ -2136,7 +2147,10 @@ class PaperStrategy:
             ev_clean = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
             pc = int(ev_clean.get("passed_count") or 0)
             side = ev_clean.get("side")
-            fresh = self._third_bar_entry_window(ev_clean, now_ms, interval)
+            if variant == config.PAPER_333_VARIANT:
+                fresh = self._333_entry_window(ev_clean, now_ms)
+            else:
+                fresh = self._third_bar_entry_window(ev_clean, now_ms, interval)
             if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
                 watch.append(
                     {
