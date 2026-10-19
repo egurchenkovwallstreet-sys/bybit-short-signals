@@ -278,9 +278,9 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
-PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "333", "vps15")
+PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "333", "33315", "vps15")
 # Стол во вкладке «Пылесос»: бумага крутится здесь, в тесте стратегии скрыты.
-PAPER_DESK_VARIANTS = ("pyl", "333", "vps15")
+PAPER_DESK_VARIANTS = ("pyl", "333", "33315", "vps15")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -344,6 +344,16 @@ PAPER_333_LOCK10_ARM_ROE = _env_float("PAPER_333_LOCK10_ARM_ROE", 14.0)
 PAPER_333_LOCK10_ROE = _env_float("PAPER_333_LOCK10_ROE", 10.0)
 PAPER_333_TRAIL_GAP_ROE = _env_float("PAPER_333_TRAIL_GAP_ROE", 15.0)
 PAPER_333_LOSS_STOP_COOLDOWN_MIN = _env_int("PAPER_333_LOSS_STOP_COOLDOWN_MIN", 45)
+PAPER_33315_VARIANT = "33315"
+PAPER_33315_INTERVAL = "15"
+
+
+def paper_333_family_variants() -> tuple[str, ...]:
+    return (PAPER_333_VARIANT, PAPER_33315_VARIANT)
+
+
+def is_paper_333_family(variant: str) -> bool:
+    return variant in paper_333_family_variants()
 PAPER_CHOP_WINDOW_BARS = _env_int("PAPER_CHOP_WINDOW_BARS", 20)
 PAPER_CHOP_MIN_BARS = _env_int("PAPER_CHOP_MIN_BARS", 10)
 PAPER_CHOP_TIGHT_RANGE_PCT = _env_float("PAPER_CHOP_TIGHT_RANGE_PCT", 1.5)
@@ -447,7 +457,7 @@ def paper_stop_style(variant: str) -> str:
         return "impulse"
     if variant == PAPER_PYL_VARIANT:
         return "bab"
-    if variant == PAPER_333_VARIANT:
+    if is_paper_333_family(variant):
         return "333"
     if variant == PAPER_VAC_VARIANT:
         return "pyl"

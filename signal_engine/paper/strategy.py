@@ -55,16 +55,19 @@ from signal_engine.paper.m5_htf import (
 from signal_engine.paper.pivot_clock import (
     entry_on_third_bar,
     just_confirmed,
+    symbols_waiting_first_bar,
     symbols_waiting_second_bar,
     vps15_entry_confirmed,
 )
 from signal_engine.paper.pyl_detect import (
     PYL333_CHECK_LABELS,
     PYL333_MANDATORY_5,
+    PYL33315_CHECK_LABELS,
     PYL_CHECK_LABELS,
     PYL_MANDATORY,
     evaluate_htf_pivot_entry,
     evaluate_333,
+    evaluate_33315,
     evaluate_pyl,
 )
 from signal_engine.paper.position import bab_pivot_stop_price
@@ -265,7 +268,11 @@ class PaperStrategy:
         self._pyl_watch: list[dict] = []
         self._333_prev_snap: dict[str, dict] = {}
         self._333_watch: list[dict] = []
+        self._33315_prev_snap: dict[str, dict] = {}
+        self._33315_watch: list[dict] = []
         self._333_loss_stop_until: dict[tuple[str, str], int] = {}
+        self._confirm_arm_33315: set[str] = set()
+        self._confirm_arm_33315_at = 0
         self._vac_used_bars: dict[tuple[str, str], int] = {}
         self._vac_watch: list[dict] = []
         self._vps_prev_snap: dict[tuple[str, str], dict] = {}
@@ -349,7 +356,7 @@ class PaperStrategy:
                 stop_style=config.paper_stop_style(variant),
                 scaled_half=bool((entry or {}).get("css2_half")),
             )
-            if variant == config.PAPER_333_VARIANT:
+            if config.is_paper_333_family(variant):
                 bab0 = float(((entry or {}).get("metrics") or {}).get("desk_initial_stop") or 0)
                 pos.desk_initial_stop = bab0 if bab0 > 0 else float(row["stop_price"])
             # Стоп по правилу варианта: t20 — +0.5% net/лок/трейл 20, p10 — +0.5% net и пик − gap.
@@ -574,6 +581,7 @@ class PaperStrategy:
         desk = {
             config.PAPER_PYL_VARIANT,
             config.PAPER_333_VARIANT,
+            config.PAPER_33315_VARIANT,
             config.PAPER_VPS15_VARIANT,
         }
         return {t.symbol for t in self.trades.values() if t.variant in desk and t.variant in VARIANTS}
@@ -614,6 +622,8 @@ class PaperStrategy:
         self._evaluate_impulse(states, now_ms)
         if config.PAPER_PYL_VARIANT in VARIANTS or config.PAPER_333_VARIANT in VARIANTS:
             self._refresh_five_min_arm(states, now_ms)
+        if config.PAPER_33315_VARIANT in VARIANTS:
+            self._refresh_33315_arm(states, now_ms)
         if config.PAPER_VPS15_VARIANT in VARIANTS:
             self._refresh_fifteen_min_arm(states, now_ms)
         if pivots:
@@ -621,6 +631,8 @@ class PaperStrategy:
                 self._evaluate_pyl(states, now_ms)
             if config.PAPER_333_VARIANT in VARIANTS:
                 self._evaluate_333(states, now_ms)
+            if config.PAPER_33315_VARIANT in VARIANTS:
+                self._evaluate_33315(states, now_ms)
             if config.PAPER_VAC_VARIANT in VARIANTS:
                 self._evaluate_vac(states, now_ms)
             self._evaluate_vps_variants(states, now_ms)
@@ -884,7 +896,7 @@ class PaperStrategy:
         self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
         self._snapshot_equity(variant, now_ms)
         self.last_close[(variant, trade.symbol)] = now_ms
-        if variant == config.PAPER_333_VARIANT and reason == "trailing_stop":
+        if config.is_paper_333_family(variant) and reason == "trailing_stop":
             if float(result["pnl_usd"]) < 0:
                 cd_ms = int(config.PAPER_333_LOSS_STOP_COOLDOWN_MIN * 60_000)
                 self._333_loss_stop_until[(variant, trade.symbol)] = now_ms + cd_ms
@@ -1930,8 +1942,11 @@ class PaperStrategy:
         return sorted(self._confirm_arm)
 
     def confirm_fetch_symbols_15(self) -> list[str]:
-        """Монеты Пылесоса 15: первая 15м подтверждения уже закрыта или есть открытая сделка."""
-        return sorted(self._confirm_arm_15)
+        """Монеты 15m: vps15 и 333-15 (окно pivot)."""
+        out = set(self._confirm_arm_15)
+        if config.PAPER_33315_VARIANT in VARIANTS:
+            out |= self._confirm_arm_33315
+        return sorted(out)
 
     def _refresh_fifteen_min_arm(self, states: dict[str, SymbolState], now_ms: int) -> None:
         opens = {
@@ -1951,8 +1966,7 @@ class PaperStrategy:
         opens = {
             symbol
             for variant, symbol in self.trades
-            if variant
-            in (config.PAPER_PYL_VARIANT,)
+            if variant in (config.PAPER_PYL_VARIANT, config.PAPER_333_VARIANT)
         }
         if self._confirm_arm and now_ms < self._confirm_arm_at + 30_000:
             self._confirm_arm |= opens
@@ -1961,6 +1975,20 @@ class PaperStrategy:
         armed = symbols_waiting_htf_second_bar(states, now_ms)
         armed |= opens
         self._confirm_arm = armed
+
+    def _refresh_33315_arm(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        opens = {
+            symbol
+            for variant, symbol in self.trades
+            if variant == config.PAPER_33315_VARIANT
+        }
+        if self._confirm_arm_33315 and now_ms < self._confirm_arm_33315_at + 30_000:
+            self._confirm_arm_33315 |= opens
+            return
+        self._confirm_arm_33315_at = now_ms
+        armed = symbols_waiting_first_bar(states, now_ms, config.PAPER_33315_INTERVAL)
+        armed |= opens
+        self._confirm_arm_33315 = armed
 
     def _pivot_entry_window(self, entry: dict, now_ms: int, interval: str) -> bool:
         if not entry.get("passed"):
@@ -1976,7 +2004,16 @@ class PaperStrategy:
         return just_confirmed(int(pivot_time), now_ms, interval)
 
     def _five_min_entry_window(self, entry: dict, now_ms: int) -> bool:
-        return self._pivot_entry_window(entry, now_ms, config.PAPER_PYL_INTERVAL)
+        return self._third_bar_entry_window(entry, now_ms, config.PAPER_PYL_INTERVAL)
+
+    def _third_bar_entry_window(self, entry: dict, now_ms: int, interval: str) -> bool:
+        if not entry.get("passed"):
+            return False
+        metrics = entry.get("metrics") or {}
+        pivot_time = metrics.get("pivot_time_ms")
+        if not pivot_time:
+            return False
+        return entry_on_third_bar(int(pivot_time), now_ms, interval)
 
     def _process_bab_opposite_exits(self, states: dict[str, SymbolState], now_ms: int) -> None:
         specs: list[tuple[str, str, str]] = []
@@ -2013,29 +2050,34 @@ class PaperStrategy:
             self._pyl_prev_snap,
             "pyl",
             lambda w: setattr(self, "_pyl_watch", w),
+            interval=config.PAPER_PYL_INTERVAL,
+            trade_kind="pyl",
         )
 
-    def _333_loss_stop_blocked(self, symbol: str, now_ms: int) -> bool:
-        until = self._333_loss_stop_until.get((config.PAPER_333_VARIANT, symbol), 0)
+    def _333_loss_stop_blocked(self, symbol: str, now_ms: int, variant: str) -> bool:
+        until = self._333_loss_stop_until.get((variant, symbol), 0)
         return until > int(now_ms)
 
     def _restore_333_loss_stop_cooldowns(self, now_ms: int) -> None:
         cd_ms = int(config.PAPER_333_LOSS_STOP_COOLDOWN_MIN * 60_000)
         since = int(now_ms) - cd_ms
+        placeholders = ",".join("?" for _ in config.paper_333_family_variants())
         rows = self.store.db.execute(
-            "SELECT symbol, MAX(closed_at) AS ts FROM paper_trades "
-            "WHERE variant = ? AND status = 'closed' AND exit_reason = 'trailing_stop' "
-            "AND pnl_usd < 0 AND closed_at >= ? GROUP BY symbol",
-            (config.PAPER_333_VARIANT, since),
+            "SELECT variant, symbol, MAX(closed_at) AS ts FROM paper_trades "
+            f"WHERE variant IN ({placeholders}) AND status = 'closed' "
+            "AND exit_reason = 'trailing_stop' AND pnl_usd < 0 AND closed_at >= ? "
+            "GROUP BY variant, symbol",
+            (*config.paper_333_family_variants(), since),
         )
         for row in rows:
             ts = int(row["ts"] or 0)
             if ts <= 0:
                 continue
+            v = str(row["variant"])
             sym = str(row["symbol"])
             until = ts + cd_ms
             if until > int(now_ms):
-                self._333_loss_stop_until[(config.PAPER_333_VARIANT, sym)] = until
+                self._333_loss_stop_until[(v, sym)] = until
 
     def _evaluate_333(self, states: dict[str, SymbolState], now_ms: int) -> None:
         self._evaluate_bab_pivot_desk(
@@ -2046,6 +2088,21 @@ class PaperStrategy:
             self._333_prev_snap,
             "333",
             lambda w: setattr(self, "_333_watch", w),
+            interval=config.PAPER_PYL_INTERVAL,
+            trade_kind="333",
+        )
+
+    def _evaluate_33315(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        self._evaluate_bab_pivot_desk(
+            states,
+            now_ms,
+            config.PAPER_33315_VARIANT,
+            evaluate_33315,
+            self._33315_prev_snap,
+            "33315",
+            lambda w: setattr(self, "_33315_watch", w),
+            interval=config.PAPER_33315_INTERVAL,
+            trade_kind="33315",
         )
 
     def _evaluate_bab_pivot_desk(
@@ -2057,11 +2114,12 @@ class PaperStrategy:
         prev_snaps: dict[str, dict],
         eval_key: str,
         set_watch,
+        *,
+        interval: str,
+        trade_kind: str,
     ) -> None:
         if variant not in VARIANTS:
             return
-        interval = config.PAPER_PYL_INTERVAL
-        trade_kind = "333" if variant == config.PAPER_333_VARIANT else "pyl"
         watch: list[dict] = []
         open_symbols = {t.symbol for t in self.trades.values() if t.variant == variant}
         scan_symbols = sorted(set(states.keys()) | open_symbols)
@@ -2077,7 +2135,7 @@ class PaperStrategy:
             ev_clean = {k: v for k, v in ev_data.items() if not str(k).startswith("_")}
             pc = int(ev_clean.get("passed_count") or 0)
             side = ev_clean.get("side")
-            fresh = self._five_min_entry_window(ev_clean, now_ms)
+            fresh = self._third_bar_entry_window(ev_clean, now_ms, interval)
             if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
                 watch.append(
                     {
@@ -2094,7 +2152,7 @@ class PaperStrategy:
             open_key = (variant, symbol)
             if open_key in self.trades:
                 # 333: только стоп, без закрытия/перевхода по противоп. pivot (как pyl).
-                if variant != config.PAPER_333_VARIANT:
+                if not config.is_paper_333_family(variant):
                     trade = self.trades[open_key]
                     closed_side = trade.pos.side
                     exit_hit = opposite_pivot_exit_signal(
@@ -2122,7 +2180,9 @@ class PaperStrategy:
                 continue
             if not fresh or not ev_clean.get("passed"):
                 continue
-            if variant == config.PAPER_333_VARIANT and self._333_loss_stop_blocked(symbol, now_ms):
+            if config.is_paper_333_family(variant) and self._333_loss_stop_blocked(
+                symbol, now_ms, variant
+            ):
                 continue
             balance = self.balances[variant]
             margin = balance * config.PAPER_MARGIN_PCT / 100.0
@@ -2149,7 +2209,7 @@ class PaperStrategy:
         pivot_high = float(m.get("pivot_high") or 0)
         pivot_low = float(m.get("pivot_low") or 0)
         stop = bab_pivot_stop_price(side, pivot_high, pivot_low)
-        if variant == config.PAPER_333_VARIANT:
+        if config.is_paper_333_family(variant):
             m["desk_initial_stop"] = stop
             entry["metrics"] = m
         tape = self.tape.symbols.get(symbol)
@@ -2163,7 +2223,7 @@ class PaperStrategy:
             side=side,
             stop_style=config.paper_stop_style(variant),
             stop_price=stop,
-            desk_initial_stop=stop if variant == config.PAPER_333_VARIANT else 0.0,
+            desk_initial_stop=stop if config.is_paper_333_family(variant) else 0.0,
         )
         trade_id = self.store.insert_trade(
             {
@@ -2861,6 +2921,9 @@ class PaperStrategy:
             "333_check_labels": PYL333_CHECK_LABELS,
             "333_mandatory": list(PYL333_MANDATORY_5),
             "333_watch": list(self._333_watch),
+            "33315_check_labels": PYL33315_CHECK_LABELS,
+            "33315_mandatory": list(PYL33315_MANDATORY),
+            "33315_watch": list(self._33315_watch),
             "vac_check_labels": VAC_CHECK_LABELS,
             "vac_mandatory": list(VAC_MANDATORY),
             "vac_watch": list(self._vac_watch),

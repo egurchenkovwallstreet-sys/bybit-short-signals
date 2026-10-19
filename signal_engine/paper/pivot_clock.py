@@ -40,8 +40,8 @@ def third_bar_close_ms(pivot_time_ms: int, interval: str = "5") -> int:
 
 
 def entry_on_third_bar(pivot_time_ms: int, now_ms: int, interval: str = "5") -> bool:
-    """Вход pyl/vps5: только пока 3-я 5m после pivot открыта."""
-    if interval != "5":
+    """Вход pyl/333: только пока 3-я свеча interval после pivot открыта (5m или 15m)."""
+    if interval not in ("5", "15"):
         return False
     start = third_bar_open_ms(pivot_time_ms, interval)
     end = third_bar_close_ms(pivot_time_ms, interval)
@@ -131,6 +131,32 @@ def symbols_waiting_second_bar(states: dict[str, SymbolState], now_ms: int, inte
             first_open = ts + step
             first_close = confirm_bar_close_ms(ts, interval, entry_right)
             if first_open <= int(now_ms) < first_close + slack:
+                out.add(symbol)
+                break
+    return out
+
+
+def symbols_waiting_first_bar(states: dict[str, SymbolState], now_ms: int, interval: str) -> set[str]:
+    """Монеты на 1-й закрытой свече справа (ожидание 2-й → окно 3-й для входа)."""
+    pl = config.VACUUM_LH_PIVOT_LEFT
+    pl_max = config.VACUUM_LH_PIVOT_LEFT_MAX
+    need = _min_bars(interval)
+    out: set[str] = set()
+    entry_right = 1
+    for symbol, state in states.items():
+        if not state.last_price or not _meets_turnover(state):
+            continue
+        bars = _bars_for_interval(state, interval)
+        if len(bars) < need:
+            continue
+        closed = closed_bars(bars, interval, now_ms)
+        if len(closed) < pl + entry_right + 1:
+            continue
+        points = pivot_highs_floating_left(closed, pl, pl_max, entry_right)
+        points.extend(pivot_lows_floating_left(closed, pl, pl_max, entry_right))
+        for point in points:
+            ts = int(point["time"])
+            if first_bar_waiting(ts, now_ms, interval):
                 out.add(symbol)
                 break
     return out

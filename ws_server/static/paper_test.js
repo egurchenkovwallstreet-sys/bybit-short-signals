@@ -179,7 +179,7 @@
     return paper.data.mandatory || [];
   }
   const TABLE_HIDDEN = { lt20: true, sc10: true };
-  const DESK_VARIANTS = { pyl: true, "333": true, vps15: true };
+  const DESK_VARIANTS = { pyl: true, "333": true, "33315": true, vps15: true };
   function variants() {
     return (paper.data && paper.data.test_variants) || (paper.data && paper.data.variants) || ["t20", "p10", "t20p", "mlnp", "mt2", "graf"];
   }

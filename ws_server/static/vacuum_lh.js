@@ -48,17 +48,18 @@ const VACUUM_DESK = [
   ["scan", "Сканер"],
   ["pyl", "БАБЛОСОС"],
   ["333", "333"],
+  ["33315", "333-15"],
   ["vps15", "Пылесос 15"],
 ];
 
-const VACUUM_TRADE_VARIANTS = ["pyl", "333", "vps15"];
+const VACUUM_TRADE_VARIANTS = ["pyl", "333", "33315", "vps15"];
 
 function vacuumIsDeskMode(mode = vacuumLhState.mode) {
-  return mode === "pyl" || mode === "333" || mode === "vps15";
+  return mode === "pyl" || mode === "333" || mode === "33315" || mode === "vps15";
 }
 
 function vacuumDeskChartInterval(mode = vacuumLhState.mode) {
-  if (mode === "vps15") return "15";
+  if (mode === "vps15" || mode === "33315") return "15";
   if (mode === "pyl" || mode === "333") return "5";
   return vacuumLhState.lhInterval;
 }
@@ -67,7 +68,7 @@ const vacuumLhState = {
   mode: "scan",
   paper: null,
   closed: [],
-  closedMap: { pyl: [], 333: [], vps15: [] },
+  closedMap: { pyl: [], 333: [], 33315: [], vps15: [] },
   symbolClosed: {},
   series: new Map(),
   scanPivots: {},
@@ -424,7 +425,7 @@ function setVacuumMode(mode) {
   if (vacuumLhState.chartInterval !== prevInterval) {
     void loadVacuumChartDisplay(true);
   } else if (rt?._lastBars?.length) {
-    rt._maOverlayMode = vacuumLhState.mode === "333" ? "333" : "default";
+    rt._maOverlayMode = vacuumLhState.mode === "333" || vacuumLhState.mode === "33315" ? "333" : "default";
     window.boardChart?.updateAvgPriceCorridor?.(rt, rt._lastBars);
     drawVacuumLhOverlays(
       rt,
@@ -790,7 +791,7 @@ function drawVacuumCandles(candles, resetScale) {
     }
   }
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
-  runtime._maOverlayMode = vacuumLhState.mode === "333" ? "333" : "default";
+  runtime._maOverlayMode = vacuumLhState.mode === "333" || vacuumLhState.mode === "33315" ? "333" : "default";
   BC.drawCandles(runtime, candles, interval, resetScale, VAC_CHART.chart, live);
   if (resetScale) focusVacuumTradeWindow(runtime);
   else if (keptRange) {
@@ -2326,6 +2327,7 @@ function vacuumClosedStats(rows) {
 
 function vacuumDeskVariant() {
   if (vacuumLhState.mode === "vps15") return "vps15";
+  if (vacuumLhState.mode === "33315") return "33315";
   if (vacuumLhState.mode === "333") return "333";
   return "pyl";
 }
@@ -2398,6 +2400,7 @@ function vacuumAnalyticsTable() {
   const cols = [
     ["pyl", "БАБЛОСОС"],
     ["333", "333"],
+    ["33315", "333-15"],
     ["vps15", "Пылесос 15"],
   ].map(([variant, label]) => {
     const rows = vacuumLhState.closedMap[variant] || [];
@@ -2484,6 +2487,7 @@ function vacuumDeskAccount() {
 function vacuumDeskWatch() {
   const data = vacuumLhState.paper || {};
   if (vacuumLhState.mode === "vps15") return data.vps15_watch || [];
+  if (vacuumLhState.mode === "33315") return data["33315_watch"] || [];
   if (vacuumLhState.mode === "333") return data["333_watch"] || data._333_watch || [];
   return data.pyl_watch || [];
 }
@@ -2567,15 +2571,19 @@ function renderVacuumDesk() {
     const deskLabel =
       vacuumLhState.mode === "vps15"
         ? "Пылесос 15"
-        : vacuumLhState.mode === "333"
-          ? "333"
-          : "БАБЛОСОС";
+        : vacuumLhState.mode === "33315"
+          ? "333-15"
+          : vacuumLhState.mode === "333"
+            ? "333"
+            : "БАБЛОСОС";
     const rule =
       vacuumLhState.mode === "vps15"
         ? "15m pivot L15–L30: вход и выход через 1 закрытую 15m справа (окно 10 с). После выхода — сразу вход в обратную сторону. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
-        : vacuumLhState.mode === "333"
-          ? "Как БАБЛОСОС + pivot, затем EMA60 (5m): боковик не торгуем; лонг/шорт по EMA60. Минус по стопу — 45 мин без входа на эту монету (333). Стоп: до +5% ±5% pivot; +5%→+0.5% net; +10%→+5%; +14%→+10%; трейл пик−15 п.п."
-          : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
+        : vacuumLhState.mode === "33315"
+          ? "333 на 15m: pivot L15–L30, вход на 3-й 15m (без старшего TF). EMA60 (15m): боковик не торгуем. Минус по стопу — 45 мин пауза (33315). Выход только стоп: до +5% ±5% pivot; +5%→+0.5% net; +10%→+5%; +14%→+10%; трейл пик−15 п.п."
+          : vacuumLhState.mode === "333"
+            ? "Как БАБЛОСОС + pivot, затем EMA60 (5m): боковик не торгуем; лонг/шорт по EMA60. Минус по стопу — 45 мин без входа на эту монету (333). Стоп: до +5% ±5% pivot; +5%→+0.5% net; +10%→+5%; +14%→+10%; трейл пик−15 п.п."
+            : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>
@@ -2629,7 +2637,7 @@ function renderVacuumDesk() {
         </tr>`;
           })
           .join("")}</tbody>`
-      : `<tbody><tr><td class="quiet">Ждём новый экстремум на ${vacuumLhState.mode === "vps15" ? "15" : "5"} мин</td></tr></tbody>`;
+      : `<tbody><tr><td class="quiet">Ждём новый экстремум на ${vacuumLhState.mode === "vps15" || vacuumLhState.mode === "33315" ? "15" : "5"} мин</td></tr></tbody>`;
   }
   const closed = vacuumLhState.closed || [];
   const closedTable = document.getElementById("vacuum-desk-closed");

@@ -61,6 +61,13 @@ PYL333_CHECK_LABELS = {
     "ma333_regime": "EMA60: |Δ| ≥ 0.4% за 60×5m — тренд; иначе боковик; лонг ≥ EMA60, шорт ≤ EMA60",
 }
 
+PYL33315_MANDATORY = ("turnover_ok", "pivot_left", "side_from_pivot", "ma333_regime")
+
+PYL33315_CHECK_LABELS = {
+    **PYL_CHECK_LABELS,
+    "ma333_regime": "EMA60: |Δ| ≥ 0.4% за 60×15m — тренд; иначе боковик; лонг ≥ EMA60, шорт ≤ EMA60",
+}
+
 
 def _last_two_prices(points: list[dict]) -> tuple[float, float] | None:
     if len(points) < 2:
@@ -283,6 +290,38 @@ def evaluate_333(state: SymbolState, now_ms: int, prev_snap: dict | None = None)
     out["score"] = 92.0 if passed else 25.0
     out["grade"] = grade_for(out["score"])
     out["variants"] = [config.PAPER_333_VARIANT] if passed else []
+    out["side"] = side if passed else None
+    metrics = dict(out.get("metrics") or {})
+    metrics["ma333"] = ma_meta
+    out["metrics"] = metrics
+    return out
+
+
+def evaluate_33315(state: SymbolState, now_ms: int, prev_snap: dict | None = None) -> dict:
+    iv = config.PAPER_33315_INTERVAL
+    base = evaluate_htf_pivot_entry(
+        state,
+        now_ms,
+        prev_snap,
+        iv,
+        kind="33315",
+        variant=config.PAPER_33315_VARIANT,
+    )
+    side = base.get("side") or (base.get("metrics") or {}).get("side")
+    ma_ok, ma_detail, ma_meta = ma333_regime_allows(state, now_ms, side, iv)
+    checks = dict(base.get("checks") or {})
+    checks["ma333_regime"] = _check(ma_ok, ma_detail, PYL33315_CHECK_LABELS["ma333_regime"])
+    mandatory = PYL33315_MANDATORY
+    failed = [k for k in mandatory if not checks[k]["ok"]]
+    passed = not failed
+    out = dict(base)
+    out["checks"] = checks
+    out["failed"] = failed
+    out["passed"] = passed
+    out["passed_count"] = len(mandatory) - len(failed)
+    out["score"] = 92.0 if passed else 25.0
+    out["grade"] = grade_for(out["score"])
+    out["variants"] = [config.PAPER_33315_VARIANT] if passed else []
     out["side"] = side if passed else None
     metrics = dict(out.get("metrics") or {})
     metrics["ma333"] = ma_meta

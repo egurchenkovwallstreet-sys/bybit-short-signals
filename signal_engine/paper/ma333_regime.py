@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import config
 from signal_engine.indicators import ema
-from signal_engine.paper.tight_chop import _closed_bars_before
 from signal_engine.state import SymbolState
+from signal_engine.swing_highs import closed_bars
 
 Regime = str  # "up" | "down" | "sideways"
 
 
 def _closes(state: SymbolState, now_ms: int, interval: str) -> list[float]:
     raw = list(state.bars_htf.get(interval) or [])
-    closed = _closed_bars_before(raw, now_ms)
+    closed = closed_bars(raw, interval, now_ms)
     return [float(b.close) for b in closed]
 
 
