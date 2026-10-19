@@ -30,6 +30,9 @@ window.boardChart = {
   EMA_333_OFFSET_PCT: 0.015,
   EMA_333_UPPER_COLOR: "#ff5d73",
   EMA_333_LOWER_COLOR: "#3dd68c",
+  /** Заливка mid→upper зелёная, mid→lower красная; 92% прозрачности → alpha 0.08. */
+  EMA_333_FILL_UPPER: "rgba(61, 214, 140, 0.08)",
+  EMA_333_FILL_LOWER: "rgba(255, 93, 115, 0.08)",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -427,11 +430,18 @@ window.boardChart = {
   },
 
   syncAvgCorridorOverlay(runtime) {
-    if (!runtime?._avgCorridorBands?.length) return;
+    const has333 = runtime?._maOverlayMode === "333" && runtime._ema333Bands?.length;
+    const hasAvg = runtime?._avgCorridorBands?.length;
+    if (!has333 && !hasAvg) return;
     if (runtime._corridorSyncRaf) return;
     runtime._corridorSyncRaf = requestAnimationFrame(() => {
       runtime._corridorSyncRaf = 0;
-      window.boardChart.renderAvgCorridorOverlay(runtime);
+      const BC = window.boardChart;
+      if (runtime._maOverlayMode === "333" && runtime._ema333Bands?.length) {
+        BC.renderEma333BandOverlay(runtime);
+      } else {
+        BC.renderAvgCorridorOverlay(runtime);
+      }
     });
   },
 
@@ -479,6 +489,7 @@ window.boardChart = {
       runtime.series.setData([]);
       runtime.volumeSeries?.setData([]);
       runtime._avgCorridorBands = null;
+      runtime._ema333Bands = null;
       if (runtime.avgCorridorOverlayEl) runtime.avgCorridorOverlayEl.innerHTML = "";
       runtime.ema50Series?.setData([]);
       runtime.ema60UpperSeries?.setData([]);
@@ -1453,6 +1464,7 @@ window.boardChart = {
   hideEma333BandSeries(runtime) {
     runtime?.ema60UpperSeries?.setData([]);
     runtime?.ema60LowerSeries?.setData([]);
+    runtime._ema333Bands = null;
   },
 
   updateEma50(runtime, bars, opts) {
@@ -1471,7 +1483,58 @@ window.boardChart = {
     runtime.ema60UpperSeries?.setData(upper);
     runtime.ema60LowerSeries?.setData(lower);
     runtime._avgCorridorBands = null;
-    if (runtime.avgCorridorOverlayEl) runtime.avgCorridorOverlayEl.innerHTML = "";
+    runtime._ema333Bands = center.map((c, i) => ({
+      time: c.time,
+      mid: c.value,
+      upper: upper[i].value,
+      lower: lower[i].value,
+    }));
+    if (runtime._chartContainer) BC.ensureAvgCorridorOverlay(runtime, runtime._chartContainer);
+    BC.syncAvgCorridorOverlay(runtime);
+  },
+
+  renderEma333BandOverlay(runtime) {
+    const BC = window.boardChart;
+    const el = runtime?.avgCorridorOverlayEl;
+    const chart = runtime?.chart;
+    const series = runtime?.series;
+    const bands = runtime._ema333Bands;
+    if (!el || !chart || !series || !bands?.length) {
+      if (el) el.innerHTML = "";
+      return;
+    }
+    const chartEl = runtime._chartContainer;
+    if (!chartEl) return;
+    const w = chartEl.clientWidth;
+    const h = Math.round(chartEl.clientHeight * 0.78) || chartEl.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const offX = el.parentElement === chartEl ? 0 : BC.overlayPlotOffsetX(runtime);
+    const y = (price) => series.priceToCoordinate(price);
+    const x = (time) => chart.timeScale().timeToCoordinate(time);
+    const upperPaths = [];
+    const lowerPaths = [];
+    for (let i = 0; i < bands.length - 1; i++) {
+      const a = bands[i];
+      const b = bands[i + 1];
+      const x0 = x(a.time);
+      const x1 = x(b.time);
+      if (x0 == null || x1 == null || Number.isNaN(x0) || Number.isNaN(x1)) continue;
+      const x0p = x0 + offX;
+      const x1p = x1 + offX;
+      const yMid0 = y(a.mid);
+      const yMid1 = y(b.mid);
+      const yUp0 = y(a.upper);
+      const yUp1 = y(b.upper);
+      const yLo0 = y(a.lower);
+      const yLo1 = y(b.lower);
+      if ([yMid0, yMid1, yUp0, yUp1, yLo0, yLo1].some((v) => v == null || Number.isNaN(v))) continue;
+      upperPaths.push(`M ${x0p} ${yUp0} L ${x1p} ${yUp1} L ${x1p} ${yMid1} L ${x0p} ${yMid0} Z`);
+      lowerPaths.push(`M ${x0p} ${yLo0} L ${x1p} ${yLo1} L ${x1p} ${yMid1} L ${x0p} ${yMid0} Z`);
+    }
+    el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
+      <path fill="${BC.EMA_333_FILL_UPPER}" d="${upperPaths.join(" ")}"/>
+      <path fill="${BC.EMA_333_FILL_LOWER}" d="${lowerPaths.join(" ")}"/>
+    </svg>`;
   },
 
   computeAvgCorridorBands(bars) {
@@ -1789,6 +1852,7 @@ window.boardChart = {
       runtime.volumeSeries = null;
       runtime.avgCorridorOverlayEl = null;
       runtime._avgCorridorBands = null;
+      runtime._ema333Bands = null;
       runtime.ema50Series = null;
       runtime.ema60UpperSeries = null;
       runtime.ema60LowerSeries = null;
