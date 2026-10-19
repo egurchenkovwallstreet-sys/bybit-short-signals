@@ -332,7 +332,7 @@ PAPER_PYL_INTERVAL = "5"
 PAPER_PYL_STOP_ROE = _env_float("PAPER_PYL_STOP_ROE", 5.0)
 # БАБЛОСОС 1: только монеты с размахом цены за час ≥ этого порога (%).
 PAPER_PYL1_HOUR_RANGE_PCT = _env_float("PAPER_PYL1_HOUR_RANGE_PCT", 2.0)
-# 333: как БАБЛОСОС + EMA20/EMA60 на 5m (тренд → только лонг/шорт; боковик → pivot + ближе к EMA20).
+# 333: как БАБЛОСОС + не узкий боковик + EMA20/60 (тренд вниз→шорт, вверх→лонг).
 PAPER_333_VARIANT = "333"
 PAPER_333_MA_FAST = _env_int("PAPER_333_MA_FAST", 20)
 PAPER_333_MA_SLOW = _env_int("PAPER_333_MA_SLOW", 60)

@@ -1,4 +1,4 @@
-"""333: режим EMA20/EMA60 на 5m — тренд (только лонг/шорт) или боковик (pivot + ближе к EMA20)."""
+"""333: EMA20/EMA60 на 5m — в тренде только лонг или шорт; боковик по pivot (узкий range — отдельный фильтр)."""
 
 from __future__ import annotations
 
@@ -94,12 +94,8 @@ def ma333_regime_detail(
             else f"EMA вверх — шорт запрещён (Δ{s20:+.2f}% / {s60:+.2f}%)"
         )
     else:
-        ok = d20 < d60
-        detail = (
-            f"боковик: |цена−EMA{fast}|={d20:.6g} < |цена−EMA{slow}|={d60:.6g}"
-            if ok
-            else f"боковик: цена ближе к EMA{slow} (d20={d20:.6g}, d60={d60:.6g}) — вход запрещён"
-        )
+        ok = True
+        detail = f"боковик EMA (Δ{s20:+.2f}% / {s60:+.2f}%) — сторона по pivot, узкий range отдельно"
 
     return {
         "insufficient_data": False,
@@ -125,5 +121,6 @@ def ma333_regime_allows(
 ) -> tuple[bool, str, dict]:
     d = ma333_regime_detail(state, now_ms, side, interval)
     if d.get("insufficient_data"):
-        return False, str(d.get("detail") or "нет данных EMA"), d
+        d = {**d, "ok": True, "regime": "unknown", "detail": str(d.get("detail") or "мало баров — фильтр EMA пропущен")}
+        return True, str(d["detail"]), d
     return bool(d.get("ok")), str(d.get("detail") or ""), d

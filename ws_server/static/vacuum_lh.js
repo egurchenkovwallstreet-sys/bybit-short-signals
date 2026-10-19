@@ -2485,7 +2485,7 @@ function renderVacuumDesk() {
             : vacuumLhState.mode === "pylbtc"
               ? "Как БАБЛОСОС + BTC за 5 мин в сторону сделки (лонг — рост, шорт — падение). Стоп ±5% ROE от pivot."
               : vacuumLhState.mode === "333"
-                ? "Как БАБЛОСОС + EMA20/60 на 5m: обе EMA вниз — только шорт, вверх — только лонг; боковик — pivot как БАБЛОСОС, но |цена−EMA20| < |цена−EMA60|. Стоп ±5%."
+                ? "Как БАБЛОСОС + не узкий боковик (5m). EMA20/60: обе вниз — только шорт, обе вверх — только лонг. Стоп ±5%."
                 : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>

@@ -10,7 +10,7 @@ from signal_engine.paper.vacuum_senior_gate import vacuum_senior_allows_entry
 from signal_engine.state import SymbolState
 from signal_engine.paper.sc10_detect import btc_move_pct
 from signal_engine.paper.ma333_regime import ma333_regime_allows
-from signal_engine.paper.tight_chop import tight_chop_detail
+from signal_engine.paper.tight_chop import is_tight_chop, tight_chop_detail
 from signal_engine.vacuum_lh import _meets_turnover, hour_range_pct
 
 PYL_INTERVAL = config.PAPER_PYL_INTERVAL
@@ -69,11 +69,12 @@ PYL1_CHECK_LABELS = {
     "structure_ok": "Не расширение; лонг: min выше prev, шорт: max ниже prev",
 }
 
-PYL333_MANDATORY_5 = PYL_MANDATORY_5 + ("ma333_regime",)
+PYL333_MANDATORY_5 = PYL_MANDATORY_5 + ("chop_not_tight", "ma333_regime")
 
 PYL333_CHECK_LABELS = {
     **PYL_CHECK_LABELS,
-    "ma333_regime": "EMA20/60: тренд вниз→шорт, вверх→лонг; боковик→|ц−EMA20|<|ц−EMA60|",
+    "chop_not_tight": "Не узкий боковик (range / avg bar на 5m)",
+    "ma333_regime": "EMA20/60: тренд вниз → только шорт, вверх → только лонг",
 }
 
 
@@ -353,9 +354,11 @@ def evaluate_333(state: SymbolState, now_ms: int, prev_snap: dict | None = None)
         variant=config.PAPER_333_VARIANT,
     )
     side = base.get("side") or (base.get("metrics") or {}).get("side")
-    ma_ok, ma_detail, ma_meta = ma333_regime_allows(state, now_ms, side, PYL_INTERVAL)
+    tight, chop_detail = is_tight_chop(state, now_ms, PYL_INTERVAL)
     chop = tight_chop_detail(state, now_ms, PYL_INTERVAL)
+    ma_ok, ma_detail, ma_meta = ma333_regime_allows(state, now_ms, side, PYL_INTERVAL)
     checks = dict(base.get("checks") or {})
+    checks["chop_not_tight"] = _check(not tight, chop_detail, PYL333_CHECK_LABELS["chop_not_tight"])
     checks["ma333_regime"] = _check(ma_ok, ma_detail, PYL333_CHECK_LABELS["ma333_regime"])
     mandatory = PYL333_MANDATORY_5
     failed = [k for k in mandatory if not checks[k]["ok"]]

@@ -52,16 +52,11 @@ def test_ma333_up_allows_long_blocks_short():
     assert d_short["ok"] is False
 
 
-def test_ma333_sideways_requires_closer_to_ema20():
-    # Плоский тренд — боковик
+def test_ma333_sideways_allows_either_side():
     closes = [100.0 + (0.02 if i % 2 else -0.02) for i in range(90)]
     state, now_ms = _state_with_closes(closes)
-    d = ma333_regime_detail(state, now_ms, "short")
-    assert d["regime"] == "sideways"
-    # Подменим цену: ближе к EMA60
-    state.last_price = float(d["ema60"])
-    d_far = ma333_regime_detail(state, now_ms, "short")
-    assert d_far["ok"] is False
-    state.last_price = float(d["ema20"])
-    d_near = ma333_regime_detail(state, now_ms, "short")
-    assert d_near["ok"] is True
+    d_short = ma333_regime_detail(state, now_ms, "short")
+    d_long = ma333_regime_detail(state, now_ms, "long")
+    assert d_short["regime"] == "sideways"
+    assert d_short["ok"] is True
+    assert d_long["ok"] is True
