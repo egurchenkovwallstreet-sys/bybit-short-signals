@@ -27,7 +27,7 @@ window.boardChart = {
   EMA_SMOOTH_PASS: 12,
   EMA_LINE_COLOR: "#58a6ff",
   /** 333: полосы EMA60 ± доля от значения центральной EMA60. */
-  EMA_333_OFFSET_PCT: 0.015,
+  EMA_333_OFFSET_PCT: 0.02,
   EMA_333_UPPER_COLOR: "#ff5d73",
   EMA_333_LOWER_COLOR: "#3dd68c",
   /** Заливка mid→upper зелёная, mid→lower красная; 92% прозрачности → alpha 0.08. */
@@ -1445,7 +1445,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "EMA60+1.5%",
+        title: "EMA60+2%",
       });
     }
     if (!runtime.ema60LowerSeries) {
