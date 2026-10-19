@@ -12,6 +12,10 @@ window.boardChart = {
   ],
   FETCH_DAYS: 30,
   FETCH_BARS: 300,
+  /** Параллельный коридор: SMA30 типичной цены (H+L+C)/3, фикс. полуширина от avg(H−L). */
+  AVG_SMA_PERIOD: 30,
+  AVG_SMA_RANGE_HALF_FACTOR: 0.55,
+  AVG_SMA_LINE_COLOR: "#c084fc",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -450,6 +454,8 @@ window.boardChart = {
     if (runtime.series) {
       runtime.series.setData([]);
       runtime.volumeSeries?.setData([]);
+      runtime.avgCorridorUpperSeries?.setData([]);
+      runtime.avgCorridorLowerSeries?.setData([]);
     }
   },
 
@@ -1272,9 +1278,87 @@ window.boardChart = {
       chart: null,
       series: null,
       volumeSeries: null,
+      avgCorridorUpperSeries: null,
+      avgCorridorLowerSeries: null,
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
     };
+  },
+
+  barAvgPrice(bar) {
+    const b = bar || {};
+    return (Number(b.high) + Number(b.low) + Number(b.close)) / 3;
+  },
+
+  smaRollingValues(values, period) {
+    const p = period;
+    const out = new Array(values.length).fill(null);
+    if (p < 1 || !values.length) return out;
+    let sum = 0;
+    for (let i = 0; i < values.length; i++) {
+      sum += values[i];
+      if (i >= p) sum -= values[i - p];
+      if (i >= p - 1) out[i] = sum / p;
+    }
+    return out;
+  },
+
+  parallelAvgCorridorLineData(bars) {
+    const BC = window.boardChart;
+    if (!bars?.length) return { upper: [], lower: [] };
+    const period = BC.AVG_SMA_PERIOD;
+    const avg = bars.map((b) => BC.barAvgPrice(b));
+    const mid = BC.smaRollingValues(avg, period);
+    let rangeSum = 0;
+    for (const b of bars) rangeSum += Math.max(0, Number(b.high) - Number(b.low));
+    let halfW = (rangeSum / bars.length) * BC.AVG_SMA_RANGE_HALF_FACTOR;
+    const lastMid = mid[mid.length - 1];
+    if (lastMid != null && lastMid > 0) {
+      halfW = Math.max(halfW, lastMid * 0.004);
+    }
+    const upper = [];
+    const lower = [];
+    for (let i = 0; i < bars.length; i++) {
+      const m = mid[i];
+      if (m == null) continue;
+      upper.push({ time: bars[i].time, value: m + halfW });
+      lower.push({ time: bars[i].time, value: m - halfW });
+    }
+    return { upper, lower };
+  },
+
+  ensureAvgCorridorSeries(runtime) {
+    const color = window.boardChart.AVG_SMA_LINE_COLOR;
+    if (!runtime?.chart) return;
+    if (!runtime.avgCorridorUpperSeries) {
+      runtime.avgCorridorUpperSeries = runtime.chart.addLineSeries({
+        color,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        title: "SMA30+",
+      });
+    }
+    if (!runtime.avgCorridorLowerSeries) {
+      runtime.avgCorridorLowerSeries = runtime.chart.addLineSeries({
+        color,
+        lineWidth: 1,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        title: "SMA30−",
+      });
+    }
+  },
+
+  updateAvgPriceCorridor(runtime, bars) {
+    const BC = window.boardChart;
+    if (!runtime?.chart) return;
+    BC.ensureAvgCorridorSeries(runtime);
+    const { upper, lower } = BC.parallelAvgCorridorLineData(bars);
+    runtime.avgCorridorUpperSeries?.setData(upper);
+    runtime.avgCorridorLowerSeries?.setData(lower);
   },
 
   createPrefetchStore() {
@@ -1454,6 +1538,8 @@ window.boardChart = {
       runtime.chart = null;
       runtime.series = null;
       runtime.volumeSeries = null;
+      runtime.avgCorridorUpperSeries = null;
+      runtime.avgCorridorLowerSeries = null;
     }
     runtime._chartContainer = container;
     if (runtime.chart) {
@@ -1559,6 +1645,7 @@ window.boardChart = {
         })),
       );
     }
+    BC.updateAvgPriceCorridor(runtime, bars);
     runtime._lastBars = bars;
     if (bars.length) {
       runtime._lastCandleTime = bars[bars.length - 1].time;
