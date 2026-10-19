@@ -26,8 +26,8 @@ window.boardChart = {
   /** Второй проход SMA по EMA для более гладкой линии (не 333). */
   EMA_SMOOTH_PASS: 12,
   EMA_LINE_COLOR: "#58a6ff",
-  /** 333: полосы EMA60 ± доля от цены закрытия (как на движке, без EMA20). */
-  EMA_333_OFFSET_PCT: 0.1,
+  /** 333: полосы EMA60 ± доля от значения центральной EMA60. */
+  EMA_333_OFFSET_PCT: 0.02,
   EMA_333_UPPER_COLOR: "#ff5d73",
   EMA_333_LOWER_COLOR: "#3dd68c",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
@@ -1401,8 +1401,7 @@ window.boardChart = {
     for (let i = 0; i < (bars?.length || 0); i++) {
       const v = ema[i];
       if (v == null) continue;
-      const px = Number(bars[i].close);
-      const d = Number.isFinite(px) && px > 0 ? px * off : 0;
+      const d = v * off;
       const t = bars[i].time;
       center.push({ time: t, value: v });
       upper.push({ time: t, value: v + d });
@@ -1435,7 +1434,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "EMA60+10%",
+        title: "EMA60+2%",
       });
     }
     if (!runtime.ema60LowerSeries) {
@@ -1445,7 +1444,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "EMA60−10%",
+        title: "EMA60−2%",
       });
     }
     runtime.ema50Series?.applyOptions({ title: "EMA60", lineWidth: 2 });
