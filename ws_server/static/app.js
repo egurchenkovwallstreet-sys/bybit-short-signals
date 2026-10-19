@@ -720,7 +720,7 @@ function updateChartLegend(detail) {
   const o4 = window.boardChart.formatOiChange(h4);
   el.innerHTML = `
     <span class="lg-price">Свечи (цена)</span>
-    <span class="lg-sma" style="color:#c084fc">— SMA50 · SMA20 ±2% (4%)</span>
+    <span class="lg-sma"><span style="color:#2dd4bf">NW+</span> · <span style="color:#f87171">NW−</span> (300, endpoint)</span>
     <span class="lg-vol">■ Объём</span>
     <span class="lg-meta">OI 1ч <span class="${o1.cls}">${o1.text}</span> · OI 4ч <span class="${o4.cls}">${o4.text}</span> · Фин. ${fr} · Тейкеры ${tk}</span>`;
 }
@@ -758,7 +758,7 @@ function drawCandles(candles, signal, detail, resetChartScale) {
       })),
     );
   }
-  window.boardChart.updateSma50(state, bars);
+  window.boardChart.updateNwEnvelope(state, bars);
   if (detail) updateChartLegend(detail);
   state.priceLines.forEach((line) => state.series.removePriceLine(line));
   state.priceLines = [];

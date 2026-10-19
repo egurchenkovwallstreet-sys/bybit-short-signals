@@ -423,7 +423,7 @@ function drawPumpStrategyCandles(candles, interval, resetScale) {
       })),
     );
   }
-  window.boardChart.updateSma50(pumpStrategyState, bars);
+  window.boardChart.updateNwEnvelope(pumpStrategyState, bars);
   if (bars.length) {
     pumpStrategyState.priceRange = {
       min: Math.min(...bars.map((b) => b.low)),
