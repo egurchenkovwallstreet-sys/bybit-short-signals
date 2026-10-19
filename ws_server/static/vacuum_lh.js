@@ -431,6 +431,8 @@ function setVacuumMode(mode) {
   if (vacuumLhState.chartInterval !== prevInterval) {
     void loadVacuumChartDisplay(true);
   } else if (rt?._lastBars?.length) {
+    rt._maOverlayMode = vacuumLhState.mode === "333" ? "333" : "default";
+    window.boardChart?.updateAvgPriceCorridor?.(rt, rt._lastBars);
     drawVacuumLhOverlays(
       rt,
       getVacuumChartPeaks(),
@@ -731,6 +733,7 @@ function drawVacuumCandles(candles, resetScale) {
     }
   }
   const live = findVacuumRow(symbol)?.last_price ?? vacuumLhState.detail?.signal?.last_price;
+  runtime._maOverlayMode = vacuumLhState.mode === "333" ? "333" : "default";
   BC.drawCandles(runtime, candles, interval, resetScale, VAC_CHART.chart, live);
   if (resetScale) focusVacuumTradeWindow(runtime);
   else if (keptRange) {

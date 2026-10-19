@@ -23,9 +23,13 @@ window.boardChart = {
   AVG_SMA_FILL_UPPER: "rgba(255, 93, 115, 0.05)",
   AVG_SMA_FILL_LOWER: "rgba(61, 214, 140, 0.05)",
   EMA_PERIOD: 60,
-  /** Второй проход SMA по EMA для более гладкой линии. */
+  /** Второй проход SMA по EMA для более гладкой линии (не 333). */
   EMA_SMOOTH_PASS: 12,
   EMA_LINE_COLOR: "#58a6ff",
+  /** 333: полосы EMA60 ± доля от цены закрытия (как на движке, без EMA20). */
+  EMA_333_OFFSET_PCT: 0.1,
+  EMA_333_UPPER_COLOR: "#ff5d73",
+  EMA_333_LOWER_COLOR: "#3dd68c",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -477,6 +481,8 @@ window.boardChart = {
       runtime._avgCorridorBands = null;
       if (runtime.avgCorridorOverlayEl) runtime.avgCorridorOverlayEl.innerHTML = "";
       runtime.ema50Series?.setData([]);
+      runtime.ema60UpperSeries?.setData([]);
+      runtime.ema60LowerSeries?.setData([]);
     }
   },
 
@@ -1302,6 +1308,9 @@ window.boardChart = {
       avgCorridorOverlayEl: null,
       _avgCorridorBands: null,
       ema50Series: null,
+      ema60UpperSeries: null,
+      ema60LowerSeries: null,
+      _maOverlayMode: "default",
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
     };
@@ -1363,11 +1372,16 @@ window.boardChart = {
     return out;
   },
 
-  ema50LineData(bars) {
+  ema60RawValues(bars) {
     const BC = window.boardChart;
     const closes = (bars || []).map((b) => Number(b.close));
-    const ema1 = BC.emaRollingValues(closes, BC.EMA_PERIOD);
-    const smoothPass = BC.EMA_SMOOTH_PASS;
+    return BC.emaRollingValues(closes, BC.EMA_PERIOD);
+  },
+
+  ema50LineData(bars, { raw } = {}) {
+    const BC = window.boardChart;
+    const ema1 = BC.ema60RawValues(bars);
+    const smoothPass = raw ? 0 : BC.EMA_SMOOTH_PASS;
     const ema =
       smoothPass > 1 ? BC.smaRollingValues(ema1, smoothPass, true) : ema1;
     const out = [];
@@ -1375,6 +1389,26 @@ window.boardChart = {
       if (ema[i] != null) out.push({ time: bars[i].time, value: ema[i] });
     }
     return out;
+  },
+
+  ema333BandLineData(bars) {
+    const BC = window.boardChart;
+    const off = BC.EMA_333_OFFSET_PCT;
+    const ema = BC.ema60RawValues(bars);
+    const center = [];
+    const upper = [];
+    const lower = [];
+    for (let i = 0; i < (bars?.length || 0); i++) {
+      const v = ema[i];
+      if (v == null) continue;
+      const px = Number(bars[i].close);
+      const d = Number.isFinite(px) && px > 0 ? px * off : 0;
+      const t = bars[i].time;
+      center.push({ time: t, value: v });
+      upper.push({ time: t, value: v + d });
+      lower.push({ time: t, value: v - d });
+    }
+    return { center, upper, lower };
   },
 
   ensureEma50Series(runtime) {
@@ -1386,15 +1420,59 @@ window.boardChart = {
       priceLineVisible: false,
       lastValueVisible: true,
       crosshairMarkerVisible: false,
-      title: "EMA50",
+      title: "EMA60",
     });
   },
 
-  updateEma50(runtime, bars) {
+  ensureEma333BandSeries(runtime) {
     const BC = window.boardChart;
     if (!runtime?.chart) return;
     BC.ensureEma50Series(runtime);
-    runtime.ema50Series?.setData(BC.ema50LineData(bars));
+    if (!runtime.ema60UpperSeries) {
+      runtime.ema60UpperSeries = runtime.chart.addLineSeries({
+        color: BC.EMA_333_UPPER_COLOR,
+        lineWidth: 1.5,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        title: "EMA60+10%",
+      });
+    }
+    if (!runtime.ema60LowerSeries) {
+      runtime.ema60LowerSeries = runtime.chart.addLineSeries({
+        color: BC.EMA_333_LOWER_COLOR,
+        lineWidth: 1.5,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        title: "EMA60−10%",
+      });
+    }
+    runtime.ema50Series?.applyOptions({ title: "EMA60", lineWidth: 2 });
+  },
+
+  hideEma333BandSeries(runtime) {
+    runtime?.ema60UpperSeries?.setData([]);
+    runtime?.ema60LowerSeries?.setData([]);
+  },
+
+  updateEma50(runtime, bars, opts) {
+    const BC = window.boardChart;
+    if (!runtime?.chart) return;
+    BC.ensureEma50Series(runtime);
+    runtime.ema50Series?.setData(BC.ema50LineData(bars, opts));
+  },
+
+  updateEma333Band(runtime, bars) {
+    const BC = window.boardChart;
+    if (!runtime?.chart) return;
+    BC.ensureEma333BandSeries(runtime);
+    const { center, upper, lower } = BC.ema333BandLineData(bars);
+    runtime.ema50Series?.setData(center);
+    runtime.ema60UpperSeries?.setData(upper);
+    runtime.ema60LowerSeries?.setData(lower);
+    runtime._avgCorridorBands = null;
+    if (runtime.avgCorridorOverlayEl) runtime.avgCorridorOverlayEl.innerHTML = "";
   },
 
   computeAvgCorridorBands(bars) {
@@ -1522,6 +1600,11 @@ window.boardChart = {
   updateAvgPriceCorridor(runtime, bars) {
     const BC = window.boardChart;
     if (!runtime?.chart) return;
+    if (runtime._maOverlayMode === "333") {
+      BC.updateEma333Band(runtime, bars);
+      return;
+    }
+    BC.hideEma333BandSeries(runtime);
     if (runtime._chartContainer) BC.ensureAvgCorridorOverlay(runtime, runtime._chartContainer);
     runtime._avgCorridorBands = BC.computeAvgCorridorBands(bars);
     BC.syncAvgCorridorOverlay(runtime);
@@ -1708,6 +1791,9 @@ window.boardChart = {
       runtime.avgCorridorOverlayEl = null;
       runtime._avgCorridorBands = null;
       runtime.ema50Series = null;
+      runtime.ema60UpperSeries = null;
+      runtime.ema60LowerSeries = null;
+      runtime._maOverlayMode = "default";
       runtime._avgCorridorHooks = false;
       runtime._corridorSyncRaf = 0;
       if (runtime._corridorResizeObs) {
