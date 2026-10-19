@@ -670,6 +670,21 @@ body {
   border: 1px solid var(--border);
 }
 
+.psc-avg-corridor-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 22%;
+  pointer-events: none;
+  z-index: 11;
+  overflow: hidden;
+}
+
+.psc-avg-corridor-overlay svg {
+  display: block;
+}
+
 .psc-liq-chart-overlay {
   position: absolute;
   top: 0;

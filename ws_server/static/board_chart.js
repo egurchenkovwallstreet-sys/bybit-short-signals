@@ -15,7 +15,12 @@ window.boardChart = {
   /** Параллельный коридор: SMA30 типичной цены (H+L+C)/3, фикс. полуширина от avg(H−L). */
   AVG_SMA_PERIOD: 30,
   AVG_SMA_RANGE_HALF_FACTOR: 2.2,
-  AVG_SMA_LINE_COLOR: "#c084fc",
+  /** Доп. множитель ширины (+10% к текущей полуширине). */
+  AVG_SMA_WIDTH_SCALE: 1.1,
+  AVG_SMA_UPPER_COLOR: "#ff5d73",
+  AVG_SMA_LOWER_COLOR: "#3dd68c",
+  AVG_SMA_FILL_UPPER: "rgba(255, 93, 115, 0.05)",
+  AVG_SMA_FILL_LOWER: "rgba(61, 214, 140, 0.05)",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -409,6 +414,7 @@ window.boardChart = {
     const liq = runtime._lastLiqCtx;
     if (liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
     BC.renderLiqCandleLabels(runtime);
+    BC.renderAvgCorridorOverlay(runtime);
   },
 
   scheduleThrottledOverlaySync(runtime) {
@@ -454,8 +460,8 @@ window.boardChart = {
     if (runtime.series) {
       runtime.series.setData([]);
       runtime.volumeSeries?.setData([]);
-      runtime.avgCorridorUpperSeries?.setData([]);
-      runtime.avgCorridorLowerSeries?.setData([]);
+      runtime._avgCorridorBands = null;
+      if (runtime.avgCorridorOverlayEl) runtime.avgCorridorOverlayEl.innerHTML = "";
     }
   },
 
@@ -1278,8 +1284,8 @@ window.boardChart = {
       chart: null,
       series: null,
       volumeSeries: null,
-      avgCorridorUpperSeries: null,
-      avgCorridorLowerSeries: null,
+      avgCorridorOverlayEl: null,
+      _avgCorridorBands: null,
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
     };
@@ -1303,62 +1309,107 @@ window.boardChart = {
     return out;
   },
 
-  parallelAvgCorridorLineData(bars) {
+  computeAvgCorridorBands(bars) {
     const BC = window.boardChart;
-    if (!bars?.length) return { upper: [], lower: [] };
+    if (!bars?.length) return [];
     const period = BC.AVG_SMA_PERIOD;
     const avg = bars.map((b) => BC.barAvgPrice(b));
     const mid = BC.smaRollingValues(avg, period);
     let rangeSum = 0;
     for (const b of bars) rangeSum += Math.max(0, Number(b.high) - Number(b.low));
-    let halfW = (rangeSum / bars.length) * BC.AVG_SMA_RANGE_HALF_FACTOR;
+    let halfW = (rangeSum / bars.length) * BC.AVG_SMA_RANGE_HALF_FACTOR * BC.AVG_SMA_WIDTH_SCALE;
     const lastMid = mid[mid.length - 1];
     if (lastMid != null && lastMid > 0) {
-      halfW = Math.max(halfW, lastMid * 0.008);
+      halfW = Math.max(halfW, lastMid * 0.016 * BC.AVG_SMA_WIDTH_SCALE);
     }
-    const upper = [];
-    const lower = [];
+    const bands = [];
     for (let i = 0; i < bars.length; i++) {
       const m = mid[i];
       if (m == null) continue;
-      upper.push({ time: bars[i].time, value: m + halfW });
-      lower.push({ time: bars[i].time, value: m - halfW });
+      bands.push({
+        time: bars[i].time,
+        mid: m,
+        upper: m + halfW,
+        lower: m - halfW,
+      });
     }
-    return { upper, lower };
+    return bands;
   },
 
-  ensureAvgCorridorSeries(runtime) {
-    const color = window.boardChart.AVG_SMA_LINE_COLOR;
-    if (!runtime?.chart) return;
-    if (!runtime.avgCorridorUpperSeries) {
-      runtime.avgCorridorUpperSeries = runtime.chart.addLineSeries({
-        color,
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-        title: "SMA30+",
-      });
+  ensureAvgCorridorOverlay(runtime, chartEl) {
+    const BC = window.boardChart;
+    if (!runtime || !chartEl) return;
+    const host = BC.overlayHost(chartEl);
+    if (!host) return;
+    if (!runtime.avgCorridorOverlayEl) {
+      const ov = document.createElement("div");
+      ov.className = "psc-avg-corridor-overlay";
+      ov.setAttribute("aria-hidden", "true");
+      runtime.avgCorridorOverlayEl = ov;
     }
-    if (!runtime.avgCorridorLowerSeries) {
-      runtime.avgCorridorLowerSeries = runtime.chart.addLineSeries({
-        color,
-        lineWidth: 1,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-        title: "SMA30−",
-      });
+    BC.attachOverlayToHost(runtime.avgCorridorOverlayEl, host, runtime.liqOverlayEl || null);
+  },
+
+  renderAvgCorridorOverlay(runtime) {
+    const BC = window.boardChart;
+    const el = runtime?.avgCorridorOverlayEl;
+    const chart = runtime?.chart;
+    const series = runtime?.series;
+    const bands = runtime._avgCorridorBands;
+    if (!el || !chart || !series || !bands?.length) {
+      if (el) el.innerHTML = "";
+      return;
     }
+    const host = el.parentElement;
+    const chartEl = runtime._chartContainer;
+    if (!host || !chartEl) return;
+    const w = chartEl.clientWidth;
+    const h = Math.round(chartEl.clientHeight * 0.78) || chartEl.clientHeight;
+    if (w <= 0 || h <= 0) return;
+    const offX = BC.overlayPlotOffsetX(runtime);
+    const y = (price) => series.priceToCoordinate(price);
+    const x = (time) => chart.timeScale().timeToCoordinate(time);
+    const upperPaths = [];
+    const lowerPaths = [];
+    const upperPts = [];
+    const lowerPts = [];
+    const toPath = (pts) => pts.map((p, idx) => `${idx ? "L" : "M"} ${p[0]} ${p[1]}`).join(" ");
+    for (let i = 0; i < bands.length - 1; i++) {
+      const a = bands[i];
+      const b = bands[i + 1];
+      const x0 = x(a.time);
+      const x1 = x(b.time);
+      if (x0 == null || x1 == null || Number.isNaN(x0) || Number.isNaN(x1)) continue;
+      const x0p = x0 + offX;
+      const x1p = x1 + offX;
+      const yMid0 = y(a.mid);
+      const yMid1 = y(b.mid);
+      const yUp0 = y(a.upper);
+      const yUp1 = y(b.upper);
+      const yLo0 = y(a.lower);
+      const yLo1 = y(b.lower);
+      if ([yMid0, yMid1, yUp0, yUp1, yLo0, yLo1].some((v) => v == null || Number.isNaN(v))) continue;
+      upperPaths.push(`M ${x0p} ${yUp0} L ${x1p} ${yUp1} L ${x1p} ${yMid1} L ${x0p} ${yMid0} Z`);
+      lowerPaths.push(`M ${x0p} ${yLo0} L ${x1p} ${yLo1} L ${x1p} ${yMid1} L ${x0p} ${yMid0} Z`);
+      if (!upperPts.length) upperPts.push([x0p, yUp0]);
+      upperPts.push([x1p, yUp1]);
+      if (!lowerPts.length) lowerPts.push([x0p, yLo0]);
+      lowerPts.push([x1p, yLo1]);
+    }
+    el.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
+      <path fill="${BC.AVG_SMA_FILL_UPPER}" d="${upperPaths.join(" ")}"/>
+      <path fill="${BC.AVG_SMA_FILL_LOWER}" d="${lowerPaths.join(" ")}"/>
+      <path fill="none" stroke="${BC.AVG_SMA_UPPER_COLOR}" stroke-width="1.5" d="${toPath(upperPts)}"/>
+      <path fill="none" stroke="${BC.AVG_SMA_LOWER_COLOR}" stroke-width="1.5" d="${toPath(lowerPts)}"/>
+    </svg>`;
   },
 
   updateAvgPriceCorridor(runtime, bars) {
     const BC = window.boardChart;
     if (!runtime?.chart) return;
-    BC.ensureAvgCorridorSeries(runtime);
-    const { upper, lower } = BC.parallelAvgCorridorLineData(bars);
-    runtime.avgCorridorUpperSeries?.setData(upper);
-    runtime.avgCorridorLowerSeries?.setData(lower);
+    if (runtime._chartContainer) BC.ensureAvgCorridorOverlay(runtime, runtime._chartContainer);
+    runtime._avgCorridorBands = BC.computeAvgCorridorBands(bars);
+    BC.renderAvgCorridorOverlay(runtime);
   },
 
   createPrefetchStore() {
@@ -1538,8 +1589,8 @@ window.boardChart = {
       runtime.chart = null;
       runtime.series = null;
       runtime.volumeSeries = null;
-      runtime.avgCorridorUpperSeries = null;
-      runtime.avgCorridorLowerSeries = null;
+      runtime.avgCorridorOverlayEl = null;
+      runtime._avgCorridorBands = null;
     }
     runtime._chartContainer = container;
     if (runtime.chart) {
@@ -1569,8 +1620,7 @@ window.boardChart = {
       priceScaleId: "vol",
     });
     runtime.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
-    BC.ensureSmaSeries(runtime);
-    BC.ensureSmaExtremaSeries(runtime);
+    BC.ensureAvgCorridorOverlay(runtime, container);
     window.boardChart.ensureBookOverlay(runtime, container);
     const resize = () => {
       if (!runtime.chart || container.clientWidth <= 0) return;
