@@ -2491,7 +2491,7 @@ function renderVacuumDesk() {
           : vacuumLhState.mode === "pyl1"
             ? "Как БАБЛОСОС + размах ≥2% за час. Запрет при расширении (high↑ и low↓). Лонг: min выше prev; шорт: max ниже prev. Стоп ±5% от пивота."
             : vacuumLhState.mode === "333"
-                ? "Как БАБЛОСОС + не узкий боковик (5m). EMA20/60: тренд вниз — шорт, вверх — лонг. До +5% ROE стоп ±5% от pivot; с +5% — лок +1% ROE, дальше трейл пик − 15 п.п. ROE. Выход только по стопу."
+                ? "Как БАБЛОСОС + не узкий боковик (5m). EMA20/EMA60: наклон за 60 свечей — вниз только шорт, вверх только лонг. До +5% ROE стоп ±5% от pivot; с +5% — лок +1% ROE, трейл пик − 15 п.п. ROE. Только стоп."
                 : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>

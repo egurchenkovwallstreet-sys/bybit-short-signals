@@ -60,7 +60,7 @@ PYL333_MANDATORY_5 = PYL_MANDATORY_5 + ("chop_not_tight", "ma333_regime")
 PYL333_CHECK_LABELS = {
     **PYL_CHECK_LABELS,
     "chop_not_tight": "Не узкий боковик (range / avg bar на 5m)",
-    "ma333_regime": "EMA20/60: тренд вниз → только шорт, вверх → только лонг",
+    "ma333_regime": "EMA20/EMA60: наклон за 60 свечей 5m — вниз только шорт, вверх только лонг",
 }
 
 

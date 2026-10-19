@@ -33,7 +33,7 @@ def _trend_closes(start: float, step: float, n: int) -> list[float]:
 
 
 def test_ma333_down_allows_short_blocks_long():
-    closes = _trend_closes(100.0, -0.15, 90)
+    closes = _trend_closes(100.0, -0.15, 150)
     state, now_ms = _state_with_closes(closes)
     d_short = ma333_regime_detail(state, now_ms, "short")
     d_long = ma333_regime_detail(state, now_ms, "long")
@@ -43,7 +43,7 @@ def test_ma333_down_allows_short_blocks_long():
 
 
 def test_ma333_up_allows_long_blocks_short():
-    closes = _trend_closes(100.0, 0.15, 90)
+    closes = _trend_closes(100.0, 0.15, 150)
     state, now_ms = _state_with_closes(closes)
     d_long = ma333_regime_detail(state, now_ms, "long")
     d_short = ma333_regime_detail(state, now_ms, "short")
@@ -53,7 +53,7 @@ def test_ma333_up_allows_long_blocks_short():
 
 
 def test_ma333_sideways_allows_either_side():
-    closes = [100.0 + (0.02 if i % 2 else -0.02) for i in range(90)]
+    closes = [100.0 + (0.02 if i % 2 else -0.02) for i in range(150)]
     state, now_ms = _state_with_closes(closes)
     d_short = ma333_regime_detail(state, now_ms, "short")
     d_long = ma333_regime_detail(state, now_ms, "long")

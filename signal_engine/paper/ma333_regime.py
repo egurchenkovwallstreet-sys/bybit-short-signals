@@ -29,7 +29,8 @@ def ma333_regime_detail(
     interval: str = "5",
 ) -> dict:
     """
-    EMA20 и EMA60 по закрытым барам interval.
+    EMA20 и EMA60 по закрытым барам interval (периоды 20 и 60).
+    Наклон каждой EMA — изменение за PAPER_333_MA_SLOPE_BARS свечей (дефолт 60).
     Тренд вниз/вверх — обе EMA с наклоном; иначе боковик.
     """
     fast = int(config.PAPER_333_MA_FAST)
