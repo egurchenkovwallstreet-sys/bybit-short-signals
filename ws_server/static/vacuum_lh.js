@@ -1559,7 +1559,8 @@ function vacuumInfoTradeBlock(symbol) {
         : "";
     return `<div class="vacuum-info-trade open">
       <p class="vacuum-lh-info-sub">Сделка · ${name} ${vacuumSideLabel(side)}</p>
-      <p>Вход: <strong>${entryStr}</strong></p>
+      <p>Время входа: <strong>${vacuumTimeMsk(t.opened_at)}</strong></p>
+      <p>Цена входа: <strong>${entryStr}</strong></p>
       <p>P&amp;L: <strong>${pnlStr}</strong></p>
       ${closeBtn}
     </div>`;
@@ -1568,8 +1569,9 @@ function vacuumInfoTradeBlock(symbol) {
   const money = entry > 0 && exit > 0 ? vacuumTradePnl(t, exit) : null;
   return `<div class="vacuum-info-trade closed">
     <p class="vacuum-lh-info-sub">Сделка · ${name} ${vacuumSideLabel(side)} · закрыта</p>
-    <p>Вход: <strong>${entryStr}</strong></p>
-    <p>Выход: <strong>${exit > 0 ? exit : "—"}</strong></p>
+    <p>Время входа: <strong>${vacuumTimeMsk(t.opened_at)}</strong></p>
+    <p>Время выхода: <strong>${vacuumTimeMsk(t.closed_at)}</strong></p>
+    <p>Цена входа: <strong>${entryStr}</strong> → выход: <strong>${exit > 0 ? exit : "—"}</strong></p>
     <p>P&amp;L: <strong>${money ? vacuumFmtTradePnl(money) : "—"}</strong></p>
   </div>`;
 }
@@ -2500,16 +2502,17 @@ function renderVacuumDesk() {
   const openTable = document.getElementById("vacuum-desk-open");
   if (openTable) {
     openTable.innerHTML = opens.length
-      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Вход</th><th>Цена</th><th>Стоп</th><th>ROE</th><th>P&L</th><th></th></tr></thead><tbody>${opens
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Время входа</th><th>Цена входа</th><th>Текущая</th><th>Стоп</th><th>ROE</th><th>P&L</th><th></th></tr></thead><tbody>${opens
           .map((t) => {
             const m = vacuumOpenMoney(t);
             const roeText = Number.isFinite(m.roe) ? `${m.roe >= 0 ? "+" : ""}${m.roe.toFixed(1)}%` : "—";
             return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
           <td><b>${t.symbol}</b></td>
           <td>${vacuumSideLabel(vacuumTradeSide(t))}</td>
-          <td>${t.entry_price}</td>
-          <td>${t.last_price}</td>
-          <td>${t.stop_price}</td>
+          <td>${vacuumTimeMsk(t.opened_at)}</td>
+          <td>${t.entry_price ?? "—"}</td>
+          <td>${t.last_price ?? "—"}</td>
+          <td>${t.stop_price ?? "—"}</td>
           ${vacuumPnlTd(m.roe, roeText)}
           ${vacuumPnlTd(m.pnl)}
           <td><button type="button" class="paper-btn vac-paper-close-btn" data-vac-paper-close="${t.id}">Закрыть</button></td>
@@ -2541,7 +2544,7 @@ function renderVacuumDesk() {
   const closedTable = document.getElementById("vacuum-desk-closed");
   if (closedTable) {
     closedTable.innerHTML = closed.length
-      ? `<thead><tr><th>Закрыта</th><th>Монета</th><th>Сторона</th><th>Вход</th><th>Выход</th><th>ROE</th><th>P&L</th><th>Время</th><th>Причина</th></tr></thead><tbody>${closed
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Время входа</th><th>Время выхода</th><th>Цена входа</th><th>Цена выхода</th><th>ROE</th><th>P&L</th><th>Длит.</th><th>Причина</th></tr></thead><tbody>${closed
           .slice(0, 200)
           .map((t) => {
             const side = vacuumTradeSide(t);
@@ -2549,9 +2552,10 @@ function renderVacuumDesk() {
             const roe = Number(t.roe_pct);
             const roeText = Number.isFinite(roe) ? `${roe >= 0 ? "+" : ""}${roe.toFixed(1)}%` : "—";
             return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
-          <td>${vacuumTimeMsk(t.closed_at)}</td>
           <td><b>${t.symbol}</b></td>
           <td>${vacuumSideLabel(side)}</td>
+          <td>${vacuumTimeMsk(t.opened_at)}</td>
+          <td>${vacuumTimeMsk(t.closed_at)}</td>
           <td>${t.entry_price ?? "—"}</td>
           <td>${t.exit_price ?? "—"}</td>
           ${vacuumPnlTd(roe, roeText)}

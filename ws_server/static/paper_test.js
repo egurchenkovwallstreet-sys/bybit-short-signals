@@ -92,7 +92,13 @@
   }
   function time(ts) {
     if (!ts) return "—";
-    return new Date(Number(ts)).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return new Date(Number(ts)).toLocaleString("ru-RU", {
+      timeZone: "Europe/Moscow",
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   }
   function dur(min) {
     if (min === null || min === undefined) return "—";
@@ -743,7 +749,7 @@
       return;
     }
     table.innerHTML = `<thead><tr>
-      <th>Монета</th><th>Памп</th><th>Условий</th><th>Вход</th><th>Цена входа</th><th>Текущая</th><th>Изм. цены</th>
+      <th>Монета</th><th>Памп</th><th>Условий</th><th>Время входа</th><th>Цена входа</th><th>Текущая</th><th>Изм. цены</th>
       <th>Стоп</th><th>Лучшая</th><th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Маржа</th><th>Funding</th><th>Сила</th><th>В сделке</th><th></th>
     </tr></thead><tbody>${rows
       .map(
@@ -968,17 +974,20 @@
       return;
     }
     table.innerHTML = `<thead><tr>
-      <th>Монета</th><th>Памп</th><th>Условий</th><th>Вход</th><th>Выход</th><th>Цена входа</th><th>Цена выхода</th><th>Причина</th>
+      <th>Монета</th><th>Памп</th><th>Условий</th><th>Время входа</th><th>Время выхода</th><th>Длит.</th><th>Цена входа</th><th>Цена выхода</th><th>Причина</th>
       <th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Мин. ROE</th><th>Комиссии</th><th>Funding</th><th>Сила</th><th>Баланс после</th>
     </tr></thead><tbody>${rows
       .map((r) => {
         const p = ((r.entry || {}).metrics || {}).pump || {};
+        const durMin =
+          r.closed_at && r.opened_at ? (Number(r.closed_at) - Number(r.opened_at)) / 60000 : null;
         return `<tr class="clickable${isSel("closed", r.id)}" data-id="${r.id}">
           <td><b>${esc(r.symbol)}</b></td>
           <td>${pumpLine(p)}</td>
           <td>${passedText(r.entry)}</td>
           <td>${time(r.opened_at)}</td>
-          <td>${time(r.closed_at)} (${dur((r.closed_at - r.opened_at) / 60000)})</td>
+          <td>${time(r.closed_at)}</td>
+          <td>${dur(durMin)}</td>
           <td>${price(r.entry_price)}</td>
           <td>${price(r.exit_price)}</td>
           <td>${EXIT[r.exit_reason] || esc(r.exit_reason)}</td>
