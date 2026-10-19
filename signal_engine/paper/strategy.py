@@ -2065,30 +2065,32 @@ class PaperStrategy:
                 )
             open_key = (variant, symbol)
             if open_key in self.trades:
-                trade = self.trades[open_key]
-                closed_side = trade.pos.side
-                exit_hit = opposite_pivot_exit_signal(
-                    state, now_ms, closed_side, trade.pos.opened_at, interval
-                )
-                if exit_hit:
-                    opp_ts = int(exit_hit["pivot_time_ms"])
-                    self._close_trade(trade, "opposite_pivot", state, now_ms)
-                    m = ev_clean.get("metrics") or {}
-                    new_side = ev_clean.get("side") or m.get("side")
-                    same_pivot = int(m.get("pivot_time_ms") or 0) == opp_ts
-                    if (
-                        same_pivot
-                        and ev_clean.get("passed")
-                        and new_side
-                        and new_side != closed_side
-                        and entry_on_third_bar(opp_ts, now_ms, interval)
-                    ):
-                        balance = self.balances[variant]
-                        margin = balance * config.PAPER_MARGIN_PCT / 100.0
-                        if margin > 0 and balance - self.used_margin(variant) >= margin:
-                            self._open_pyl_trade(
-                                variant, symbol, state, ev_clean, margin, now_ms, kind=trade_kind
-                            )
+                # 333: только стоп, без закрытия/перевхода по противоп. pivot (как pyl).
+                if variant != config.PAPER_333_VARIANT:
+                    trade = self.trades[open_key]
+                    closed_side = trade.pos.side
+                    exit_hit = opposite_pivot_exit_signal(
+                        state, now_ms, closed_side, trade.pos.opened_at, interval
+                    )
+                    if exit_hit:
+                        opp_ts = int(exit_hit["pivot_time_ms"])
+                        self._close_trade(trade, "opposite_pivot", state, now_ms)
+                        m = ev_clean.get("metrics") or {}
+                        new_side = ev_clean.get("side") or m.get("side")
+                        same_pivot = int(m.get("pivot_time_ms") or 0) == opp_ts
+                        if (
+                            same_pivot
+                            and ev_clean.get("passed")
+                            and new_side
+                            and new_side != closed_side
+                            and entry_on_third_bar(opp_ts, now_ms, interval)
+                        ):
+                            balance = self.balances[variant]
+                            margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                            if margin > 0 and balance - self.used_margin(variant) >= margin:
+                                self._open_pyl_trade(
+                                    variant, symbol, state, ev_clean, margin, now_ms, kind=trade_kind
+                                )
                 continue
             if not fresh or not ev_clean.get("passed"):
                 continue
