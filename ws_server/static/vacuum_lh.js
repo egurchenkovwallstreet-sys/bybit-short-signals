@@ -1578,11 +1578,30 @@ function vacuumInfoTradeBlock(symbol) {
 }
 
 function vacuumFmtTradePnl(money) {
+  if (!money) return "—";
+  const plus = vacuumTradePlus(money);
+  const cls = plus ? "pnl-plus" : "pnl-minus";
   const roe = vacuumFmtSigned(money.roe, 1, "%");
   const usd = Number.isFinite(money.pnl)
     ? `${money.pnl >= 0 ? "+" : "−"}$${Math.abs(money.pnl).toFixed(2)}`
     : "—";
-  return `${roe} · ${usd}`;
+  return `<span class="${cls}">${roe} · ${usd}</span>`;
+}
+
+function vacuumTradeCloseMarkHtml(runtime, trade, chartInterval, hostW) {
+  const closedMs = vacuumTradeClosedMs(trade);
+  if (!closedMs || trade._open) return "";
+  const exitPx = Number(trade.exit_price || trade.last_price);
+  if (!(exitPx > 0)) return "";
+  const x = vacuumTimeToX(runtime, closedMs);
+  const y = runtime.series.priceToCoordinate(exitPx);
+  if (!vacuumMarkOnScreen(x, hostW) || y == null || Number.isNaN(y)) return "";
+  const plus = vacuumTradePlus(vacuumTradePnl(trade, exitPx));
+  const long = vacuumTradeSide(trade) === "long";
+  const shift = long ? "translate(-50%, calc(-100% - 10px))" : "translate(-50%, 10px)";
+  const cls = plus ? "plus" : "minus";
+  const glyph = plus ? "✓" : "✕";
+  return `<div class="vac-trade-result ${cls}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}"><span class="trade-result-glyph">${glyph}</span></div>`;
 }
 
 function clearVacuumEntryPriceLines(runtime) {
@@ -1875,8 +1894,10 @@ function vacuumTradeSeriesMarkers(runtime, symbol, chartInterval) {
           position: long ? "aboveBar" : "belowBar",
           color: plus ? "#4ade80" : "#f87171",
           shape: "square",
-          text: plus ? "✓" : "✕",
+          text: "",
           _rank: 2400,
+          _tradeClose: plus,
+          _exitPrice: exitPx,
         });
       }
     }
@@ -1910,8 +1931,14 @@ function drawVacuumLhOverlays(runtime, peaks, troughs, chartInterval) {
     /* ignore */
   }
   if (sym) syncVacuumEntryPriceLines(runtime, sym);
-  const ov = document.getElementById("vacuum-trade-overlay");
-  if (ov) ov.innerHTML = "";
+  const ov = ensureVacuumTradeOverlayEl();
+  if (ov) {
+    const hostW = ov.clientWidth || 0;
+    const closeParts = sym
+      ? vacuumSymbolTrades(sym).map((t) => vacuumTradeCloseMarkHtml(runtime, t, chartInterval, hostW))
+      : [];
+    ov.innerHTML = closeParts.filter(Boolean).join("");
+  }
 }
 
 function resizeVacuumLhChart() {

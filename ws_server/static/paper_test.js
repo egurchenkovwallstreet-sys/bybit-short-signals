@@ -1155,7 +1155,7 @@
       html += mandatory()
         .map((key) => {
           const c = ev.checks[key] || {};
-          return `<li class="${c.ok ? "ok" : "fail"}">${c.ok ? "✓" : "✗"} ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
+          return `<li class="${c.ok ? "ok" : "fail"}"><span class="trade-result-glyph">${c.ok ? "✓" : "✗"}</span> ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
         })
         .join("");
       html += "</ul>";
@@ -1173,7 +1173,7 @@
       html += mandatory()
         .map((key) => {
           const c = ev.checks[key] || {};
-          return `<li class="${c.ok ? "ok" : "fail"}">${c.ok ? "✓" : "✗"} ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
+          return `<li class="${c.ok ? "ok" : "fail"}"><span class="trade-result-glyph">${c.ok ? "✓" : "✗"}</span> ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
         })
         .join("");
       html += "</ul>";
@@ -1191,7 +1191,7 @@
       html += mandatory()
         .map((key) => {
           const c = ev.checks[key] || {};
-          return `<li class="${c.ok ? "ok" : "fail"}">${c.ok ? "✓" : "✗"} ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
+          return `<li class="${c.ok ? "ok" : "fail"}"><span class="trade-result-glyph">${c.ok ? "✓" : "✗"}</span> ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
         })
         .join("");
       html += "</ul>";
@@ -1210,7 +1210,7 @@
     html += mandatory()
       .map((key) => {
         const c = ev.checks[key] || {};
-        return `<li class="${c.ok ? "ok" : "fail"}">${c.ok ? "✓" : "✗"} ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
+        return `<li class="${c.ok ? "ok" : "fail"}"><span class="trade-result-glyph">${c.ok ? "✓" : "✗"}</span> ${esc(L[key] || key)}: <b>${valueText(c.value)}</b><span class="need">нужно: ${esc(c.need || "")}</span></li>`;
       })
       .join("");
     html += "</ul>";
@@ -1388,6 +1388,70 @@
     });
   }
 
+  function ensurePaperTradeOverlay() {
+    const box = document.getElementById("paper-chart");
+    if (!box) return null;
+    const parent = box.parentElement;
+    if (parent && getComputedStyle(parent).position === "static") {
+      parent.style.position = "relative";
+    }
+    let el = document.getElementById("paper-trade-overlay");
+    if (!el && parent) {
+      el = document.createElement("div");
+      el.id = "paper-trade-overlay";
+      el.className = "vacuum-trade-overlay";
+      el.setAttribute("aria-hidden", "true");
+      parent.appendChild(el);
+    }
+    return el;
+  }
+
+  function clearPaperTradeCloseGlyph() {
+    const el = document.getElementById("paper-trade-overlay");
+    if (el) el.innerHTML = "";
+  }
+
+  function syncPaperTradeCloseGlyph(item, plus, long, closedAt, exitPrice, tzOffset) {
+    const el = ensurePaperTradeOverlay();
+    if (!el || !paper.chart || !paper.series) {
+      clearPaperTradeCloseGlyph();
+      return;
+    }
+    const t = Math.floor(Number(closedAt) / 1000) + tzOffset;
+    const x = paper.chart.timeScale().timeToCoordinate(t);
+    const px = Number(exitPrice);
+    const y = px > 0 ? paper.series.priceToCoordinate(px) : null;
+    if (x == null || Number.isNaN(x) || y == null || Number.isNaN(y)) {
+      el.innerHTML = "";
+      return;
+    }
+    const shift = long ? "translate(-50%, calc(-100% - 10px))" : "translate(-50%, 10px)";
+    const cls = plus ? "plus" : "minus";
+    const glyph = plus ? "✓" : "✕";
+    el.innerHTML = `<div class="vac-trade-result ${cls}" style="left:${Math.round(x)}px;top:${Math.round(y)}px;transform:${shift}"><span class="trade-result-glyph">${glyph}</span></div>`;
+    if (!paper._tradeCloseGlyphHook) {
+      paper._tradeCloseGlyphHook = true;
+      paper.chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        if (paper.selected?.type === "closed" || (paper.selected?.type === "open" && !paper.selected?.live)) {
+          const sel = paper.selected;
+          if (sel?.row?.closed_at) {
+            const pnl = Number(sel.row.pnl_usd);
+            const roe = Number(sel.row.roe_pct);
+            const p = Number.isFinite(pnl) ? pnl >= 0 : roe >= 0;
+            syncPaperTradeCloseGlyph(
+              { kind: "trade", row: sel.row },
+              p,
+              sel.row.side === "long",
+              sel.row.closed_at,
+              sel.row.exit_price,
+              -new Date().getTimezoneOffset() * 60,
+            );
+          }
+        }
+      });
+    }
+  }
+
   function ensureChart() {
     if (paper.chart || typeof LightweightCharts === "undefined") return;
     const box = document.getElementById("paper-chart");
@@ -1445,6 +1509,9 @@
     add(p.anchor_price || p.valley_price || r.valley_price, "#8d97a8", p.kind === "growth" ? "якорь" : "дно");
     const tzOffset = -new Date().getTimezoneOffset() * 60;
     const markers = [];
+    if (item.kind !== "trade" || !item.row?.closed_at) {
+      clearPaperTradeCloseGlyph();
+    }
     if (item.kind === "trade") {
       add(r.entry_price, "#5dade2", "вход", 0);
       if (item.live) {
@@ -1470,8 +1537,11 @@
           position: long ? "aboveBar" : "belowBar",
           color: plus ? "#3ddc84" : "#ff5d73",
           shape: "circle",
-          text: plus ? "✓" : "✕",
+          text: "",
         });
+        syncPaperTradeCloseGlyph(item, plus, long, r.closed_at, r.exit_price, tzOffset);
+      } else {
+        clearPaperTradeCloseGlyph();
       }
     } else if (item.kind === "hist" && r.shadow_entry_price) {
       add(r.shadow_entry_price, "#5dade2", "тень: вход", 0);
