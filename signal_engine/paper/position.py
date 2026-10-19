@@ -352,6 +352,60 @@ def bab_pivot_stop_price(
     return price_for_roe(pivot_high, roe, lev)
 
 
+def _trail333_stop_prices_short(
+    entry: float,
+    peak: float,
+    lev: int,
+    *,
+    margin: float,
+    entry_fee: float,
+    funding_paid: float,
+) -> list[float]:
+    prices: list[float] = [
+        _net_lock_price(
+            entry,
+            margin,
+            config.PAPER_333_TRAIL_LOCK_NET_ROE,
+            lev,
+            entry_fee,
+            funding_paid,
+        ),
+        price_for_roe(entry, peak - config.PAPER_333_TRAIL_GAP_ROE, lev),
+    ]
+    if peak >= config.PAPER_333_LOCK5_ARM_ROE:
+        prices.append(price_for_roe(entry, config.PAPER_333_LOCK5_ROE, lev))
+    if peak >= config.PAPER_333_LOCK10_ARM_ROE:
+        prices.append(price_for_roe(entry, config.PAPER_333_LOCK10_ROE, lev))
+    return prices
+
+
+def _trail333_stop_prices_long(
+    entry: float,
+    peak: float,
+    lev: int,
+    *,
+    margin: float,
+    entry_fee: float,
+    funding_paid: float,
+) -> list[float]:
+    prices: list[float] = [
+        net_roe_stop_price_long(
+            entry,
+            margin,
+            config.PAPER_333_TRAIL_LOCK_NET_ROE,
+            lev,
+            entry_fee,
+            funding_paid,
+        ),
+        price_for_long_roe(entry, peak - config.PAPER_333_TRAIL_GAP_ROE, lev),
+    ]
+    if peak >= config.PAPER_333_LOCK5_ARM_ROE:
+        prices.append(price_for_long_roe(entry, config.PAPER_333_LOCK5_ROE, lev))
+    if peak >= config.PAPER_333_LOCK10_ARM_ROE:
+        prices.append(price_for_long_roe(entry, config.PAPER_333_LOCK10_ROE, lev))
+    return prices
+
+
 def trail333_stop_short(
     entry: float,
     best_price: float,
@@ -362,21 +416,16 @@ def trail333_stop_short(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
-    """333 шорт: до +5% ROE — стоп pivot; с +5% — +0.5% net и трейл пик − 15 п.п., не выше bab."""
+    """333 шорт: pivot до +5% ROE; +5% +0.5% net; +10%→+5%; +14%→+10%; трейл пик−15 п.п."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
     if peak < config.PAPER_333_TRAIL_ARM_ROE:
         return bab_stop
-    lock_net = _net_lock_price(
-        entry,
-        margin,
-        config.PAPER_333_TRAIL_LOCK_NET_ROE,
-        lev,
-        entry_fee,
-        funding_paid,
+    trail = min(
+        _trail333_stop_prices_short(
+            entry, peak, lev, margin=margin, entry_fee=entry_fee, funding_paid=funding_paid
+        )
     )
-    trail_roe = peak - config.PAPER_333_TRAIL_GAP_ROE
-    trail = min(price_for_roe(entry, trail_roe, lev), lock_net)
     return min(trail, bab_stop)
 
 
@@ -390,21 +439,16 @@ def trail333_stop_long(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
 ) -> float:
-    """333 лонг: до +5% ROE — стоп pivot; с +5% — +0.5% net и трейл пик − 15 п.п., не ниже bab."""
+    """333 лонг: pivot до +5% ROE; +5% +0.5% net; +10%→+5%; +14%→+10%; трейл пик−15 п.п."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = long_roe_pct(entry, best_price, lev)
     if peak < config.PAPER_333_TRAIL_ARM_ROE:
         return bab_stop
-    lock_net = net_roe_stop_price_long(
-        entry,
-        margin,
-        config.PAPER_333_TRAIL_LOCK_NET_ROE,
-        lev,
-        entry_fee,
-        funding_paid,
+    trail = max(
+        _trail333_stop_prices_long(
+            entry, peak, lev, margin=margin, entry_fee=entry_fee, funding_paid=funding_paid
+        )
     )
-    trail_roe = peak - config.PAPER_333_TRAIL_GAP_ROE
-    trail = max(price_for_long_roe(entry, trail_roe, lev), lock_net)
     return max(trail, bab_stop)
 
 
