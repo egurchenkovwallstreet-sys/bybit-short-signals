@@ -335,7 +335,7 @@ PAPER_333_MA_FAST = _env_int("PAPER_333_MA_FAST", 20)
 PAPER_333_MA_SLOW = _env_int("PAPER_333_MA_SLOW", 60)
 # Наклон EMA20/EMA60: сравнение текущего значения с тем же EMA N свечей назад (5m).
 PAPER_333_MA_SLOPE_BARS = _env_int("PAPER_333_MA_SLOPE_BARS", 60)
-PAPER_333_MA_SLOPE_MIN_PCT = _env_float("PAPER_333_MA_SLOPE_MIN_PCT", 0.7)
+PAPER_333_MA_SLOPE_MIN_PCT = _env_float("PAPER_333_MA_SLOPE_MIN_PCT", 1.0)
 # Зона входа у EMA60: лонг EMA…EMA+1%, шорт EMA−1%…EMA; мёртвая зона 1–4%; отрыв >4% — stretch.
 PAPER_333_MA_BAND_PCT = _env_float("PAPER_333_MA_BAND_PCT", 1.0)
 PAPER_333_MA_STRETCH_PCT = _env_float("PAPER_333_MA_STRETCH_PCT", 4.0)
