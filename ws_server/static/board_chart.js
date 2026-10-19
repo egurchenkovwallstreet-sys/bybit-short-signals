@@ -15,7 +15,8 @@ window.boardChart = {
   /** Nadaraya–Watson Envelope (LuxAlgo-style endpoint, без repaint). */
   NW_WINDOW: 300,
   NW_BANDWIDTH: 8,
-  NW_MULT: 3,
+  /** LuxAlgo default 3; сужено на 70% → 30% ширины. */
+  NW_MULT: 0.9,
   NW_SOURCE: "close",
   NW_UPPER_COLOR: "#2dd4bf",
   NW_LOWER_COLOR: "#f87171",
