@@ -1,4 +1,4 @@
-"""333: только EMA60 на 5m — тренд по наклону; боковик не торгуем; цена vs EMA60."""
+"""333: EMA60 — тренд по наклону; боковик не торгуем; полоса ±1% у EMA; stretch >4%."""
 
 from __future__ import annotations
 
@@ -22,17 +22,69 @@ def _slope_pct(now: float, prev: float) -> float:
     return (now - prev) / prev * 100.0
 
 
+def _band_frac() -> float:
+    return float(config.PAPER_333_MA_BAND_PCT) / 100.0
+
+
+def _stretch_frac() -> float:
+    return float(config.PAPER_333_MA_STRETCH_PCT) / 100.0
+
+
+def ma333_price_entry_ok(
+    regime: Regime,
+    side: str,
+    price: float,
+    ema60: float,
+) -> tuple[bool, str, str | None]:
+    """
+    Лонг: EMA↑ и EMA…EMA+1%; или EMA↓ и price < EMA−4%.
+    Шорт: EMA↓ и EMA−1%…EMA; или EMA↑ и price > EMA+4%.
+    Между 1% и 4% от EMA — мёртвая зона.
+    """
+    band = _band_frac()
+    stretch = _stretch_frac()
+    e = float(ema60)
+    side_s = str(side or "").lower()
+    p = float(price)
+    bp = band * 100.0
+    sp = stretch * 100.0
+
+    if side_s == "long":
+        if regime == "up":
+            if p + 1e-12 < e:
+                return False, f"лонг: цена {p:.8g} ниже EMA60 {e:.8g}", None
+            if p > e * (1 + band) + 1e-12:
+                return False, f"лонг: цена выше EMA60+{bp:g}%", None
+            return True, f"лонг: EMA60 … EMA60+{bp:g}%", "base"
+        if regime == "down":
+            if p >= e * (1 - stretch) - 1e-12:
+                if p >= e - 1e-12:
+                    return False, "лонг при EMA↓: цена не ниже EMA60", None
+                return False, f"лонг: мёртвая зона {bp:g}–{sp:g}% ниже EMA60", None
+            return True, f"лонг: отрыв >{sp:g}% ниже EMA60 при EMA↓", "stretch"
+    elif side_s == "short":
+        if regime == "down":
+            if p > e + 1e-12:
+                return False, f"шорт: цена {p:.8g} выше EMA60 {e:.8g}", None
+            if p + 1e-12 < e * (1 - band):
+                return False, f"шорт: цена ниже EMA60−{bp:g}%", None
+            return True, f"шорт: EMA60−{bp:g}% … EMA60", "base"
+        if regime == "up":
+            if p <= e * (1 + stretch) + 1e-12:
+                if p <= e + 1e-12:
+                    return False, "шорт при EMA↑: цена не выше EMA60", None
+                return False, f"шорт: мёртвая зона {bp:g}–{sp:g}% выше EMA60", None
+            return True, f"шорт: отрыв >{sp:g}% выше EMA60 при EMA↑", "stretch"
+
+    return False, "—", None
+
+
 def ma333_regime_detail(
     state: SymbolState,
     now_ms: int,
     side: str | None,
     interval: str = "5",
 ) -> dict:
-    """
-    EMA60 по закрытым барам interval.
-    Наклон — изменение за PAPER_333_MA_SLOPE_BARS свечей.
-    Боковик: вход запрещён. Тренд вниз — только шорт и price ≤ EMA60; вверх — лонг и price ≥ EMA60.
-    """
     slow = int(config.PAPER_333_MA_SLOW)
     slope_bars = int(config.PAPER_333_MA_SLOPE_BARS)
     thr = float(config.PAPER_333_MA_SLOPE_MIN_PCT)
@@ -74,30 +126,20 @@ def ma333_regime_detail(
 
     ok = False
     detail = ""
+    entry_zone: str | None = None
     if regime == "sideways":
         detail = f"боковик EMA60 (Δ{s60:+.2f}% за {slope_bars} бар.) — вход запрещён"
-    elif regime == "down":
-        if side_s != "short":
-            detail = f"EMA60 вниз (Δ{s60:+.2f}%) — лонг запрещён"
-        elif price > ema60 + 1e-12:
-            detail = f"шорт: цена {price:.8g} выше EMA60 {ema60:.8g}"
-        else:
-            ok = True
-            detail = f"EMA60 вниз, цена ≤ EMA60 — шорт"
-    elif regime == "up":
-        if side_s != "long":
-            detail = f"EMA60 вверх (Δ{s60:+.2f}%) — шорт запрещён"
-        elif price + 1e-12 < ema60:
-            detail = f"лонг: цена {price:.8g} ниже EMA60 {ema60:.8g}"
-        else:
-            ok = True
-            detail = f"EMA60 вверх, цена ≥ EMA60 — лонг"
+    elif side_s not in ("long", "short"):
+        detail = "нет стороны сделки"
+    else:
+        ok, detail, entry_zone = ma333_price_entry_ok(regime, side_s, price, ema60)
 
     return {
         "insufficient_data": False,
         "ok": ok,
         "regime": regime,
         "detail": detail,
+        "entry_zone": entry_zone,
         "ema60": round(ema60, 8),
         "slope_60_pct": round(s60, 4),
         "price": round(price, 8),

@@ -1,4 +1,4 @@
-from signal_engine.paper.ma333_regime import ma333_regime_detail
+from signal_engine.paper.ma333_regime import ma333_price_entry_ok, ma333_regime_detail
 from signal_engine.state import Bar, SymbolState
 
 
@@ -78,3 +78,27 @@ def test_ma333_long_blocks_price_below_ema60():
     d = ma333_regime_detail(state, now_ms, "long")
     assert d["regime"] == "up"
     assert d["ok"] is False
+
+
+def test_ma333_long_dead_zone_below_ema_in_downtrend():
+    ok, _, zone = ma333_price_entry_ok("down", "long", 97.0, 100.0)
+    assert ok is False
+    assert zone is None
+
+
+def test_ma333_long_stretch_below_ema_in_downtrend():
+    ok, _, zone = ma333_price_entry_ok("down", "long", 95.0, 100.0)
+    assert ok is True
+    assert zone == "stretch"
+
+
+def test_ma333_short_stretch_above_ema_in_uptrend():
+    ok, _, zone = ma333_price_entry_ok("up", "short", 105.0, 100.0)
+    assert ok is True
+    assert zone == "stretch"
+
+
+def test_ma333_short_dead_zone_above_ema_in_uptrend():
+    ok, _, zone = ma333_price_entry_ok("up", "short", 102.0, 100.0)
+    assert ok is False
+    assert zone is None
