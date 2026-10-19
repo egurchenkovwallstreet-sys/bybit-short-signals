@@ -332,8 +332,12 @@ PAPER_PYL_INTERVAL = "5"
 PAPER_PYL_STOP_ROE = _env_float("PAPER_PYL_STOP_ROE", 5.0)
 # БАБЛОСОС 1: только монеты с размахом цены за час ≥ этого порога (%).
 PAPER_PYL1_HOUR_RANGE_PCT = _env_float("PAPER_PYL1_HOUR_RANGE_PCT", 2.0)
-# 333: как БАБЛОСОС + фильтр узкого боковика на вход.
+# 333: как БАБЛОСОС + EMA20/EMA60 на 5m (тренд → только лонг/шорт; боковик → pivot + ближе к EMA20).
 PAPER_333_VARIANT = "333"
+PAPER_333_MA_FAST = _env_int("PAPER_333_MA_FAST", 20)
+PAPER_333_MA_SLOW = _env_int("PAPER_333_MA_SLOW", 60)
+PAPER_333_MA_SLOPE_BARS = _env_int("PAPER_333_MA_SLOPE_BARS", 5)
+PAPER_333_MA_SLOPE_MIN_PCT = _env_float("PAPER_333_MA_SLOPE_MIN_PCT", 0.03)
 PAPER_CHOP_WINDOW_BARS = _env_int("PAPER_CHOP_WINDOW_BARS", 20)
 PAPER_CHOP_MIN_BARS = _env_int("PAPER_CHOP_MIN_BARS", 10)
 PAPER_CHOP_TIGHT_RANGE_PCT = _env_float("PAPER_CHOP_TIGHT_RANGE_PCT", 1.5)

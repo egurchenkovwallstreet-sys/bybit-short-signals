@@ -1,0 +1,67 @@
+from signal_engine.paper.ma333_regime import ma333_regime_detail
+from signal_engine.state import Bar, SymbolState
+
+
+def _bars_from_closes(closes: list[float], step_ms: int = 300_000) -> list[Bar]:
+    t0 = 1_700_000_000_000
+    out = []
+    for i, c in enumerate(closes):
+        out.append(
+            Bar(
+                timestamp=t0 + i * step_ms,
+                open=c,
+                high=c * 1.001,
+                low=c * 0.999,
+                close=c,
+                volume=1.0,
+                from_kline=True,
+            )
+        )
+    return out
+
+
+def _state_with_closes(closes: list[float]) -> tuple[SymbolState, int]:
+    state = SymbolState(symbol="TEST")
+    state.bars_htf["5"] = _bars_from_closes(closes)
+    state.last_price = closes[-1]
+    now_ms = state.bars_htf["5"][-1].timestamp + 300_000
+    return state, now_ms
+
+
+def _trend_closes(start: float, step: float, n: int) -> list[float]:
+    return [start + i * step for i in range(n)]
+
+
+def test_ma333_down_allows_short_blocks_long():
+    closes = _trend_closes(100.0, -0.15, 90)
+    state, now_ms = _state_with_closes(closes)
+    d_short = ma333_regime_detail(state, now_ms, "short")
+    d_long = ma333_regime_detail(state, now_ms, "long")
+    assert d_short["regime"] == "down"
+    assert d_short["ok"] is True
+    assert d_long["ok"] is False
+
+
+def test_ma333_up_allows_long_blocks_short():
+    closes = _trend_closes(100.0, 0.15, 90)
+    state, now_ms = _state_with_closes(closes)
+    d_long = ma333_regime_detail(state, now_ms, "long")
+    d_short = ma333_regime_detail(state, now_ms, "short")
+    assert d_long["regime"] == "up"
+    assert d_long["ok"] is True
+    assert d_short["ok"] is False
+
+
+def test_ma333_sideways_requires_closer_to_ema20():
+    # Плоский тренд — боковик
+    closes = [100.0 + (0.02 if i % 2 else -0.02) for i in range(90)]
+    state, now_ms = _state_with_closes(closes)
+    d = ma333_regime_detail(state, now_ms, "short")
+    assert d["regime"] == "sideways"
+    # Подменим цену: ближе к EMA60
+    state.last_price = float(d["ema60"])
+    d_far = ma333_regime_detail(state, now_ms, "short")
+    assert d_far["ok"] is False
+    state.last_price = float(d["ema20"])
+    d_near = ma333_regime_detail(state, now_ms, "short")
+    assert d_near["ok"] is True
