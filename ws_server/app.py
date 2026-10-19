@@ -312,6 +312,7 @@ def _kline_reply(
     history_complete: bool,
     pivots: bool,
     now_ms: int,
+    klines_bundle: dict[str, list] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "symbol": symbol,
@@ -321,15 +322,31 @@ def _kline_reply(
         "history_complete": history_complete,
     }
     if pivots and interval in config.VACUUM_LH_CONFLUENCE_INTERVALS:
-        from signal_engine.vacuum_lh import chart_pivots_from_candles
+        from signal_engine.vacuum_lh import chart_pivots_from_candles, enrich_pivots_senior_mtf
 
         packed = chart_pivots_from_candles(candles, interval, now_ms)
-        payload["anchor_peaks"] = packed["anchor_peaks"]
-        payload["anchor_troughs"] = packed["anchor_troughs"]
+        bundle = dict(klines_bundle or {})
+        bundle.setdefault(interval, candles)
+        ap, at = enrich_pivots_senior_mtf(
+            list(packed.get("anchor_peaks") or []),
+            list(packed.get("anchor_troughs") or []),
+            interval,
+            bundle,
+            now_ms,
+        )
+        pp, tt = enrich_pivots_senior_mtf(
+            list(packed.get("peaks") or []),
+            list(packed.get("troughs") or []),
+            interval,
+            bundle,
+            now_ms,
+        )
+        payload["anchor_peaks"] = ap
+        payload["anchor_troughs"] = at
         payload["ghost_peaks"] = packed.get("ghost_peaks") or []
         payload["ghost_troughs"] = packed.get("ghost_troughs") or []
-        payload["peaks"] = packed["peaks"]
-        payload["troughs"] = packed["troughs"]
+        payload["peaks"] = pp
+        payload["troughs"] = tt
         payload["pivots_ready"] = True
     return payload
 
@@ -447,6 +464,10 @@ async def klines(
     history_complete = bool(bar_cap and len(candles) >= bar_cap) or config.kline_history_complete(
         oldest_out, interval, window_days, now_ms
     ) or (fetched_ok and len(candles) < min_bars)
+    klines_bundle = None
+    if pivots and interval in config.VACUUM_LH_CONFLUENCE_INTERVALS:
+        klines_bundle = hub.cache._vacuum_klines_bundle(symbol, interval)
+        klines_bundle[interval] = list(candles)
     return _kline_reply(
         symbol,
         interval,
@@ -455,6 +476,7 @@ async def klines(
         history_complete=history_complete,
         pivots=pivots,
         now_ms=now_ms,
+        klines_bundle=klines_bundle,
     )
 
 

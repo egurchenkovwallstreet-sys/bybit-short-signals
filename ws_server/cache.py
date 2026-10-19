@@ -240,8 +240,22 @@ class MarketCache:
             "chart_pivots": self.vacuum_lh_chart_pivots,
         }
 
+    def _vacuum_klines_bundle(self, symbol: str, chart_interval: str) -> dict[str, list]:
+        from signal_engine.vacuum_lh import senior_intervals_for_chart
+
+        bundle: dict[str, list] = {
+            str(chart_interval): list(self.klines.get((symbol, chart_interval), []) or [])
+        }
+        for iv in senior_intervals_for_chart(chart_interval):
+            bundle[str(iv)] = list(self.klines.get((symbol, iv), []) or [])
+        return bundle
+
     def vacuum_lh_detail(self, symbol: str, chart_interval: str = "60") -> dict[str, Any] | None:
-        from signal_engine.vacuum_lh import chart_pivots_from_candles, union_pivot_points
+        from signal_engine.vacuum_lh import (
+            chart_pivots_from_candles,
+            enrich_pivots_senior_mtf,
+            union_pivot_points,
+        )
 
         candles = list(self.klines.get((symbol, chart_interval), []) or [])
         signal = self.vacuum_lh_by_symbol.get(symbol)
@@ -264,6 +278,13 @@ class MarketCache:
         scanned = (self.vacuum_lh_chart_pivots.get(str(chart_interval)) or {}).get(symbol) or {}
         anchor_peaks = union_pivot_points(anchor_peaks, scanned.get("all_peaks"))
         anchor_troughs = union_pivot_points(anchor_troughs, scanned.get("all_troughs"))
+        peaks = list(packed.get("peaks") or scanned.get("peaks") or [])
+        troughs = list(packed.get("troughs") or scanned.get("troughs") or [])
+        klines_bundle = self._vacuum_klines_bundle(symbol, chart_interval)
+        anchor_peaks, anchor_troughs = enrich_pivots_senior_mtf(
+            anchor_peaks, anchor_troughs, chart_interval, klines_bundle, now_ms
+        )
+        peaks, troughs = enrich_pivots_senior_mtf(peaks, troughs, chart_interval, klines_bundle, now_ms)
         return {
             "signal": sig,
             "interval": chart_interval,
@@ -272,8 +293,8 @@ class MarketCache:
             "anchor_troughs": anchor_troughs,
             "ghost_peaks": list(packed.get("ghost_peaks") or scanned.get("ghost_peaks") or []),
             "ghost_troughs": list(packed.get("ghost_troughs") or scanned.get("ghost_troughs") or []),
-            "peaks": packed.get("peaks") or scanned.get("peaks") or [],
-            "troughs": packed.get("troughs") or scanned.get("troughs") or [],
+            "peaks": peaks,
+            "troughs": troughs,
             "anchor_days": config.VACUUM_LH_LOOKBACK_DAYS,
             "book": self.book_view(symbol),
             "funding_rate": self.funding.get(symbol),

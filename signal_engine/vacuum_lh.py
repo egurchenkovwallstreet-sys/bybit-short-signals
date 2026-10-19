@@ -19,6 +19,19 @@ _INTERVAL_MS = {
     "240": 14_400_000,
 }
 
+# Старшие TF для цвета маркера на графике (число совпадений 0–3).
+VACUUM_CHART_SENIOR_INTERVALS: dict[str, tuple[str, ...]] = {
+    "5": ("15", "30", "60"),
+    "15": ("30", "60", "240"),
+    "30": ("60", "240"),
+    "60": ("240",),
+    "240": (),
+}
+
+
+def senior_intervals_for_chart(chart_interval: str) -> tuple[str, ...]:
+    return VACUUM_CHART_SENIOR_INTERVALS.get(str(chart_interval), ())
+
 
 def _meets_turnover(state: SymbolState) -> bool:
     turnover = state.turnover_24h_usdt
@@ -359,6 +372,86 @@ def last_higher_low_troughs(
 def _pivot_match_key(p: dict) -> tuple[int, float]:
     t = int(p.get("time_ms") or p.get("time") or 0)
     return (t, round(float(p["price"]), 8))
+
+
+def _aligned_pivot_match_key(p: dict, interval: str) -> tuple[int, float]:
+    t = int(p.get("time_ms") or p.get("time") or 0)
+    price = round(float(p["price"]), 8)
+    step = _INTERVAL_MS.get(str(interval), 300_000)
+    return ((t // step) * step, price)
+
+
+def _anchor_match_index(anchors: list[dict], interval: str) -> set[tuple[int, float]]:
+    keys: set[tuple[int, float]] = set()
+    for p in anchors:
+        keys.add(_pivot_match_key(p))
+        keys.add(_aligned_pivot_match_key(p, interval))
+    return keys
+
+
+def build_senior_mtf_indexes(
+    klines_by_interval: dict[str, list],
+    now_ms: int,
+    chart_interval: str,
+) -> tuple[dict[str, set[tuple[int, float]]], dict[str, set[tuple[int, float]]]]:
+    """Индексы anchor pivot на старших TF для сравнения с графиком chart_interval."""
+    peak_idx: dict[str, set[tuple[int, float]]] = {}
+    trough_idx: dict[str, set[tuple[int, float]]] = {}
+    for iv in senior_intervals_for_chart(chart_interval):
+        rows = klines_by_interval.get(iv) or []
+        if not rows:
+            peak_idx[iv] = set()
+            trough_idx[iv] = set()
+            continue
+        packed = chart_pivots_from_candles(rows, iv, now_ms)
+        peak_idx[iv] = _anchor_match_index(list(packed.get("anchor_peaks") or []), iv)
+        trough_idx[iv] = _anchor_match_index(list(packed.get("anchor_troughs") or []), iv)
+    return peak_idx, trough_idx
+
+
+def _senior_mtf_matches(
+    p: dict,
+    indexes: dict[str, set[tuple[int, float]]],
+) -> tuple[int, list[str]]:
+    t = int(p.get("time_ms") or p.get("time") or 0)
+    price = round(float(p["price"]), 8)
+    matched: list[str] = []
+    for iv in sorted(indexes.keys(), key=lambda x: (0 if x.isdigit() else 1, int(x) if x.isdigit() else x)):
+        idx = indexes.get(iv) or set()
+        step = _INTERVAL_MS.get(iv, 300_000)
+        bucket = (t // step) * step
+        if (bucket, price) in idx or (t, price) in idx:
+            matched.append(iv)
+    return len(matched), matched
+
+
+def apply_senior_mtf_confluence(
+    points: list[dict],
+    indexes: dict[str, set[tuple[int, float]]],
+) -> list[dict]:
+    out: list[dict] = []
+    for p in points:
+        n, matches = _senior_mtf_matches(p, indexes)
+        item = dict(p)
+        item["tf_match_count"] = n
+        item["tf_matches"] = matches
+        item["confluence"] = n >= 1
+        out.append(item)
+    return out
+
+
+def enrich_pivots_senior_mtf(
+    peaks: list[dict],
+    troughs: list[dict],
+    chart_interval: str,
+    klines_by_interval: dict[str, list],
+    now_ms: int,
+) -> tuple[list[dict], list[dict]]:
+    peak_idx, trough_idx = build_senior_mtf_indexes(klines_by_interval, now_ms, chart_interval)
+    return (
+        apply_senior_mtf_confluence(list(peaks or []), peak_idx),
+        apply_senior_mtf_confluence(list(troughs or []), trough_idx),
+    )
 
 
 def _peak_match_key(p: dict) -> tuple[int, float]:

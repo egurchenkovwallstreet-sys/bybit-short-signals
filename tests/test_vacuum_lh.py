@@ -13,7 +13,9 @@ from signal_engine.swing_highs import (
 from signal_engine.vacuum_lh import (
     all_anchor_peaks,
     apply_peak_confluence,
+    apply_senior_mtf_confluence,
     build_vacuum_lh_boards,
+    senior_intervals_for_chart,
     classify_lh_hl_structure,
     hour_range_pct,
     structure_trend_on_interval,
@@ -230,6 +232,25 @@ class VacuumLhPeaksTest(unittest.TestCase):
         out = apply_peak_confluence(tr60, idx)
         self.assertTrue(out[0]["confluence"])
         self.assertEqual(out[0]["tf_match_count"], 2)
+
+    def test_senior_mtf_ladder_intervals(self) -> None:
+        self.assertEqual(senior_intervals_for_chart("5"), ("15", "30", "60"))
+        self.assertEqual(senior_intervals_for_chart("60"), ("240",))
+        self.assertEqual(senior_intervals_for_chart("240"), ())
+
+    def test_senior_mtf_match_by_price_and_bucket(self) -> None:
+        t5 = 1_700_000_000_000
+        step15 = 900_000
+        t15 = (t5 // step15) * step15
+        point = {"time_ms": t5, "price": 1.234}
+        indexes = {
+            "15": {(t15, 1.234)},
+            "30": set(),
+            "60": set(),
+        }
+        out = apply_senior_mtf_confluence([point], indexes)
+        self.assertEqual(out[0]["tf_match_count"], 1)
+        self.assertEqual(out[0]["tf_matches"], ["15"])
 
     def test_confluence_same_time_and_price(self) -> None:
         t = 1_700_000_000_000

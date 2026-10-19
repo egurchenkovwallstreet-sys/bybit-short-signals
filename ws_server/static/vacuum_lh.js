@@ -112,8 +112,13 @@ const VAC_CHART = {
 
 const PEAK_COLORS = ["#e9c46a", "#f4a261", "#e76f51", "#d62828", "#9d0208"];
 const TROUGH_COLORS = ["#4cc9f0", "#4895ef", "#4361ee", "#3a0ca3", "#560bad"];
-const PEAK_CONFLUENCE_COLOR = "#ffe566";
-const PEAK_CONFLUENCE_STRONG = "#ffffff";
+/** MTF: совпадения со старшими TF → 0 голубой … 3 красный. */
+const VACUUM_MTF_COLORS = ["#22d3ee", "#4ade80", "#facc15", "#ef4444"];
+
+function vacuumPivotMtfColor(matchCount) {
+  const n = Math.min(3, Math.max(0, Number(matchCount) || 0));
+  return VACUUM_MTF_COLORS[n];
+}
 const TROUGH_CONFLUENCE_COLOR = "#7df9ff";
 const TROUGH_CONFLUENCE_STRONG = "#e0ffff";
 
@@ -128,8 +133,8 @@ function vacuumDeskVisible() {
 
 function vacuumPivotMatchCount(p) {
   const n = Number(p?.tf_match_count);
-  if (n >= 1) return n;
-  return p?.confluence ? 2 : 1;
+  if (Number.isFinite(n) && n >= 0) return Math.min(3, n);
+  return 0;
 }
 
 function vacuumLeftStrength(p) {
@@ -174,16 +179,9 @@ function vacuumPivotLineStyle(p, fallbackColor, kind) {
   const n = vacuumPivotMatchCount(p);
   const ls = vacuumLeftStrength(p);
   const amp = Math.min(1, Math.max(0, (ls - 15) / 15));
-  const strong = kind === "trough" ? TROUGH_CONFLUENCE_STRONG : PEAK_CONFLUENCE_STRONG;
-  const mid = kind === "trough" ? TROUGH_CONFLUENCE_COLOR : PEAK_CONFLUENCE_COLOR;
-  if (n >= 3) {
-    return { color: strong, lineWidth: 3, lineStyle: 0, amp: 1 };
-  }
-  if (n >= 2) {
-    return { color: mid, lineWidth: 2, lineStyle: 0, amp: 0.85 + amp * 0.15 };
-  }
-  const lw = 1 + Math.round(amp * 2);
-  return { color: fallbackColor, lineWidth: lw, lineStyle: 0, amp };
+  const color = vacuumPivotMtfColor(n);
+  const lw = 1 + Math.min(2, n) + Math.round(amp);
+  return { color, lineWidth: lw, lineStyle: 0, amp };
 }
 
 function formatVacuumPivotPrice(p, kind) {
@@ -191,33 +189,26 @@ function formatVacuumPivotPrice(p, kind) {
   const n = vacuumPivotMatchCount(p);
   const x3 = kind === "trough" ? "vacuum-lh-trough-x3" : "vacuum-lh-peak-x3";
   const x2 = kind === "trough" ? "vacuum-lh-trough-x2" : "vacuum-lh-peak-x2";
-  const cls = n >= 3 ? x3 : n >= 2 ? x2 : "";
-  const tag = n >= 2 ? `<sup class="vacuum-lh-peak-tag">×${n} TF</sup>` : "";
+  const x1 = kind === "trough" ? "vacuum-lh-trough-x1" : "vacuum-lh-peak-x1";
+  const cls = n >= 3 ? x3 : n >= 2 ? x2 : n >= 1 ? x1 : "";
+  const tag = n >= 1 ? `<sup class="vacuum-lh-peak-tag">+${n} ст.</sup>` : "";
   return `<span class="vacuum-lh-pivot${cls ? ` ${cls}` : ""}">${price}${tag}</span>`;
 }
 
 function formatVacuumInfoPivot(p, prefix, lhTf) {
   const n = vacuumPivotMatchCount(p);
   const isTrough = prefix === "HL";
-  const cls =
-    n >= 3
-      ? isTrough
-        ? "vacuum-lh-trough-li-x3"
-        : "vacuum-lh-peak-li-x3"
-      : n >= 2
-        ? isTrough
-          ? "vacuum-lh-trough-li-x2"
-          : "vacuum-lh-peak-li-x2"
-        : "";
+  const tier = n >= 3 ? "x3" : n >= 2 ? "x2" : n >= 1 ? "x1" : "x0";
+  const cls = isTrough ? `vacuum-lh-trough-li-${tier}` : `vacuum-lh-peak-li-${tier}`;
   const tfNote =
-    n >= 2 && p.tf_matches?.length
+    n >= 1 && p.tf_matches?.length
       ? ` · <span class="vacuum-lh-peak-tag">${p.tf_matches.map(labelTf).join(", ")}</span>`
       : "";
   const ls = vacuumLeftStrength(p);
   const str = ls
     ? ` <span class="vacuum-lh-peak-tag" title="Свечей слева при формировании">L${ls}</span>`
     : "";
-  return `<li class="${cls}">${prefix}${p.index}: <strong>${p.price}</strong>${str}${n >= 2 ? ` <span class="vacuum-lh-peak-tag">×${n} TF</span>` : ""} (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})${tfNote}</li>`;
+  return `<li class="${cls}">${prefix}${p.index}: <strong>${p.price}</strong>${str}${n >= 1 ? ` <span class="vacuum-lh-peak-tag">+${n} ст.</span>` : ""} (${lhTf} ${new Date(p.time_ms).toLocaleString("ru-RU")})${tfNote}</li>`;
 }
 
 function labelTf(code) {
@@ -1529,7 +1520,7 @@ function renderVacuumLhInfo() {
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
     ${vacuumInfoTradeBlock(sym)}
-    <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): pivot на экстремумах (L10–30, справа 2, шаг ≥10; плато из 2 свечей — на 2-й).</p>
+    <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): L10–30, 2 справа, шаг ≥10; цвет — совпадение со старшими TF: <span style="color:#22d3ee">0</span> · <span style="color:#4ade80">1</span> · <span style="color:#facc15">2</span> · <span style="color:#ef4444">3</span>.</p>
     <p>Цена: <strong data-vac-live="price">${vacuumPaperLastPrice(sym) || row.last_price || "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>
@@ -1788,12 +1779,12 @@ function vacuumPivotSeriesMarker(p, chartInterval, kind, inChain, i, runtime) {
   const prefix = kind === "trough" ? "HL" : "LH";
   const head = inChain ? `${prefix}${p.index || i + 1}` : prefix;
   const lsTag = ls ? ` L${ls}` : "";
-  const tfTag = inChain && n >= 2 ? ` ×${n}` : "";
+  const tfTag = n >= 1 ? ` +${n}` : "";
   const long = kind === "trough";
   return {
     time: barTime,
     position: long ? "belowBar" : "aboveBar",
-    color: long ? (n >= 2 ? "#67e8f9" : "#22d3ee") : n >= 2 ? "#fde047" : "#facc15",
+    color: vacuumPivotMtfColor(n),
     shape: inChain ? "square" : "circle",
     text: `${head}${lsTag}${tfTag}`,
     _rank: (inChain ? 1000 : 0) + ls * 10 + n,
