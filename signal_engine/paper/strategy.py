@@ -355,6 +355,9 @@ class PaperStrategy:
                 stop_style=config.paper_stop_style(variant),
                 scaled_half=bool((entry or {}).get("css2_half")),
             )
+            if variant == config.PAPER_333_VARIANT:
+                bab0 = float(((entry or {}).get("metrics") or {}).get("desk_initial_stop") or 0)
+                pos.desk_initial_stop = bab0 if bab0 > 0 else float(row["stop_price"])
             # Стоп по правилу варианта: t20 — +0.5% net/лок/трейл 20, p10 — +0.5% net и пик − gap.
             pos._sync_stop(float(row["last_price"] or row["entry_price"]))
             self.trades[(variant, row["symbol"])] = OpenTrade(
@@ -1995,8 +1998,6 @@ class PaperStrategy:
             specs.append((config.PAPER_PYL_VARIANT, config.PAPER_PYL_INTERVAL, "pyl"))
         if config.PAPER_PYL1_VARIANT in VARIANTS:
             specs.append((config.PAPER_PYL1_VARIANT, config.PAPER_PYL_INTERVAL, "pyl1"))
-        if config.PAPER_333_VARIANT in VARIANTS:
-            specs.append((config.PAPER_333_VARIANT, config.PAPER_PYL_INTERVAL, "333"))
         if config.PAPER_VPS5_VARIANT in VARIANTS:
             specs.append((config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "vps5"))
         if config.PAPER_VPS15_VARIANT in VARIANTS:
@@ -2161,6 +2162,9 @@ class PaperStrategy:
         pivot_high = float(m.get("pivot_high") or 0)
         pivot_low = float(m.get("pivot_low") or 0)
         stop = bab_pivot_stop_price(side, pivot_high, pivot_low)
+        if variant == config.PAPER_333_VARIANT:
+            m["desk_initial_stop"] = stop
+            entry["metrics"] = m
         tape = self.tape.symbols.get(symbol)
         nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
         pos = Position(
@@ -2172,6 +2176,7 @@ class PaperStrategy:
             side=side,
             stop_style=config.paper_stop_style(variant),
             stop_price=stop,
+            desk_initial_stop=stop if variant == config.PAPER_333_VARIANT else 0.0,
         )
         trade_id = self.store.insert_trade(
             {

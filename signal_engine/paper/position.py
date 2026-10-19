@@ -352,6 +352,38 @@ def bab_pivot_stop_price(
     return price_for_roe(pivot_high, roe, lev)
 
 
+def trail333_stop_short(
+    entry: float,
+    best_price: float,
+    bab_stop: float,
+    leverage: int | None = None,
+) -> float:
+    """333 шорт: до пика +5% ROE — стоп от pivot; далее max(+1% ROE, пик − 15 п.п.) и не выше bab."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = roe_pct(entry, best_price, lev)
+    if peak < config.PAPER_333_TRAIL_ARM_ROE:
+        return bab_stop
+    lock_roe = max(config.PAPER_333_TRAIL_LOCK_ROE, peak - config.PAPER_333_TRAIL_GAP_ROE)
+    trail = price_for_roe(entry, lock_roe, lev)
+    return min(trail, bab_stop)
+
+
+def trail333_stop_long(
+    entry: float,
+    best_price: float,
+    bab_stop: float,
+    leverage: int | None = None,
+) -> float:
+    """333 лонг: до пика +5% ROE — стоп от pivot; далее max(+1% ROE, пик − 15 п.п.) и не ниже bab."""
+    lev = leverage or config.PAPER_LEVERAGE
+    peak = long_roe_pct(entry, best_price, lev)
+    if peak < config.PAPER_333_TRAIL_ARM_ROE:
+        return bab_stop
+    lock_roe = max(config.PAPER_333_TRAIL_LOCK_ROE, peak - config.PAPER_333_TRAIL_GAP_ROE)
+    trail = price_for_long_roe(entry, lock_roe, lev)
+    return max(trail, bab_stop)
+
+
 def pyl_trail_stop(
     entry: float,
     best_price: float,
@@ -530,6 +562,7 @@ class Position:
     side: str = "short"
     stop_style: str = "default"
     scaled_half: bool = False
+    desk_initial_stop: float = 0.0
 
     def __post_init__(self) -> None:
         if self.best_price <= 0:
@@ -675,6 +708,21 @@ class Position:
                     if self.side == "long"
                     else liquidation_price(self.entry_price, self.leverage)
                 )
+            return
+        if self.stop_style == "333":
+            bab = self.desk_initial_stop if self.desk_initial_stop > 0 else self.stop_price
+            if self.desk_initial_stop <= 0 and bab > 0:
+                self.desk_initial_stop = bab
+            if self.side == "long":
+                trail = trail333_stop_long(
+                    self.entry_price, self.best_price, bab, self.leverage
+                )
+                self.stop_price = max(self.liq_price, trail)
+            else:
+                trail = trail333_stop_short(
+                    self.entry_price, self.best_price, bab, self.leverage
+                )
+                self.stop_price = min(self.liq_price, trail)
             return
         if self.stop_style == "pyl":
             trail = pyl_trail_stop(

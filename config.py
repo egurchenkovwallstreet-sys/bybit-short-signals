@@ -335,6 +335,9 @@ PAPER_333_MA_FAST = _env_int("PAPER_333_MA_FAST", 20)
 PAPER_333_MA_SLOW = _env_int("PAPER_333_MA_SLOW", 60)
 PAPER_333_MA_SLOPE_BARS = _env_int("PAPER_333_MA_SLOPE_BARS", 5)
 PAPER_333_MA_SLOPE_MIN_PCT = _env_float("PAPER_333_MA_SLOPE_MIN_PCT", 0.03)
+PAPER_333_TRAIL_ARM_ROE = _env_float("PAPER_333_TRAIL_ARM_ROE", 5.0)
+PAPER_333_TRAIL_LOCK_ROE = _env_float("PAPER_333_TRAIL_LOCK_ROE", 1.0)
+PAPER_333_TRAIL_GAP_ROE = _env_float("PAPER_333_TRAIL_GAP_ROE", 15.0)
 PAPER_CHOP_WINDOW_BARS = _env_int("PAPER_CHOP_WINDOW_BARS", 20)
 PAPER_CHOP_MIN_BARS = _env_int("PAPER_CHOP_MIN_BARS", 10)
 PAPER_CHOP_TIGHT_RANGE_PCT = _env_float("PAPER_CHOP_TIGHT_RANGE_PCT", 1.5)
@@ -436,8 +439,10 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
-    if variant in (PAPER_PYL_VARIANT, PAPER_PYL1_VARIANT, PAPER_333_VARIANT):
+    if variant in (PAPER_PYL_VARIANT, PAPER_PYL1_VARIANT):
         return "bab"
+    if variant == PAPER_333_VARIANT:
+        return "333"
     if variant == PAPER_VAC_VARIANT:
         return "pyl"
     if variant in PAPER_VPS_VARIANTS:
