@@ -265,6 +265,7 @@ class PaperStrategy:
         self._pyl_watch: list[dict] = []
         self._333_prev_snap: dict[str, dict] = {}
         self._333_watch: list[dict] = []
+        self._333_loss_stop_until: dict[tuple[str, str], int] = {}
         self._vac_used_bars: dict[tuple[str, str], int] = {}
         self._vac_watch: list[dict] = []
         self._vps_prev_snap: dict[tuple[str, str], dict] = {}
@@ -499,6 +500,7 @@ class PaperStrategy:
                 last_check=now,
             )
         self.last_close = self.store.last_close_by_symbol()
+        self._restore_333_loss_stop_cooldowns(now)
         for row in self.store.db.execute(
             "SELECT symbol, MAX(peak_ts) AS ts FROM paper_candidates WHERE status != 'watching' GROUP BY symbol"
         ):
@@ -882,6 +884,10 @@ class PaperStrategy:
         self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
         self._snapshot_equity(variant, now_ms)
         self.last_close[(variant, trade.symbol)] = now_ms
+        if variant == config.PAPER_333_VARIANT and reason == "trailing_stop":
+            if float(result["pnl_usd"]) < 0:
+                cd_ms = int(config.PAPER_333_LOSS_STOP_COOLDOWN_MIN * 60_000)
+                self._333_loss_stop_until[(variant, trade.symbol)] = now_ms + cd_ms
         self._next_analytics = 0
         if variant == config.PAPER_CSS_VARIANT:
             self._on_css_trade_closed(trade, pos, now_ms)
@@ -2009,6 +2015,28 @@ class PaperStrategy:
             lambda w: setattr(self, "_pyl_watch", w),
         )
 
+    def _333_loss_stop_blocked(self, symbol: str, now_ms: int) -> bool:
+        until = self._333_loss_stop_until.get((config.PAPER_333_VARIANT, symbol), 0)
+        return until > int(now_ms)
+
+    def _restore_333_loss_stop_cooldowns(self, now_ms: int) -> None:
+        cd_ms = int(config.PAPER_333_LOSS_STOP_COOLDOWN_MIN * 60_000)
+        since = int(now_ms) - cd_ms
+        rows = self.store.db.execute(
+            "SELECT symbol, MAX(closed_at) AS ts FROM paper_trades "
+            "WHERE variant = ? AND status = 'closed' AND exit_reason = 'trailing_stop' "
+            "AND pnl_usd < 0 AND closed_at >= ? GROUP BY symbol",
+            (config.PAPER_333_VARIANT, since),
+        )
+        for row in rows:
+            ts = int(row["ts"] or 0)
+            if ts <= 0:
+                continue
+            sym = str(row["symbol"])
+            until = ts + cd_ms
+            if until > int(now_ms):
+                self._333_loss_stop_until[(config.PAPER_333_VARIANT, sym)] = until
+
     def _evaluate_333(self, states: dict[str, SymbolState], now_ms: int) -> None:
         self._evaluate_bab_pivot_desk(
             states,
@@ -2093,6 +2121,8 @@ class PaperStrategy:
                                 )
                 continue
             if not fresh or not ev_clean.get("passed"):
+                continue
+            if variant == config.PAPER_333_VARIANT and self._333_loss_stop_blocked(symbol, now_ms):
                 continue
             balance = self.balances[variant]
             margin = balance * config.PAPER_MARGIN_PCT / 100.0
