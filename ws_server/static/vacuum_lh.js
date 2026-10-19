@@ -48,19 +48,17 @@ const VACUUM_DESK = [
   ["scan", "Сканер"],
   ["pyl", "БАБЛОСОС"],
   ["pyl1", "БАБЛОСОС 1"],
-  ["pylbtc", "БАБЛОСОС+BTC"],
   ["333", "333"],
   ["vps5", "Пылесос 5"],
   ["vps15", "Пылесос 15"],
 ];
 
-const VACUUM_TRADE_VARIANTS = ["pyl", "pyl1", "pylbtc", "333", "vps5", "vps15"];
+const VACUUM_TRADE_VARIANTS = ["pyl", "pyl1", "333", "vps5", "vps15"];
 
 function vacuumIsDeskMode(mode = vacuumLhState.mode) {
   return (
     mode === "pyl" ||
     mode === "pyl1" ||
-    mode === "pylbtc" ||
     mode === "333" ||
     mode === "vps5" ||
     mode === "vps15"
@@ -69,7 +67,7 @@ function vacuumIsDeskMode(mode = vacuumLhState.mode) {
 
 function vacuumDeskChartInterval(mode = vacuumLhState.mode) {
   if (mode === "vps15") return "15";
-  if (mode === "pyl" || mode === "pyl1" || mode === "pylbtc" || mode === "333" || mode === "vps5") return "5";
+  if (mode === "pyl" || mode === "pyl1" || mode === "333" || mode === "vps5") return "5";
   return vacuumLhState.lhInterval;
 }
 
@@ -77,7 +75,7 @@ const vacuumLhState = {
   mode: "scan",
   paper: null,
   closed: [],
-  closedMap: { pyl: [], pyl1: [], pylbtc: [], 333: [], vps5: [], vps15: [] },
+  closedMap: { pyl: [], pyl1: [], 333: [], vps5: [], vps15: [] },
   symbolClosed: {},
   series: new Map(),
   scanPivots: {},
@@ -2220,7 +2218,6 @@ function vacuumDeskVariant() {
   if (vacuumLhState.mode === "vps5") return "vps5";
   if (vacuumLhState.mode === "vps15") return "vps15";
   if (vacuumLhState.mode === "pyl1") return "pyl1";
-  if (vacuumLhState.mode === "pylbtc") return "pylbtc";
   if (vacuumLhState.mode === "333") return "333";
   return "pyl";
 }
@@ -2293,7 +2290,6 @@ function vacuumAnalyticsTable() {
   const cols = [
     ["pyl", "БАБЛОСОС"],
     ["pyl1", "БАБЛОСОС 1"],
-    ["pylbtc", "БАБЛОСОС+BTC"],
     ["333", "333"],
     ["vps5", "Пылесос 5"],
     ["vps15", "Пылесос 15"],
@@ -2384,7 +2380,6 @@ function vacuumDeskWatch() {
   if (vacuumLhState.mode === "vps5") return data.vps5_watch || [];
   if (vacuumLhState.mode === "vps15") return data.vps15_watch || [];
   if (vacuumLhState.mode === "pyl1") return data.pyl1_watch || [];
-  if (vacuumLhState.mode === "pylbtc") return data.pylbtc_watch || [];
   if (vacuumLhState.mode === "333") return data["333_watch"] || data._333_watch || [];
   return data.pyl_watch || [];
 }
@@ -2472,9 +2467,7 @@ function renderVacuumDesk() {
           ? "Пылесос 15"
           : vacuumLhState.mode === "pyl1"
             ? "БАБЛОСОС 1"
-            : vacuumLhState.mode === "pylbtc"
-              ? "БАБЛОСОС+BTC"
-              : vacuumLhState.mode === "333"
+            : vacuumLhState.mode === "333"
                 ? "333"
                 : "БАБЛОСОС";
     const rule =
@@ -2484,9 +2477,7 @@ function renderVacuumDesk() {
           ? "15m pivot L15–L30: вход и выход через 1 закрытую 15m справа (окно 10 с). После выхода — сразу вход в обратную сторону. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
           : vacuumLhState.mode === "pyl1"
             ? "Как БАБЛОСОС + размах ≥2% за час. Запрет при расширении (high↑ и low↓). Лонг: min выше prev; шорт: max ниже prev. Стоп ±5% от пивота."
-            : vacuumLhState.mode === "pylbtc"
-              ? "Как БАБЛОСОС + BTC за 5 мин в сторону сделки (лонг — рост, шорт — падение). Стоп ±5% ROE от pivot."
-              : vacuumLhState.mode === "333"
+            : vacuumLhState.mode === "333"
                 ? "Как БАБЛОСОС + не узкий боковик (5m). EMA20/60: обе вниз — только шорт, обе вверх — только лонг. Стоп ±5%."
                 : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `

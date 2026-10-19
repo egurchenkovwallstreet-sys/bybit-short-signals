@@ -8,7 +8,6 @@ from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
 from signal_engine.paper.m5_htf import htf_pivot_setup, newest_pivot_reason
 from signal_engine.paper.vacuum_senior_gate import vacuum_senior_allows_entry
 from signal_engine.state import SymbolState
-from signal_engine.paper.sc10_detect import btc_move_pct
 from signal_engine.paper.ma333_regime import ma333_regime_allows
 from signal_engine.paper.tight_chop import is_tight_chop, tight_chop_detail
 from signal_engine.vacuum_lh import _meets_turnover, hour_range_pct
@@ -49,19 +48,6 @@ PYL1_MANDATORY_5 = (
     "side_from_pivot",
     "senior_tf_trend",
 )
-
-PYLBTC_MANDATORY_5 = (
-    "turnover_ok",
-    "pivot_left",
-    "side_from_pivot",
-    "senior_tf_trend",
-    "btc_same_side",
-)
-
-PYLBTC_CHECK_LABELS = {
-    **PYL_CHECK_LABELS,
-    "btc_same_side": "BTC движется в ту же сторону, что и сделка",
-}
 
 PYL1_CHECK_LABELS = {
     **PYL_CHECK_LABELS,
@@ -267,75 +253,6 @@ def evaluate_htf_pivot_entry(
         "entry_blocked": [],
         "side": signal.get("side") if passed else None,
     }
-
-
-def _btc_same_side_ok(side: str | None, btc_pct: float | None) -> bool:
-    if not side or btc_pct is None:
-        return False
-    floor = float(config.PAPER_PYLBTC_BTC_MIN_MOVE_PCT)
-    if side == "long":
-        return btc_pct > floor
-    if side == "short":
-        return btc_pct < -floor
-    return False
-
-
-def _btc_same_side_detail(side: str | None, btc_pct: float | None) -> str:
-    mins = config.PAPER_PYLBTC_BTC_MINUTES
-    floor = config.PAPER_PYLBTC_BTC_MIN_MOVE_PCT
-    if btc_pct is None:
-        return f"нет BTC {mins}м"
-    pct = f"{btc_pct:+.2f}%"
-    if not side:
-        return pct
-    if side == "long":
-        need = f">{floor:g}%" if floor else ">0%"
-        return f"{pct} (лонг: {need})"
-    need = f"<-{floor:g}%" if floor else "<0%"
-    return f"{pct} (шорт: {need})"
-
-
-def evaluate_pylbtc(
-    state: SymbolState,
-    now_ms: int,
-    prev_snap: dict | None,
-    btc_state: SymbolState | None,
-) -> dict:
-    base = evaluate_htf_pivot_entry(
-        state,
-        now_ms,
-        prev_snap,
-        PYL_INTERVAL,
-        kind="pylbtc",
-        variant=config.PAPER_PYLBTC_VARIANT,
-    )
-    side = base.get("side")
-    mins = config.PAPER_PYLBTC_BTC_MINUTES
-    btc_pct = btc_move_pct(btc_state, now_ms, mins)
-    btc_ok = _btc_same_side_ok(str(side) if side else None, btc_pct)
-    checks = dict(base.get("checks") or {})
-    checks["btc_same_side"] = _check(
-        btc_ok,
-        _btc_same_side_detail(str(side) if side else None, btc_pct),
-        PYLBTC_CHECK_LABELS["btc_same_side"],
-    )
-    mandatory = PYLBTC_MANDATORY_5
-    failed = [k for k in mandatory if not checks[k]["ok"]]
-    passed = not failed
-    out = dict(base)
-    out["checks"] = checks
-    out["failed"] = failed
-    out["passed"] = passed
-    out["passed_count"] = len(mandatory) - len(failed)
-    out["score"] = 92.0 if passed else 25.0
-    out["grade"] = grade_for(out["score"])
-    out["variants"] = [config.PAPER_PYLBTC_VARIANT] if passed else []
-    out["side"] = side if passed else None
-    metrics = dict(out.get("metrics") or {})
-    metrics["btc_move_pct"] = round(float(btc_pct), 3) if btc_pct is not None else None
-    metrics["btc_move_minutes"] = mins
-    out["metrics"] = metrics
-    return out
 
 
 def evaluate_pyl(state: SymbolState, now_ms: int, prev_snap: dict | None = None) -> dict:

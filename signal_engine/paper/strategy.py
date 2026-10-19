@@ -62,8 +62,6 @@ from signal_engine.paper.pivot_clock import (
 from signal_engine.paper.pyl_detect import (
     PYL1_CHECK_LABELS,
     PYL1_MANDATORY_5,
-    PYLBTC_CHECK_LABELS,
-    PYLBTC_MANDATORY_5,
     PYL333_CHECK_LABELS,
     PYL333_MANDATORY_5,
     PYL_CHECK_LABELS,
@@ -72,7 +70,6 @@ from signal_engine.paper.pyl_detect import (
     evaluate_333,
     evaluate_pyl,
     evaluate_pyl1,
-    evaluate_pylbtc,
 )
 from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
@@ -272,8 +269,6 @@ class PaperStrategy:
         self._pyl_watch: list[dict] = []
         self._pyl1_prev_snap: dict[str, dict] = {}
         self._pyl1_watch: list[dict] = []
-        self._pylbtc_prev_snap: dict[str, dict] = {}
-        self._pylbtc_watch: list[dict] = []
         self._333_prev_snap: dict[str, dict] = {}
         self._333_watch: list[dict] = []
         self._vac_used_bars: dict[tuple[str, str], int] = {}
@@ -581,7 +576,6 @@ class PaperStrategy:
         desk = {
             config.PAPER_PYL_VARIANT,
             config.PAPER_PYL1_VARIANT,
-            config.PAPER_PYLBTC_VARIANT,
             config.PAPER_333_VARIANT,
             config.PAPER_VPS5_VARIANT,
             config.PAPER_VPS15_VARIANT,
@@ -625,7 +619,6 @@ class PaperStrategy:
         if (
             config.PAPER_PYL_VARIANT in VARIANTS
             or config.PAPER_PYL1_VARIANT in VARIANTS
-            or config.PAPER_PYLBTC_VARIANT in VARIANTS
             or config.PAPER_333_VARIANT in VARIANTS
             or config.PAPER_VPS5_VARIANT in VARIANTS
         ):
@@ -637,8 +630,6 @@ class PaperStrategy:
                 self._evaluate_pyl(states, now_ms)
             if config.PAPER_PYL1_VARIANT in VARIANTS:
                 self._evaluate_pyl1(states, now_ms)
-            if config.PAPER_PYLBTC_VARIANT in VARIANTS:
-                self._evaluate_pylbtc(states, now_ms)
             if config.PAPER_333_VARIANT in VARIANTS:
                 self._evaluate_333(states, now_ms)
             if config.PAPER_VAC_VARIANT in VARIANTS:
@@ -1971,7 +1962,6 @@ class PaperStrategy:
             in (
                 config.PAPER_PYL_VARIANT,
                 config.PAPER_PYL1_VARIANT,
-                config.PAPER_PYLBTC_VARIANT,
                 config.PAPER_VPS5_VARIANT,
             )
         }
@@ -2005,8 +1995,6 @@ class PaperStrategy:
             specs.append((config.PAPER_PYL_VARIANT, config.PAPER_PYL_INTERVAL, "pyl"))
         if config.PAPER_PYL1_VARIANT in VARIANTS:
             specs.append((config.PAPER_PYL1_VARIANT, config.PAPER_PYL_INTERVAL, "pyl1"))
-        if config.PAPER_PYLBTC_VARIANT in VARIANTS:
-            specs.append((config.PAPER_PYLBTC_VARIANT, config.PAPER_PYL_INTERVAL, "pylbtc"))
         if config.PAPER_333_VARIANT in VARIANTS:
             specs.append((config.PAPER_333_VARIANT, config.PAPER_PYL_INTERVAL, "333"))
         if config.PAPER_VPS5_VARIANT in VARIANTS:
@@ -2055,22 +2043,6 @@ class PaperStrategy:
             lambda w: setattr(self, "_pyl1_watch", w),
         )
 
-    def _evaluate_pylbtc(self, states: dict[str, SymbolState], now_ms: int) -> None:
-        btc = states.get(config.PAPER_BTC_SYMBOL)
-
-        def evaluate_fn(state: SymbolState, now_ms: int, prev: dict | None) -> dict:
-            return evaluate_pylbtc(state, now_ms, prev, btc)
-
-        self._evaluate_bab_pivot_desk(
-            states,
-            now_ms,
-            config.PAPER_PYLBTC_VARIANT,
-            evaluate_fn,
-            self._pylbtc_prev_snap,
-            "pylbtc",
-            lambda w: setattr(self, "_pylbtc_watch", w),
-        )
-
     def _evaluate_333(self, states: dict[str, SymbolState], now_ms: int) -> None:
         self._evaluate_bab_pivot_desk(
             states,
@@ -2097,8 +2069,6 @@ class PaperStrategy:
         interval = config.PAPER_PYL_INTERVAL
         if variant == config.PAPER_PYL1_VARIANT:
             trade_kind = "pyl1"
-        elif variant == config.PAPER_PYLBTC_VARIANT:
-            trade_kind = "pylbtc"
         elif variant == config.PAPER_333_VARIANT:
             trade_kind = "333"
         else:
@@ -2900,9 +2870,6 @@ class PaperStrategy:
             "pyl1_check_labels": PYL1_CHECK_LABELS,
             "pyl1_mandatory": list(PYL1_MANDATORY_5),
             "pyl1_watch": list(self._pyl1_watch),
-            "pylbtc_check_labels": PYLBTC_CHECK_LABELS,
-            "pylbtc_mandatory": list(PYLBTC_MANDATORY_5),
-            "pylbtc_watch": list(self._pylbtc_watch),
             "333_check_labels": PYL333_CHECK_LABELS,
             "333_mandatory": list(PYL333_MANDATORY_5),
             "333_watch": list(self._333_watch),

@@ -278,9 +278,9 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
-PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "pyl1", "pylbtc", "333", "vps15", "vps5")
+PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "pyl1", "333", "vps15", "vps5")
 # Стол во вкладке «Пылесос»: бумага крутится здесь, в тесте стратегии скрыты.
-PAPER_DESK_VARIANTS = ("pyl", "pyl1", "pylbtc", "333", "vps5", "vps15")
+PAPER_DESK_VARIANTS = ("pyl", "pyl1", "333", "vps5", "vps15")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -325,9 +325,6 @@ PAPER_DPS_MAX_OPEN = _env_int("PAPER_DPS_MAX_OPEN", 3)
 # Вход и закрытие по противоположному pivot — не позже 10 с после закрытия второй свечи.
 PAPER_PYL_VARIANT = "pyl"
 PAPER_PYL1_VARIANT = "pyl1"
-PAPER_PYLBTC_VARIANT = "pylbtc"
-PAPER_PYLBTC_BTC_MINUTES = _env_int("PAPER_PYLBTC_BTC_MINUTES", 5)
-PAPER_PYLBTC_BTC_MIN_MOVE_PCT = _env_float("PAPER_PYLBTC_BTC_MIN_MOVE_PCT", 0.0)
 PAPER_PYL_INTERVAL = "5"
 PAPER_PYL_STOP_ROE = _env_float("PAPER_PYL_STOP_ROE", 5.0)
 # БАБЛОСОС 1: только монеты с размахом цены за час ≥ этого порога (%).
@@ -439,7 +436,7 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
-    if variant in (PAPER_PYL_VARIANT, PAPER_PYL1_VARIANT, PAPER_PYLBTC_VARIANT, PAPER_333_VARIANT):
+    if variant in (PAPER_PYL_VARIANT, PAPER_PYL1_VARIANT, PAPER_333_VARIANT):
         return "bab"
     if variant == PAPER_VAC_VARIANT:
         return "pyl"
