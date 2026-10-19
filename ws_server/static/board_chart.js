@@ -22,7 +22,9 @@ window.boardChart = {
   AVG_SMA_LOWER_COLOR: "#3dd68c",
   AVG_SMA_FILL_UPPER: "rgba(255, 93, 115, 0.05)",
   AVG_SMA_FILL_LOWER: "rgba(61, 214, 140, 0.05)",
-  EMA_PERIOD: 50,
+  EMA_PERIOD: 60,
+  /** Второй проход SMA по EMA для более гладкой линии. */
+  EMA_SMOOTH_PASS: 12,
   EMA_LINE_COLOR: "#58a6ff",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
@@ -1364,7 +1366,10 @@ window.boardChart = {
   ema50LineData(bars) {
     const BC = window.boardChart;
     const closes = (bars || []).map((b) => Number(b.close));
-    const ema = BC.emaRollingValues(closes, BC.EMA_PERIOD);
+    const ema1 = BC.emaRollingValues(closes, BC.EMA_PERIOD);
+    const smoothPass = BC.EMA_SMOOTH_PASS;
+    const ema =
+      smoothPass > 1 ? BC.smaRollingValues(ema1, smoothPass, true) : ema1;
     const out = [];
     for (let i = 0; i < (bars?.length || 0); i++) {
       if (ema[i] != null) out.push({ time: bars[i].time, value: ema[i] });
