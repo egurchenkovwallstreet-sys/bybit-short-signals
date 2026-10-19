@@ -333,6 +333,7 @@ function mountPumpStrategyChart() {
     priceScaleId: "vol",
   });
   pumpStrategyState.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+  window.boardChart.ensureSmaSeries(pumpStrategyState);
   const resize = () => {
     if (!pumpStrategyState.chart || container.clientWidth <= 0) return;
     const h = container.clientHeight || 420;
@@ -422,6 +423,7 @@ function drawPumpStrategyCandles(candles, interval, resetScale) {
       })),
     );
   }
+  window.boardChart.updateSma50(pumpStrategyState, bars);
   if (bars.length) {
     pumpStrategyState.priceRange = {
       min: Math.min(...bars.map((b) => b.low)),

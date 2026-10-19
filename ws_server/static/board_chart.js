@@ -12,6 +12,7 @@ window.boardChart = {
   ],
   FETCH_DAYS: 30,
   FETCH_BARS: 300,
+  SMA_PERIOD: 50,
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -450,6 +451,7 @@ window.boardChart = {
     if (runtime.series) {
       runtime.series.setData([]);
       runtime.volumeSeries?.setData([]);
+      runtime.smaSeries?.setData([]);
     }
   },
 
@@ -1272,9 +1274,42 @@ window.boardChart = {
       chart: null,
       series: null,
       volumeSeries: null,
+      smaSeries: null,
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
     };
+  },
+
+  smaLineData(bars, period) {
+    const p = period ?? window.boardChart.SMA_PERIOD;
+    if (!bars?.length || p < 1) return [];
+    const out = [];
+    let sum = 0;
+    for (let i = 0; i < bars.length; i++) {
+      sum += Number(bars[i].close);
+      if (i >= p) sum -= Number(bars[i - p].close);
+      if (i >= p - 1) out.push({ time: bars[i].time, value: sum / p });
+    }
+    return out;
+  },
+
+  ensureSmaSeries(runtime) {
+    if (!runtime?.chart || runtime.smaSeries) return;
+    runtime.smaSeries = runtime.chart.addLineSeries({
+      color: "#c084fc",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      title: "SMA50",
+    });
+  },
+
+  updateSma50(runtime, bars) {
+    const BC = window.boardChart;
+    if (!runtime?.chart) return;
+    BC.ensureSmaSeries(runtime);
+    runtime.smaSeries?.setData(BC.smaLineData(bars));
   },
 
   createPrefetchStore() {
@@ -1454,6 +1489,7 @@ window.boardChart = {
       runtime.chart = null;
       runtime.series = null;
       runtime.volumeSeries = null;
+      runtime.smaSeries = null;
     }
     runtime._chartContainer = container;
     if (runtime.chart) {
@@ -1483,6 +1519,7 @@ window.boardChart = {
       priceScaleId: "vol",
     });
     runtime.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
+    BC.ensureSmaSeries(runtime);
     window.boardChart.ensureBookOverlay(runtime, container);
     const resize = () => {
       if (!runtime.chart || container.clientWidth <= 0) return;
@@ -1557,6 +1594,7 @@ window.boardChart = {
         })),
       );
     }
+    BC.updateSma50(runtime, bars);
     runtime._lastBars = bars;
     if (bars.length) {
       runtime._lastCandleTime = bars[bars.length - 1].time;
