@@ -58,7 +58,7 @@ PYL333_MANDATORY_5 = PYL_MANDATORY_5 + ("ma333_regime",)
 
 PYL333_CHECK_LABELS = {
     **PYL_CHECK_LABELS,
-    "ma333_regime": "EMA60: тренд за 60 свечей 5m; боковик — нет; лонг ≥ EMA60, шорт ≤ EMA60",
+    "ma333_regime": "EMA60: |Δ| ≥ 0.4% за 60×5m — тренд; иначе боковик; лонг ≥ EMA60, шорт ≤ EMA60",
 }
 
 
