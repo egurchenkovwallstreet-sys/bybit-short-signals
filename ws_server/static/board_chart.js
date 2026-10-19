@@ -12,16 +12,6 @@ window.boardChart = {
   ],
   FETCH_DAYS: 30,
   FETCH_BARS: 300,
-  /** Nadaraya–Watson Envelope (LuxAlgo-style endpoint, без repaint). */
-  NW_WINDOW: 300,
-  NW_BANDWIDTH: 8,
-  /** LuxAlgo default 3; после −70% и ещё −20% → mult 0.72. */
-  NW_MULT: 0.72,
-  NW_SOURCE: "close",
-  NW_UPPER_COLOR: "#2dd4bf",
-  NW_LOWER_COLOR: "#f87171",
-  _nwCoefs: null,
-  _nwCoefDen: 0,
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -460,8 +450,6 @@ window.boardChart = {
     if (runtime.series) {
       runtime.series.setData([]);
       runtime.volumeSeries?.setData([]);
-      runtime.nwUpperSeries?.setData([]);
-      runtime.nwLowerSeries?.setData([]);
     }
   },
 
@@ -1284,110 +1272,9 @@ window.boardChart = {
       chart: null,
       series: null,
       volumeSeries: null,
-      nwUpperSeries: null,
-      nwLowerSeries: null,
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
     };
-  },
-
-  barFieldValue(bar, field) {
-    const b = bar || {};
-    if (field === "avg") {
-      return (Number(b.high) + Number(b.low) + Number(b.close)) / 3;
-    }
-    return Number(b[field ?? "close"]);
-  },
-
-  nwGauss(lag, bandwidth) {
-    const h = bandwidth;
-    return Math.exp(-(lag * lag) / (h * h * 2));
-  },
-
-  buildNwCoefs() {
-    const BC = window.boardChart;
-    const w = BC.NW_WINDOW;
-    const h = BC.NW_BANDWIDTH;
-    const coefs = new Array(w);
-    let den = 0;
-    for (let i = 0; i < w; i++) {
-      const c = BC.nwGauss(i, h);
-      coefs[i] = c;
-      den += c;
-    }
-    BC._nwCoefs = coefs;
-    BC._nwCoefDen = den;
-  },
-
-  /** Endpoint NW + MAE envelope (non-repainting), окно NW_WINDOW. */
-  nwEnvelopeLineData(bars) {
-    const BC = window.boardChart;
-    if (!bars?.length) return { upper: [], lower: [] };
-    if (!BC._nwCoefs?.length) BC.buildNwCoefs();
-    const windowLen = BC.NW_WINDOW;
-    const maeLen = windowLen - 1;
-    const mult = BC.NW_MULT;
-    const coefs = BC._nwCoefs;
-    const den = BC._nwCoefDen;
-    const src = bars.map((b) => BC.barFieldValue(b, BC.NW_SOURCE));
-    const n = bars.length;
-    const out = new Array(n);
-    for (let idx = 0; idx < n; idx++) {
-      let sum = 0;
-      const maxLag = Math.min(windowLen - 1, idx);
-      for (let lag = 0; lag <= maxLag; lag++) sum += src[idx - lag] * coefs[lag];
-      out[idx] = sum / den;
-    }
-    const upper = [];
-    const lower = [];
-    for (let idx = 0; idx < n; idx++) {
-      const start = Math.max(0, idx - maeLen + 1);
-      let devSum = 0;
-      for (let j = start; j <= idx; j++) devSum += Math.abs(src[j] - out[j]);
-      const mae = (devSum / (idx - start + 1)) * mult;
-      upper.push({ time: bars[idx].time, value: out[idx] + mae });
-      lower.push({ time: bars[idx].time, value: out[idx] - mae });
-    }
-    return { upper, lower };
-  },
-
-  ensureNwEnvelopeSeries(runtime) {
-    const BC = window.boardChart;
-    if (!runtime?.chart) return;
-    if (!runtime.nwUpperSeries) {
-      runtime.nwUpperSeries = runtime.chart.addLineSeries({
-        color: BC.NW_UPPER_COLOR,
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-        title: "NW+",
-      });
-    }
-    if (!runtime.nwLowerSeries) {
-      runtime.nwLowerSeries = runtime.chart.addLineSeries({
-        color: BC.NW_LOWER_COLOR,
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-        title: "NW−",
-      });
-    }
-  },
-
-  updateNwEnvelope(runtime, bars) {
-    const BC = window.boardChart;
-    if (!runtime?.chart) return;
-    BC.ensureNwEnvelopeSeries(runtime);
-    const { upper, lower } = BC.nwEnvelopeLineData(bars);
-    runtime.nwUpperSeries?.setData(upper);
-    runtime.nwLowerSeries?.setData(lower);
-  },
-
-  /** @deprecated alias */
-  updateSma50(runtime, bars) {
-    window.boardChart.updateNwEnvelope(runtime, bars);
   },
 
   createPrefetchStore() {
@@ -1567,8 +1454,6 @@ window.boardChart = {
       runtime.chart = null;
       runtime.series = null;
       runtime.volumeSeries = null;
-      runtime.nwUpperSeries = null;
-      runtime.nwLowerSeries = null;
     }
     runtime._chartContainer = container;
     if (runtime.chart) {
@@ -1674,7 +1559,6 @@ window.boardChart = {
         })),
       );
     }
-    BC.updateNwEnvelope(runtime, bars);
     runtime._lastBars = bars;
     if (bars.length) {
       runtime._lastCandleTime = bars[bars.length - 1].time;
