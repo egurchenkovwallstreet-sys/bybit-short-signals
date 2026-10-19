@@ -2500,7 +2500,7 @@ function renderVacuumDesk() {
       vacuumLhState.mode === "vps15"
         ? "15m pivot L15–L30: вход и выход через 1 закрытую 15m справа (окно 10 с). После выхода — сразу вход в обратную сторону. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
         : vacuumLhState.mode === "333"
-          ? "Как БАБЛОСОС + pivot, затем EMA60 (5m): боковик не торгуем; лонг только вверх EMA60 и цена ≥ EMA60; шорт только вниз и цена ≤ EMA60. До +5% ROE стоп ±5% от pivot; с +5% — лок +1% ROE, трейл пик − 15 п.п. ROE. Только стоп."
+          ? "Как БАБЛОСОС + pivot, затем EMA60 (5m): боковик не торгуем; лонг только вверх EMA60 и цена ≥ EMA60; шорт только вниз и цена ≤ EMA60. До +5% ROE стоп ±5% от pivot; с +5% — лок +0.5% net, трейл пик − 15 п.п. ROE. Только стоп."
           : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>

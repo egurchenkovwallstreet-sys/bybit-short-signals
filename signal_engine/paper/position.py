@@ -357,14 +357,26 @@ def trail333_stop_short(
     best_price: float,
     bab_stop: float,
     leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
 ) -> float:
-    """333 шорт: до пика +5% ROE — стоп от pivot; далее max(+1% ROE, пик − 15 п.п.) и не выше bab."""
+    """333 шорт: до +5% ROE — стоп pivot; с +5% — +0.5% net и трейл пик − 15 п.п., не выше bab."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = roe_pct(entry, best_price, lev)
     if peak < config.PAPER_333_TRAIL_ARM_ROE:
         return bab_stop
-    lock_roe = max(config.PAPER_333_TRAIL_LOCK_ROE, peak - config.PAPER_333_TRAIL_GAP_ROE)
-    trail = price_for_roe(entry, lock_roe, lev)
+    lock_net = _net_lock_price(
+        entry,
+        margin,
+        config.PAPER_333_TRAIL_LOCK_NET_ROE,
+        lev,
+        entry_fee,
+        funding_paid,
+    )
+    trail_roe = peak - config.PAPER_333_TRAIL_GAP_ROE
+    trail = min(price_for_roe(entry, trail_roe, lev), lock_net)
     return min(trail, bab_stop)
 
 
@@ -373,14 +385,26 @@ def trail333_stop_long(
     best_price: float,
     bab_stop: float,
     leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
 ) -> float:
-    """333 лонг: до пика +5% ROE — стоп от pivot; далее max(+1% ROE, пик − 15 п.п.) и не ниже bab."""
+    """333 лонг: до +5% ROE — стоп pivot; с +5% — +0.5% net и трейл пик − 15 п.п., не ниже bab."""
     lev = leverage or config.PAPER_LEVERAGE
     peak = long_roe_pct(entry, best_price, lev)
     if peak < config.PAPER_333_TRAIL_ARM_ROE:
         return bab_stop
-    lock_roe = max(config.PAPER_333_TRAIL_LOCK_ROE, peak - config.PAPER_333_TRAIL_GAP_ROE)
-    trail = price_for_long_roe(entry, lock_roe, lev)
+    lock_net = net_roe_stop_price_long(
+        entry,
+        margin,
+        config.PAPER_333_TRAIL_LOCK_NET_ROE,
+        lev,
+        entry_fee,
+        funding_paid,
+    )
+    trail_roe = peak - config.PAPER_333_TRAIL_GAP_ROE
+    trail = max(price_for_long_roe(entry, trail_roe, lev), lock_net)
     return max(trail, bab_stop)
 
 
@@ -715,12 +739,24 @@ class Position:
                 self.desk_initial_stop = bab
             if self.side == "long":
                 trail = trail333_stop_long(
-                    self.entry_price, self.best_price, bab, self.leverage
+                    self.entry_price,
+                    self.best_price,
+                    bab,
+                    self.leverage,
+                    margin=self.margin,
+                    entry_fee=self.entry_fee,
+                    funding_paid=self.funding_paid,
                 )
                 self.stop_price = max(self.liq_price, trail)
             else:
                 trail = trail333_stop_short(
-                    self.entry_price, self.best_price, bab, self.leverage
+                    self.entry_price,
+                    self.best_price,
+                    bab,
+                    self.leverage,
+                    margin=self.margin,
+                    entry_fee=self.entry_fee,
+                    funding_paid=self.funding_paid,
                 )
                 self.stop_price = min(self.liq_price, trail)
             return
