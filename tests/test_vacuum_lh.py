@@ -79,7 +79,7 @@ class VacuumLhPeaksTest(unittest.TestCase):
             {"bar_index": 3, "price": 11.0, "time": 3, "left_strength": 7},
             {"bar_index": 10, "price": 9.0, "time": 10, "left_strength": 12},
         ]
-        out = filter_pivots_min_bar_gap(pivots, 30, kind="peak")
+        out = filter_pivots_min_bar_gap(pivots, 10, kind="peak")
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["bar_index"], 3)
         self.assertEqual(out[0]["price"], 11.0)
@@ -89,18 +89,26 @@ class VacuumLhPeaksTest(unittest.TestCase):
             {"bar_index": 0, "price": 12.0, "left_strength": 16},
             {"bar_index": 20, "price": 11.0, "left_strength": 28},
         ]
-        out = filter_pivots_min_bar_gap(pivots, 30, kind="peak")
-        self.assertEqual(len(out), 1)
-        self.assertEqual(out[0]["price"], 12.0)
+        out = filter_pivots_min_bar_gap(pivots, 10, kind="peak")
+        self.assertEqual(len(out), 2)
 
     def test_pivot_gap_trough_prefers_lower_low(self) -> None:
         pivots = [
             {"bar_index": 0, "price": 5.0, "left_strength": 28},
             {"bar_index": 15, "price": 4.2, "left_strength": 15},
         ]
-        out = filter_pivots_min_bar_gap(pivots, 30, kind="trough")
-        self.assertEqual(len(out), 1)
-        self.assertEqual(out[0]["price"], 4.2)
+        out = filter_pivots_min_bar_gap(pivots, 10, kind="trough")
+        self.assertEqual(len(out), 2)
+        self.assertEqual(out[-1]["price"], 4.2)
+
+    def test_pivot_gap_three_in_thirty_window(self) -> None:
+        pivots = [
+            {"bar_index": 0, "price": 10.0, "left_strength": 12},
+            {"bar_index": 12, "price": 11.0, "left_strength": 12},
+            {"bar_index": 24, "price": 9.5, "left_strength": 12},
+        ]
+        out = filter_pivots_min_bar_gap(pivots, 10, kind="peak")
+        self.assertEqual(len(out), 3)
 
     def test_floating_left_strength_up_to_twenty(self) -> None:
         lows = [10.0] * 7 + [20.0, 9.0, 8.0]

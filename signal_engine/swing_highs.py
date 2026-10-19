@@ -161,7 +161,7 @@ def pivot_highs_floating_left(
 
 
 def _pivot_strength_rank(p: dict, kind: str) -> tuple[int, float]:
-    """Сначала left_strength 15–30, затем экстремум цены."""
+    """Сначала left_strength, затем экстремум цены (legacy rank)."""
     ls = int(p.get("left_strength") or 0)
     price = float(p["price"])
     if kind == "peak":

@@ -1,4 +1,4 @@
-"""Единое правило pivot (paper + LH-скан): L15–L30 слева, 2 справа, разнос ≥ gap 30.
+"""Единое правило pivot (paper + LH-скан): L10–L30 слева, 2 справа, разнос ≥ gap 10.
 
 Источник якорей: vacuum_lh.all_anchor_peaks / all_anchor_troughs (VACUUM_LH_PIVOT_*).
 """

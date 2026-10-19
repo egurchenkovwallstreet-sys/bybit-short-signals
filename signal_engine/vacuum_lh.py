@@ -1,4 +1,4 @@
-"""Пылесос (LH-скан): pivot L15–L30, 2 справа, gap ≥30 (VACUUM_LH_PIVOT_*); цепочки LH/HL."""
+"""Пылесос (LH-скан): pivot на экстремумах L10–L30, 2 справа, gap ≥10 (VACUUM_LH_PIVOT_*); цепочки LH/HL."""
 
 from __future__ import annotations
 

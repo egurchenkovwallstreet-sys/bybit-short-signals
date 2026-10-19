@@ -783,12 +783,12 @@ VACUUM_LH_HOUR_MIN_1M_BARS = _env_int("VACUUM_LH_HOUR_MIN_1M_BARS", 10)
 VACUUM_LH_HOUR_MIN_5M_BARS = _env_int("VACUUM_LH_HOUR_MIN_5M_BARS", 3)
 VACUUM_LH_PEAK_COUNT = _env_int("VACUUM_LH_PEAK_COUNT", 5)
 VACUUM_LH_PRICE_BELOW_LAST = _env_int("VACUUM_LH_PRICE_BELOW_LAST", 3)
-# Pivot LH/HL (единое правило для LH-скана, vps, БАБЛОСОС): L15–L30 слева, 2 справа, gap ≥30.
-VACUUM_LH_PIVOT_LEFT = _env_int("VACUUM_LH_PIVOT_LEFT", 15)
+# Pivot LH/HL: L10–L30 слева, 2 справа; min gap 10 (в окне ~30 баров до 3 экстремумов одного типа).
+VACUUM_LH_PIVOT_LEFT = _env_int("VACUUM_LH_PIVOT_LEFT", 10)
 VACUUM_LH_PIVOT_LEFT_MAX = _env_int("VACUUM_LH_PIVOT_LEFT_MAX", 30)
 VACUUM_LH_PIVOT_RIGHT = _env_int("VACUUM_LH_PIVOT_RIGHT", 2)
-# Между двумя pivot-high или двумя pivot-low на одном TF — не меньше N закрытых свечей.
-VACUUM_LH_PIVOT_MIN_GAP = _env_int("VACUUM_LH_PIVOT_MIN_GAP", 30)
+# Между соседними pivot одного типа — не ближе N баров; ближе — один экстремум по цене.
+VACUUM_LH_PIVOT_MIN_GAP = _env_int("VACUUM_LH_PIVOT_MIN_GAP", 10)
 VACUUM_LH_LIVE_INTERVAL = "15"
 VACUUM_LH_LOOKBACK_DAYS = _env_int("VACUUM_LH_LOOKBACK_DAYS", 14)
 VACUUM_LH_MIN_1H_BARS = _env_int("VACUUM_LH_MIN_1H_BARS", 24)
