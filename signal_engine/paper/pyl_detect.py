@@ -58,14 +58,14 @@ PYL333_MANDATORY_5 = PYL_MANDATORY_5 + ("ma333_regime",)
 
 PYL333_CHECK_LABELS = {
     **PYL_CHECK_LABELS,
-    "ma333_regime": "EMA60: |Δ| ≥ 0.4% за 60×5m — тренд; иначе боковик; лонг ≥ EMA60, шорт ≤ EMA60",
+    "ma333_regime": f"EMA60: |Δ| ≥ {config.PAPER_333_MA_SLOPE_MIN_PCT:g}% за 60×5m — тренд; иначе боковик; лонг ≥ EMA60, шорт ≤ EMA60",
 }
 
 PYL33315_MANDATORY = ("turnover_ok", "pivot_left", "side_from_pivot", "ma333_regime")
 
 PYL33315_CHECK_LABELS = {
     **PYL_CHECK_LABELS,
-    "ma333_regime": "EMA60: |Δ| ≥ 0.4% за 60×15m — тренд; иначе боковик; лонг ≥ EMA60, шорт ≤ EMA60",
+    "ma333_regime": f"EMA60: |Δ| ≥ {config.PAPER_333_MA_SLOPE_MIN_PCT:g}% за 60×15m — тренд; иначе боковик; лонг ≥ EMA60, шорт ≤ EMA60",
 }
 
 
