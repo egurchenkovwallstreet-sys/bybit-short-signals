@@ -616,16 +616,80 @@ function getVacuumChainTroughs() {
   return vacuumFilterPivotsForChart(vacuumChainPoints(sym, iv, "troughs"), iv);
 }
 
+function vacuumParseTradeEntry(trade) {
+  let entry = trade?.entry ?? trade?.entry_json;
+  if (typeof entry === "string") {
+    try {
+      entry = JSON.parse(entry);
+    } catch (_e) {
+      entry = {};
+    }
+  }
+  return entry && typeof entry === "object" ? entry : {};
+}
+
+/** Pivot из entry_json сделки — не пропадает при пересчёте якорей графика. */
+function vacuumTradeEntryPivotPoints(symbol, chartInterval) {
+  const peaks = [];
+  const troughs = [];
+  const iv = String(chartInterval || "");
+  for (const trade of vacuumSymbolTrades(symbol)) {
+    const m = vacuumParseTradeEntry(trade).metrics || {};
+    const t = Number(m.pivot_time_ms || m.bar_ts);
+    let price = Number(m.pivot_price);
+    const side = vacuumTradeSide(trade);
+    if (!(price > 0)) {
+      price = side === "long" ? Number(m.pivot_low) : Number(m.pivot_high);
+    }
+    if (!(t > 0) || !(price > 0)) continue;
+    const tradeIv = String(m.interval || (trade.variant === "vps15" ? "15" : "5"));
+    if (iv && tradeIv !== iv) continue;
+    const kind =
+      m.pivot_kind === "peak" || m.pivot_kind === "trough"
+        ? m.pivot_kind
+        : side === "long"
+          ? "trough"
+          : "peak";
+    const ls = Number(m.left_strength) || 0;
+    const point = {
+      time_ms: t,
+      time_chart_ms: t,
+      price,
+      left_strength: ls,
+      _entryPivot: true,
+      index: m.pivot_index,
+    };
+    if (kind === "peak") {
+      point.lh_interval = tradeIv;
+      peaks.push(point);
+    } else {
+      point.hl_interval = tradeIv;
+      troughs.push(point);
+    }
+  }
+  return { peaks, troughs };
+}
+
 function getVacuumChartPeaks() {
   const sym = vacuumLhState.selected;
   if (!sym) return [];
-  return vacuumChartAnchors(sym, vacuumLhState.chartInterval, "peak");
+  const iv = vacuumLhState.chartInterval;
+  const tradePts = vacuumTradeEntryPivotPoints(sym, iv);
+  return vacuumFilterPivotsForChart(
+    vacuumUnionPivots([vacuumChartAnchors(sym, iv, "peak"), tradePts.peaks]),
+    iv,
+  );
 }
 
 function getVacuumChartTroughs() {
   const sym = vacuumLhState.selected;
   if (!sym) return [];
-  return vacuumChartAnchors(sym, vacuumLhState.chartInterval, "trough");
+  const iv = vacuumLhState.chartInterval;
+  const tradePts = vacuumTradeEntryPivotPoints(sym, iv);
+  return vacuumFilterPivotsForChart(
+    vacuumUnionPivots([vacuumChartAnchors(sym, iv, "trough"), tradePts.troughs]),
+    iv,
+  );
 }
 
 function getVacuumGhostPeaks() {
@@ -1805,6 +1869,16 @@ function vacuumPivotSeriesMarker(p, chartInterval, kind, inChain, i, runtime) {
   const lsTag = ls ? ` L${ls}` : "";
   const tfTag = n >= 1 ? ` +${n}` : "";
   const long = kind === "trough";
+  if (p._entryPivot) {
+    return {
+      time: barTime,
+      position: long ? "belowBar" : "aboveBar",
+      color: "#fbbf24",
+      shape: inChain ? "square" : "circle",
+      text: `${head}${lsTag}★`,
+      _rank: 3200 + ls,
+    };
+  }
   return {
     time: barTime,
     position: long ? "belowBar" : "aboveBar",
