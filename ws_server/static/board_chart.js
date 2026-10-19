@@ -13,9 +13,9 @@ window.boardChart = {
   FETCH_DAYS: 30,
   FETCH_BARS: 300,
   SMA_PERIOD: 50,
-  /** Полосы вокруг SMA: ±1%, до +0.5% к pivot; сглаживание и «память» pivot — 20 свечей. */
-  ENVELOPE_PCT: 0.01,
-  ENVELOPE_EXTRA_PCT: 0.005,
+  /** Полосы вокруг SMA: не ближе ±2%; к pivot до +1% сверх базы; сглаживание 20 свечей. */
+  ENVELOPE_PCT: 0.02,
+  ENVELOPE_EXTRA_PCT: 0.01,
   ENVELOPE_SMOOTH: 20,
   ENVELOPE_PIVOT_LEFT_MIN: 10,
   ENVELOPE_PIVOT_LEFT_MAX: 30,
@@ -1425,6 +1425,8 @@ window.boardChart = {
       }
       let up = s * (1 + pct);
       let lo = s * (1 - pct);
+      const floorUp = s * (1 + pct);
+      const ceilLo = s * (1 - pct);
       const capUp = s * (1 + pct + extra);
       const capLo = s * (1 - pct - extra);
       let peakHit = null;
@@ -1434,6 +1436,7 @@ window.boardChart = {
       if (peakHit) {
         up = Math.min(Math.max(up, peakHit.price), capUp);
       }
+      up = Math.max(up, floorUp);
       let troughHit = null;
       for (const t of troughs) {
         if (t.confirmIndex <= i && i - t.confirmIndex <= influence) troughHit = t;
@@ -1441,6 +1444,7 @@ window.boardChart = {
       if (troughHit) {
         lo = Math.max(Math.min(lo, troughHit.price), capLo);
       }
+      lo = Math.min(lo, ceilLo);
       rawUp.push(up);
       rawLo.push(lo);
     }
@@ -1467,11 +1471,23 @@ window.boardChart = {
 
   envelopeLineData(bars) {
     const BC = window.boardChart;
+    const pct = BC.ENVELOPE_PCT;
+    const sma = BC.smaAtEachBar(bars);
     const { rawUp, rawLo } = BC._envelopeRawTargets(bars);
-    return {
-      upper: BC._smoothEnvelopeSeries(rawUp, bars),
-      lower: BC._smoothEnvelopeSeries(rawLo, bars),
-    };
+    const upper = BC._smoothEnvelopeSeries(rawUp, bars);
+    const lower = BC._smoothEnvelopeSeries(rawLo, bars);
+    const byTime = new Map(bars.map((b, i) => [BC.barTimeKey(b.time), i]));
+    for (const pt of upper) {
+      const i = byTime.get(BC.barTimeKey(pt.time));
+      const s = i != null ? sma[i] : null;
+      if (s != null) pt.value = Math.max(Number(pt.value), s * (1 + pct));
+    }
+    for (const pt of lower) {
+      const i = byTime.get(BC.barTimeKey(pt.time));
+      const s = i != null ? sma[i] : null;
+      if (s != null) pt.value = Math.min(Number(pt.value), s * (1 - pct));
+    }
+    return { upper, lower };
   },
 
   ensureSmaSeries(runtime) {
@@ -1497,7 +1513,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "SMA+1%",
+        title: "SMA+2%",
       });
     }
     if (!runtime.smaLowerSeries) {
@@ -1508,7 +1524,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "SMA−1%",
+        title: "SMA−2%",
       });
     }
   },
