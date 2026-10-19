@@ -2132,11 +2132,24 @@ function vacuumTimeMsk(ms) {
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString("ru-RU", {
     timeZone: "Europe/Moscow",
+    year: "2-digit",
     day: "2-digit",
     month: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
   });
+}
+
+function vacuumRoePct(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
+}
+
+function vacuumRoeTd(v) {
+  const n = Number(v);
+  return vacuumPnlTd(Number.isFinite(n) ? n : null, vacuumRoePct(v));
 }
 
 function vacuumDur(min) {
@@ -2493,18 +2506,22 @@ function renderVacuumDesk() {
   const openTable = document.getElementById("vacuum-desk-open");
   if (openTable) {
     openTable.innerHTML = opens.length
-      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Время входа</th><th>Цена входа</th><th>Текущая</th><th>Стоп</th><th>ROE</th><th>P&L</th><th></th></tr></thead><tbody>${opens
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Время входа (MSK)</th><th>Цена входа</th><th>Текущая</th><th>Стоп</th><th>ROE</th><th>Макс. ROE</th><th>Мин. ROE</th><th>P&L</th><th></th></tr></thead><tbody>${opens
           .map((t) => {
             const m = vacuumOpenMoney(t);
-            const roeText = Number.isFinite(m.roe) ? `${m.roe >= 0 ? "+" : ""}${m.roe.toFixed(1)}%` : "—";
+            const roeText = vacuumRoePct(m.roe);
+            const maxR = t.max_roe;
+            const minR = t.min_roe;
             return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
           <td><b>${t.symbol}</b></td>
           <td>${vacuumSideLabel(vacuumTradeSide(t))}</td>
-          <td>${vacuumTimeMsk(t.opened_at)}</td>
+          <td class="paper-time">${vacuumTimeMsk(t.opened_at)}</td>
           <td>${t.entry_price ?? "—"}</td>
           <td>${t.last_price ?? "—"}</td>
           <td>${t.stop_price ?? "—"}</td>
           ${vacuumPnlTd(m.roe, roeText)}
+          ${vacuumRoeTd(maxR)}
+          ${vacuumRoeTd(minR)}
           ${vacuumPnlTd(m.pnl)}
           <td><button type="button" class="paper-btn vac-paper-close-btn" data-vac-paper-close="${t.id}">Закрыть</button></td>
         </tr>`;
@@ -2535,21 +2552,23 @@ function renderVacuumDesk() {
   const closedTable = document.getElementById("vacuum-desk-closed");
   if (closedTable) {
     closedTable.innerHTML = closed.length
-      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Время входа</th><th>Время выхода</th><th>Цена входа</th><th>Цена выхода</th><th>ROE</th><th>P&L</th><th>Длит.</th><th>Причина</th></tr></thead><tbody>${closed
+      ? `<thead><tr><th>Монета</th><th>Сторона</th><th>Время входа (MSK)</th><th>Время выхода (MSK)</th><th>Цена входа</th><th>Цена выхода</th><th>ROE</th><th>Макс. ROE</th><th>Мин. ROE</th><th>P&L</th><th>Длит.</th><th>Причина</th></tr></thead><tbody>${closed
           .slice(0, 200)
           .map((t) => {
             const side = vacuumTradeSide(t);
             const mins = t.closed_at && t.opened_at ? (Number(t.closed_at) - Number(t.opened_at)) / 60000 : null;
             const roe = Number(t.roe_pct);
-            const roeText = Number.isFinite(roe) ? `${roe >= 0 ? "+" : ""}${roe.toFixed(1)}%` : "—";
+            const roeText = vacuumRoePct(roe);
             return `<tr class="clickable" data-vac-desk-symbol="${t.symbol}">
           <td><b>${t.symbol}</b></td>
           <td>${vacuumSideLabel(side)}</td>
-          <td>${vacuumTimeMsk(t.opened_at)}</td>
-          <td>${vacuumTimeMsk(t.closed_at)}</td>
+          <td class="paper-time">${vacuumTimeMsk(t.opened_at)}</td>
+          <td class="paper-time">${vacuumTimeMsk(t.closed_at)}</td>
           <td>${t.entry_price ?? "—"}</td>
           <td>${t.exit_price ?? "—"}</td>
           ${vacuumPnlTd(roe, roeText)}
+          ${vacuumRoeTd(t.max_roe)}
+          ${vacuumRoeTd(t.min_roe)}
           ${vacuumPnlTd(t.pnl_usd)}
           <td>${vacuumDur(mins)}</td>
           <td>${vacuumExitLabel(t.exit_reason)}</td>

@@ -1936,6 +1936,7 @@ th { cursor: pointer; color: var(--muted); }
 .paper-table { font-size: 13px; }
 .paper-table th { white-space: nowrap; cursor: default; }
 .paper-table td { white-space: nowrap; padding: 6px 8px; }
+.paper-table td.paper-time { font-variant-numeric: tabular-nums; min-width: 9.5rem; }
 .paper-table tbody tr.clickable { cursor: pointer; }
 .paper-table tbody tr.clickable:hover { background: rgba(93, 173, 226, 0.08); }
 .paper-table tbody tr.selected { background: rgba(93, 173, 226, 0.16); }

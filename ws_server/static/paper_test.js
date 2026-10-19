@@ -94,10 +94,12 @@
     if (!ts) return "—";
     return new Date(Number(ts)).toLocaleString("ru-RU", {
       timeZone: "Europe/Moscow",
+      year: "2-digit",
       day: "2-digit",
       month: "2-digit",
       hour: "2-digit",
       minute: "2-digit",
+      second: "2-digit",
     });
   }
   function dur(min) {
@@ -747,14 +749,14 @@
     }
     table.innerHTML = `<thead><tr>
       <th>Монета</th><th>Памп</th><th>Условий</th><th>Время входа</th><th>Цена входа</th><th>Текущая</th><th>Изм. цены</th>
-      <th>Стоп</th><th>Лучшая</th><th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Маржа</th><th>Funding</th><th>Сила</th><th>В сделке</th><th></th>
+      <th>Стоп</th><th>Лучшая</th><th>ROE</th><th>P&amp;L</th><th>Макс. ROE</th><th>Мин. ROE</th><th>Маржа</th><th>Funding</th><th>Сила</th><th>В сделке</th><th></th>
     </tr></thead><tbody>${rows
       .map(
         (r) => `<tr class="clickable${isSel("open", r.id)}" data-id="${r.id}">
         <td><b>${esc(r.symbol)}</b></td>
         <td>${pumpLine(r.pump)}</td>
         <td>${passedText(r.entry)}</td>
-        <td>${time(r.opened_at)}</td>
+        <td class="paper-time">${time(r.opened_at)}</td>
         <td>${price(r.entry_price)}</td>
         <td>${price(r.last_price)}</td>
         <td>${pct(r.price_change_pct)}</td>
@@ -763,6 +765,7 @@
         <td>${pct(r.roe_pct, 1)}</td>
         <td>${usd(r.pnl_usd)}</td>
         <td>${pct(r.max_roe, 1)}</td>
+        <td>${pct(r.min_roe, 1)}</td>
         <td>$${num(r.margin)}</td>
         <td>${usd(r.funding_paid, 4)}</td>
         <td class="grade-${r.grade}">${r.grade} · ${num(r.score, 1)}</td>
@@ -982,8 +985,8 @@
           <td><b>${esc(r.symbol)}</b></td>
           <td>${pumpLine(p)}</td>
           <td>${passedText(r.entry)}</td>
-          <td>${time(r.opened_at)}</td>
-          <td>${time(r.closed_at)}</td>
+          <td class="paper-time">${time(r.opened_at)}</td>
+          <td class="paper-time">${time(r.closed_at)}</td>
           <td>${dur(durMin)}</td>
           <td>${price(r.entry_price)}</td>
           <td>${price(r.exit_price)}</td>

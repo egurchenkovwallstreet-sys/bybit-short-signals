@@ -39,7 +39,13 @@ def snapshot_from_db() -> dict[str, Any]:
     if conn is None:
         return {"summary": None, "open_trades": [], "candidates": [], "analytics": {}}
     try:
-        return {"summary": None, "open_trades": [], "candidates": [], "analytics": compute_analytics(conn)}
+        open_rows = list_trades(conn, "open", 500)
+        return {
+            "summary": None,
+            "open_trades": open_rows,
+            "candidates": [],
+            "analytics": compute_analytics(conn),
+        }
     finally:
         conn.close()
 
