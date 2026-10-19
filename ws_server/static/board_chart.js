@@ -15,8 +15,8 @@ window.boardChart = {
   /** Параллельный коридор: SMA30 типичной цены (H+L+C)/3, фикс. полуширина от avg(H−L). */
   AVG_SMA_PERIOD: 30,
   AVG_SMA_RANGE_HALF_FACTOR: 2.2,
-  /** Доп. множитель ширины (+10% к текущей полуширине). */
-  AVG_SMA_WIDTH_SCALE: 1.1,
+  /** Доп. множитель полуширины (ещё +20% к прежнему 1.1 → 1.32). */
+  AVG_SMA_WIDTH_SCALE: 1.32,
   AVG_SMA_UPPER_COLOR: "#ff5d73",
   AVG_SMA_LOWER_COLOR: "#3dd68c",
   AVG_SMA_FILL_UPPER: "rgba(255, 93, 115, 0.05)",
