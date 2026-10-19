@@ -14,6 +14,8 @@ window.boardChart = {
   FETCH_BARS: 300,
   SMA_PERIOD: 50,
   SMA_EXTREMA_PERIOD: 20,
+  /** Полуширина коридора SMA20 от центра (2% → 4% между линиями). */
+  SMA_CORRIDOR_HALF_PCT: 0.02,
   SMA_LINE_COLOR: "#c084fc",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
@@ -1286,8 +1288,17 @@ window.boardChart = {
     };
   },
 
+  barFieldValue(bar, field) {
+    const b = bar || {};
+    if (field === "avg") {
+      return (Number(b.high) + Number(b.low) + Number(b.close)) / 3;
+    }
+    return Number(b[field ?? "close"]);
+  },
+
   smaAtEachBar(bars, period, field, allBars) {
-    const p = period ?? window.boardChart.SMA_PERIOD;
+    const BC = window.boardChart;
+    const p = period ?? BC.SMA_PERIOD;
     const key = field || "close";
     const sma = new Array(bars?.length || 0).fill(null);
     if (!bars?.length || p < 1) return sma;
@@ -1295,18 +1306,41 @@ window.boardChart = {
       for (let i = 0; i < bars.length; i++) {
         let sum = 0;
         const start = Math.max(0, i - p + 1);
-        for (let j = start; j <= i; j++) sum += Number(bars[j][key]);
+        for (let j = start; j <= i; j++) sum += BC.barFieldValue(bars[j], key);
         sma[i] = sum / (i - start + 1);
       }
       return sma;
     }
     let sum = 0;
     for (let i = 0; i < bars.length; i++) {
-      sum += Number(bars[i][key]);
-      if (i >= p) sum -= Number(bars[i - p][key]);
+      sum += BC.barFieldValue(bars[i], key);
+      if (i >= p) sum -= BC.barFieldValue(bars[i - p], key);
       if (i >= p - 1) sma[i] = sum / p;
     }
     return sma;
+  },
+
+  /** Верх/низ: SMA20 типичной цены + SMA20 high/low, центр — среднее; ширина всегда 4%. */
+  smaCorridorLineData(bars) {
+    const BC = window.boardChart;
+    const p = BC.SMA_EXTREMA_PERIOD;
+    const halfPct = BC.SMA_CORRIDOR_HALF_PCT;
+    const mid = BC.smaAtEachBar(bars, p, "avg", true);
+    const hi = BC.smaAtEachBar(bars, p, "high", true);
+    const lo = BC.smaAtEachBar(bars, p, "low", true);
+    const upper = [];
+    const lower = [];
+    for (let i = 0; i < (bars?.length || 0); i++) {
+      const m = mid[i];
+      const h = hi[i];
+      const l = lo[i];
+      if (m == null || h == null || l == null) continue;
+      const center = (m + h + l) / 3;
+      const half = halfPct * center;
+      upper.push({ time: bars[i].time, value: center + half });
+      lower.push({ time: bars[i].time, value: center - half });
+    }
+    return { upper, lower };
   },
 
   smaLineData(bars, period, field, allBars) {
@@ -1341,7 +1375,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "SMA20 high",
+        title: "SMA20+",
       });
     }
     if (!runtime.smaLow20Series) {
@@ -1351,7 +1385,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "SMA20 low",
+        title: "SMA20−",
       });
     }
   },
@@ -1361,10 +1395,10 @@ window.boardChart = {
     if (!runtime?.chart) return;
     BC.ensureSmaSeries(runtime);
     BC.ensureSmaExtremaSeries(runtime);
-    const p20 = BC.SMA_EXTREMA_PERIOD;
     runtime.smaSeries?.setData(BC.smaLineData(bars, BC.SMA_PERIOD, "close", false));
-    runtime.smaHigh20Series?.setData(BC.smaLineData(bars, p20, "high", true));
-    runtime.smaLow20Series?.setData(BC.smaLineData(bars, p20, "low", true));
+    const corridor = BC.smaCorridorLineData(bars);
+    runtime.smaHigh20Series?.setData(corridor.upper);
+    runtime.smaLow20Series?.setData(corridor.lower);
     runtime.smaUpperSeries?.setData([]);
     runtime.smaLowerSeries?.setData([]);
   },
