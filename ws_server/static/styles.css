@@ -677,7 +677,7 @@ body {
   right: 0;
   bottom: 22%;
   pointer-events: none;
-  z-index: 11;
+  z-index: 3;
   overflow: hidden;
 }
 

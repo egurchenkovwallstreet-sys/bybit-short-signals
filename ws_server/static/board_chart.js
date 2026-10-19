@@ -415,7 +415,16 @@ window.boardChart = {
     const liq = runtime._lastLiqCtx;
     if (liq) BC.renderLiqChartOverlay(runtime, liq.zones, liq.mark);
     BC.renderLiqCandleLabels(runtime);
-    BC.renderAvgCorridorOverlay(runtime);
+    BC.syncAvgCorridorOverlay(runtime);
+  },
+
+  syncAvgCorridorOverlay(runtime) {
+    if (!runtime?._avgCorridorBands?.length) return;
+    if (runtime._corridorSyncRaf) return;
+    runtime._corridorSyncRaf = requestAnimationFrame(() => {
+      runtime._corridorSyncRaf = 0;
+      window.boardChart.renderAvgCorridorOverlay(runtime);
+    });
   },
 
   scheduleThrottledOverlaySync(runtime) {
@@ -1360,15 +1369,37 @@ window.boardChart = {
   ensureAvgCorridorOverlay(runtime, chartEl) {
     const BC = window.boardChart;
     if (!runtime || !chartEl) return;
-    const host = BC.overlayHost(chartEl);
-    if (!host) return;
     if (!runtime.avgCorridorOverlayEl) {
       const ov = document.createElement("div");
       ov.className = "psc-avg-corridor-overlay";
       ov.setAttribute("aria-hidden", "true");
       runtime.avgCorridorOverlayEl = ov;
     }
-    BC.attachOverlayToHost(runtime.avgCorridorOverlayEl, host, runtime.liqOverlayEl || null);
+    const ov = runtime.avgCorridorOverlayEl;
+    if (ov.parentElement !== chartEl) chartEl.appendChild(ov);
+    BC.ensureAvgCorridorHooks(runtime);
+  },
+
+  ensureAvgCorridorHooks(runtime) {
+    const BC = window.boardChart;
+    if (!runtime?.chart || runtime._avgCorridorHooks) return;
+    runtime._avgCorridorHooks = true;
+    const paint = () => BC.syncAvgCorridorOverlay(runtime);
+    runtime.chart.timeScale().subscribeVisibleLogicalRangeChange(paint);
+    if (typeof runtime.chart.timeScale().subscribeSizeChange === "function") {
+      runtime.chart.timeScale().subscribeSizeChange(paint);
+    }
+    const ps = runtime.series?.priceScale?.();
+    if (ps?.subscribeVisiblePriceRangeChange) {
+      ps.subscribeVisiblePriceRangeChange(paint);
+    } else if (ps?.subscribeSizeChange) {
+      ps.subscribeSizeChange(paint);
+    }
+    const chartEl = runtime._chartContainer || runtime.chart.chartElement?.();
+    if (chartEl && !runtime._corridorResizeObs) {
+      runtime._corridorResizeObs = new ResizeObserver(paint);
+      runtime._corridorResizeObs.observe(chartEl);
+    }
   },
 
   renderAvgCorridorOverlay(runtime) {
@@ -1387,7 +1418,7 @@ window.boardChart = {
     const w = chartEl.clientWidth;
     const h = Math.round(chartEl.clientHeight * 0.78) || chartEl.clientHeight;
     if (w <= 0 || h <= 0) return;
-    const offX = BC.overlayPlotOffsetX(runtime);
+    const offX = el.parentElement === chartEl ? 0 : BC.overlayPlotOffsetX(runtime);
     const y = (price) => series.priceToCoordinate(price);
     const x = (time) => chart.timeScale().timeToCoordinate(time);
     const upperPaths = [];
@@ -1430,7 +1461,7 @@ window.boardChart = {
     if (!runtime?.chart) return;
     if (runtime._chartContainer) BC.ensureAvgCorridorOverlay(runtime, runtime._chartContainer);
     runtime._avgCorridorBands = BC.computeAvgCorridorBands(bars);
-    BC.renderAvgCorridorOverlay(runtime);
+    BC.syncAvgCorridorOverlay(runtime);
   },
 
   createPrefetchStore() {
@@ -1612,6 +1643,12 @@ window.boardChart = {
       runtime.volumeSeries = null;
       runtime.avgCorridorOverlayEl = null;
       runtime._avgCorridorBands = null;
+      runtime._avgCorridorHooks = false;
+      runtime._corridorSyncRaf = 0;
+      if (runtime._corridorResizeObs) {
+        runtime._corridorResizeObs.disconnect();
+        runtime._corridorResizeObs = null;
+      }
     }
     runtime._chartContainer = container;
     if (runtime.chart) {
