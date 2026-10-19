@@ -14,7 +14,7 @@ window.boardChart = {
   FETCH_BARS: 300,
   /** Параллельный коридор: SMA30 типичной цены (H+L+C)/3, фикс. полуширина от avg(H−L). */
   AVG_SMA_PERIOD: 30,
-  AVG_SMA_RANGE_HALF_FACTOR: 1.1,
+  AVG_SMA_RANGE_HALF_FACTOR: 2.2,
   AVG_SMA_LINE_COLOR: "#c084fc",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
