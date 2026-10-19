@@ -12,8 +12,9 @@ window.boardChart = {
   ],
   FETCH_DAYS: 30,
   FETCH_BARS: 300,
-  /** Параллельный коридор: SMA30 типичной цены (H+L+C)/3, фикс. полуширина от avg(H−L). */
-  AVG_SMA_PERIOD: 30,
+  /** Параллельный коридор: SMA25 (H+L+C)/3 + второй проход для более гладкой оси. */
+  AVG_SMA_PERIOD: 25,
+  AVG_SMA_SMOOTH_PASS: 8,
   AVG_SMA_RANGE_HALF_FACTOR: 2.2,
   /** Доп. множитель полуширины (ещё +20% к прежнему 1.1 → 1.32). */
   AVG_SMA_WIDTH_SCALE: 1.32,
@@ -1296,10 +1297,25 @@ window.boardChart = {
     return (Number(b.high) + Number(b.low) + Number(b.close)) / 3;
   },
 
-  smaRollingValues(values, period) {
+  smaRollingValues(values, period, skipNull) {
     const p = period;
     const out = new Array(values.length).fill(null);
     if (p < 1 || !values.length) return out;
+    if (skipNull) {
+      for (let i = 0; i < values.length; i++) {
+        let sum = 0;
+        let count = 0;
+        const start = Math.max(0, i - p + 1);
+        for (let j = start; j <= i; j++) {
+          const v = values[j];
+          if (v == null || Number.isNaN(v)) continue;
+          sum += v;
+          count++;
+        }
+        if (count >= p) out[i] = sum / count;
+      }
+      return out;
+    }
     let sum = 0;
     for (let i = 0; i < values.length; i++) {
       sum += values[i];
@@ -1313,8 +1329,13 @@ window.boardChart = {
     const BC = window.boardChart;
     if (!bars?.length) return [];
     const period = BC.AVG_SMA_PERIOD;
+    const smoothPass = BC.AVG_SMA_SMOOTH_PASS;
     const avg = bars.map((b) => BC.barAvgPrice(b));
-    const mid = BC.smaRollingValues(avg, period);
+    const mid1 = BC.smaRollingValues(avg, period);
+    const mid =
+      smoothPass > 1
+        ? BC.smaRollingValues(mid1, smoothPass, true)
+        : mid1;
     let rangeSum = 0;
     for (const b of bars) rangeSum += Math.max(0, Number(b.high) - Number(b.low));
     let halfW = (rangeSum / bars.length) * BC.AVG_SMA_RANGE_HALF_FACTOR * BC.AVG_SMA_WIDTH_SCALE;
