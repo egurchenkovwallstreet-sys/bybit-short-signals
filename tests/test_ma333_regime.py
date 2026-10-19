@@ -20,10 +20,10 @@ def _bars_from_closes(closes: list[float], step_ms: int = 300_000) -> list[Bar]:
     return out
 
 
-def _state_with_closes(closes: list[float]) -> tuple[SymbolState, int]:
+def _state_with_closes(closes: list[float], price: float | None = None) -> tuple[SymbolState, int]:
     state = SymbolState(symbol="TEST")
     state.bars_htf["5"] = _bars_from_closes(closes)
-    state.last_price = closes[-1]
+    state.last_price = price if price is not None else closes[-1]
     now_ms = state.bars_htf["5"][-1].timestamp + 300_000
     return state, now_ms
 
@@ -52,11 +52,29 @@ def test_ma333_up_allows_long_blocks_short():
     assert d_short["ok"] is False
 
 
-def test_ma333_sideways_allows_either_side():
+def test_ma333_sideways_blocks_both():
     closes = [100.0 + (0.02 if i % 2 else -0.02) for i in range(150)]
     state, now_ms = _state_with_closes(closes)
     d_short = ma333_regime_detail(state, now_ms, "short")
     d_long = ma333_regime_detail(state, now_ms, "long")
     assert d_short["regime"] == "sideways"
-    assert d_short["ok"] is True
-    assert d_long["ok"] is True
+    assert d_short["ok"] is False
+    assert d_long["ok"] is False
+
+
+def test_ma333_short_blocks_price_above_ema60():
+    closes = _trend_closes(100.0, -0.15, 150)
+    ema_zone = closes[-1]
+    state, now_ms = _state_with_closes(closes, price=ema_zone + 5.0)
+    d = ma333_regime_detail(state, now_ms, "short")
+    assert d["regime"] == "down"
+    assert d["ok"] is False
+
+
+def test_ma333_long_blocks_price_below_ema60():
+    closes = _trend_closes(100.0, 0.15, 150)
+    ema_zone = closes[-1]
+    state, now_ms = _state_with_closes(closes, price=ema_zone - 5.0)
+    d = ma333_regime_detail(state, now_ms, "long")
+    assert d["regime"] == "up"
+    assert d["ok"] is False

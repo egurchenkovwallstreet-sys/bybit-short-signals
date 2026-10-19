@@ -1,4 +1,4 @@
-"""333: EMA20/EMA60 на 5m — в тренде только лонг или шорт; боковик по pivot (узкий range — отдельный фильтр)."""
+"""333: только EMA60 на 5m — тренд по наклону; боковик не торгуем; цена vs EMA60."""
 
 from __future__ import annotations
 
@@ -29,11 +29,10 @@ def ma333_regime_detail(
     interval: str = "5",
 ) -> dict:
     """
-    EMA20 и EMA60 по закрытым барам interval (периоды 20 и 60).
-    Наклон каждой EMA — изменение за PAPER_333_MA_SLOPE_BARS свечей (дефолт 60).
-    Тренд вниз/вверх — обе EMA с наклоном; иначе боковик.
+    EMA60 по закрытым барам interval.
+    Наклон — изменение за PAPER_333_MA_SLOPE_BARS свечей.
+    Боковик: вход запрещён. Тренд вниз — только шорт и price ≤ EMA60; вверх — лонг и price ≥ EMA60.
     """
-    fast = int(config.PAPER_333_MA_FAST)
     slow = int(config.PAPER_333_MA_SLOW)
     slope_bars = int(config.PAPER_333_MA_SLOPE_BARS)
     thr = float(config.PAPER_333_MA_SLOPE_MIN_PCT)
@@ -48,67 +47,59 @@ def ma333_regime_detail(
             "detail": f"мало баров {interval}m для EMA{slow} ({len(closes)}/{min_closes})",
         }
 
-    ema_fast = ema(closes, fast)
     ema_slow = ema(closes, slow)
     i = len(closes) - 1
     j = i - slope_bars
-    v20 = ema_fast[i]
-    v20_o = ema_fast[j]
     v60 = ema_slow[i]
     v60_o = ema_slow[j]
-    if v20 is None or v20_o is None or v60 is None or v60_o is None:
+    if v60 is None or v60_o is None:
         return {
             "insufficient_data": True,
             "ok": False,
             "regime": "unknown",
-            "detail": "EMA не посчитаны",
+            "detail": "EMA60 не посчитана",
         }
 
-    s20 = _slope_pct(float(v20), float(v20_o))
     s60 = _slope_pct(float(v60), float(v60_o))
-    if s20 <= -thr and s60 <= -thr:
+    if s60 <= -thr:
         regime: Regime = "down"
-    elif s20 >= thr and s60 >= thr:
+    elif s60 >= thr:
         regime = "up"
     else:
         regime = "sideways"
 
     price = float(state.last_price or closes[-1])
-    d20 = abs(price - float(v20))
-    d60 = abs(price - float(v60))
     side_s = str(side or "").lower()
+    ema60 = float(v60)
 
     ok = False
     detail = ""
-    if regime == "down":
-        ok = side_s == "short"
-        detail = (
-            f"EMA{fast}/EMA{slow} вниз (Δ{s20:+.2f}% / {s60:+.2f}% за {slope_bars} бар.) — только шорт"
-            if ok
-            else f"EMA вниз — лонг запрещён (Δ{s20:+.2f}% / {s60:+.2f}%)"
-        )
+    if regime == "sideways":
+        detail = f"боковик EMA60 (Δ{s60:+.2f}% за {slope_bars} бар.) — вход запрещён"
+    elif regime == "down":
+        if side_s != "short":
+            detail = f"EMA60 вниз (Δ{s60:+.2f}%) — лонг запрещён"
+        elif price > ema60 + 1e-12:
+            detail = f"шорт: цена {price:.8g} выше EMA60 {ema60:.8g}"
+        else:
+            ok = True
+            detail = f"EMA60 вниз, цена ≤ EMA60 — шорт"
     elif regime == "up":
-        ok = side_s == "long"
-        detail = (
-            f"EMA{fast}/EMA{slow} вверх (Δ{s20:+.2f}% / {s60:+.2f}%) — только лонг"
-            if ok
-            else f"EMA вверх — шорт запрещён (Δ{s20:+.2f}% / {s60:+.2f}%)"
-        )
-    else:
-        ok = True
-        detail = f"боковик EMA (Δ{s20:+.2f}% / {s60:+.2f}%) — сторона по pivot, узкий range отдельно"
+        if side_s != "long":
+            detail = f"EMA60 вверх (Δ{s60:+.2f}%) — шорт запрещён"
+        elif price + 1e-12 < ema60:
+            detail = f"лонг: цена {price:.8g} ниже EMA60 {ema60:.8g}"
+        else:
+            ok = True
+            detail = f"EMA60 вверх, цена ≥ EMA60 — лонг"
 
     return {
         "insufficient_data": False,
         "ok": ok,
         "regime": regime,
         "detail": detail,
-        "ema20": round(float(v20), 8),
-        "ema60": round(float(v60), 8),
-        "slope_20_pct": round(s20, 4),
+        "ema60": round(ema60, 8),
         "slope_60_pct": round(s60, 4),
-        "dist_20": round(d20, 8),
-        "dist_60": round(d60, 8),
         "price": round(price, 8),
         "side": side_s or None,
     }
@@ -122,6 +113,5 @@ def ma333_regime_allows(
 ) -> tuple[bool, str, dict]:
     d = ma333_regime_detail(state, now_ms, side, interval)
     if d.get("insufficient_data"):
-        d = {**d, "ok": True, "regime": "unknown", "detail": str(d.get("detail") or "мало баров — фильтр EMA пропущен")}
-        return True, str(d["detail"]), d
+        return False, str(d.get("detail") or "мало баров — вход запрещён"), d
     return bool(d.get("ok")), str(d.get("detail") or ""), d

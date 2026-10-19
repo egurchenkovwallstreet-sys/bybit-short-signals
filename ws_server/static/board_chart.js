@@ -1389,6 +1389,57 @@ window.boardChart = {
     return BC.emaRollingValues(closes, BC.EMA_PERIOD);
   },
 
+  /** Длительность бара в мс (как в движке 333: ts + barMs <= now). */
+  barDurationMs(interval) {
+    const BC = window.boardChart;
+    const min = BC.INTERVAL_MINUTES[interval] ?? 5;
+    return min * 60 * 1000;
+  },
+
+  /** Закрытые свечи — как _closed_bars_before в paper (333 / EMA60). */
+  closedBarsForEngine(bars, interval, nowMs) {
+    const BC = window.boardChart;
+    const barMs = BC.barDurationMs(interval);
+    const now = Number(nowMs) > 0 ? Number(nowMs) : Date.now();
+    return (bars || []).filter((b) => {
+      const startMs = Number(b._utcSec) * 1000;
+      return startMs > 0 && startMs + barMs <= now;
+    });
+  },
+
+  /** EMA60 только по закрытым барам — тот же алгоритм, что signal_engine.indicators.ema. */
+  ema333EngineLineData(bars, { interval = "5", nowMs } = {}) {
+    const BC = window.boardChart;
+    const closed = BC.closedBarsForEngine(bars, interval, nowMs);
+    const period = BC.EMA_PERIOD;
+    const closes = closed.map((b) => Number(b.close));
+    const ema = BC.emaRollingValues(closes, period);
+    const center = [];
+    const upper = [];
+    const lower = [];
+    const off = BC.EMA_333_OFFSET_PCT;
+    for (let i = 0; i < closed.length; i++) {
+      const v = ema[i];
+      if (v == null) continue;
+      const t = closed[i].time;
+      const d = v * off;
+      center.push({ time: t, value: v });
+      upper.push({ time: t, value: v + d });
+      lower.push({ time: t, value: v - d });
+    }
+    const last = bars?.[bars.length - 1];
+    const lastClosed = closed[closed.length - 1];
+    if (last && lastClosed && last !== lastClosed && center.length) {
+      const v = center[center.length - 1].value;
+      const d = v * off;
+      const t = last.time;
+      center.push({ time: t, value: v });
+      upper.push({ time: t, value: v + d });
+      lower.push({ time: t, value: v - d });
+    }
+    return { center, upper, lower };
+  },
+
   ema50LineData(bars, { raw } = {}) {
     const BC = window.boardChart;
     const ema1 = BC.ema60RawValues(bars);
@@ -1402,23 +1453,8 @@ window.boardChart = {
     return out;
   },
 
-  ema333BandLineData(bars) {
-    const BC = window.boardChart;
-    const off = BC.EMA_333_OFFSET_PCT;
-    const ema = BC.ema60RawValues(bars);
-    const center = [];
-    const upper = [];
-    const lower = [];
-    for (let i = 0; i < (bars?.length || 0); i++) {
-      const v = ema[i];
-      if (v == null) continue;
-      const d = v * off;
-      const t = bars[i].time;
-      center.push({ time: t, value: v });
-      upper.push({ time: t, value: v + d });
-      lower.push({ time: t, value: v - d });
-    }
-    return { center, upper, lower };
+  ema333BandLineData(bars, opts) {
+    return window.boardChart.ema333EngineLineData(bars, opts);
   },
 
   ensureEma50Series(runtime) {
@@ -1455,7 +1491,7 @@ window.boardChart = {
         priceLineVisible: false,
         lastValueVisible: false,
         crosshairMarkerVisible: false,
-        title: "EMA60−1.5%",
+        title: "EMA60−2%",
       });
     }
     runtime.ema50Series?.applyOptions({ title: "EMA60", lineWidth: 2 });
@@ -1478,7 +1514,11 @@ window.boardChart = {
     const BC = window.boardChart;
     if (!runtime?.chart) return;
     BC.ensureEma333BandSeries(runtime);
-    const { center, upper, lower } = BC.ema333BandLineData(bars);
+    const interval = runtime._chartInterval || "5";
+    const { center, upper, lower } = BC.ema333BandLineData(bars, {
+      interval,
+      nowMs: Date.now(),
+    });
     runtime.ema50Series?.setData(center);
     runtime.ema60UpperSeries?.setData(upper);
     runtime.ema60LowerSeries?.setData(lower);
