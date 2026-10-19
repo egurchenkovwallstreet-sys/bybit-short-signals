@@ -13,6 +13,13 @@ window.boardChart = {
   FETCH_DAYS: 30,
   FETCH_BARS: 300,
   SMA_PERIOD: 50,
+  /** Полосы вокруг SMA: ±1%, до +0.5% к pivot; сглаживание и «память» pivot — 20 свечей. */
+  ENVELOPE_PCT: 0.01,
+  ENVELOPE_EXTRA_PCT: 0.005,
+  ENVELOPE_SMOOTH: 20,
+  ENVELOPE_PIVOT_LEFT_MIN: 10,
+  ENVELOPE_PIVOT_LEFT_MAX: 30,
+  ENVELOPE_PIVOT_RIGHT: 2,
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -452,6 +459,8 @@ window.boardChart = {
       runtime.series.setData([]);
       runtime.volumeSeries?.setData([]);
       runtime.smaSeries?.setData([]);
+      runtime.smaUpperSeries?.setData([]);
+      runtime.smaLowerSeries?.setData([]);
     }
   },
 
@@ -1275,22 +1284,194 @@ window.boardChart = {
       series: null,
       volumeSeries: null,
       smaSeries: null,
+      smaUpperSeries: null,
+      smaLowerSeries: null,
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
     };
   },
 
-  smaLineData(bars, period) {
+  smaAtEachBar(bars, period) {
     const p = period ?? window.boardChart.SMA_PERIOD;
-    if (!bars?.length || p < 1) return [];
-    const out = [];
+    const sma = new Array(bars?.length || 0).fill(null);
+    if (!bars?.length || p < 1) return sma;
     let sum = 0;
     for (let i = 0; i < bars.length; i++) {
       sum += Number(bars[i].close);
       if (i >= p) sum -= Number(bars[i - p].close);
-      if (i >= p - 1) out.push({ time: bars[i].time, value: sum / p });
+      if (i >= p - 1) sma[i] = sum / p;
+    }
+    return sma;
+  },
+
+  smaLineData(bars, period) {
+    const sma = window.boardChart.smaAtEachBar(bars, period);
+    const out = [];
+    for (let i = 0; i < (bars?.length || 0); i++) {
+      if (sma[i] != null) out.push({ time: bars[i].time, value: sma[i] });
     }
     return out;
+  },
+
+  _pivotPriceEqual(a, b) {
+    return Math.abs(Number(a) - Number(b)) <= 1e-12 * Math.max(1, Math.abs(a), Math.abs(b));
+  },
+
+  _peakLeftStrength(highs, i, leftMin, leftMax, right) {
+    const high = highs[i];
+    if (high <= Math.max(highs[i + 1], highs[i + 2])) return 0;
+    const cap = Math.min(leftMax, i);
+    for (let k = cap; k >= leftMin; k--) {
+      let ok = true;
+      for (let j = i - k; j < i; j++) {
+        if (high <= highs[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return k;
+    }
+    if (
+      i >= 1 &&
+      window.boardChart._pivotPriceEqual(high, highs[i - 1]) &&
+      (i < 2 || !window.boardChart._pivotPriceEqual(high, highs[i - 2]))
+    ) {
+      for (let k = cap; k >= leftMin; k--) {
+        let ok = true;
+        for (let j = i - k; j < i; j++) {
+          if (j === i - 1) continue;
+          if (high <= highs[j]) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return k;
+      }
+    }
+    return 0;
+  },
+
+  _troughLeftStrength(lows, i, leftMin, leftMax, right) {
+    const low = lows[i];
+    if (low >= Math.min(lows[i + 1], lows[i + 2])) return 0;
+    const cap = Math.min(leftMax, i);
+    for (let k = cap; k >= leftMin; k--) {
+      let ok = true;
+      for (let j = i - k; j < i; j++) {
+        if (low >= lows[j]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) return k;
+    }
+    if (
+      i >= 1 &&
+      window.boardChart._pivotPriceEqual(low, lows[i - 1]) &&
+      (i < 2 || !window.boardChart._pivotPriceEqual(low, lows[i - 2]))
+    ) {
+      for (let k = cap; k >= leftMin; k--) {
+        let ok = true;
+        for (let j = i - k; j < i; j++) {
+          if (j === i - 1) continue;
+          if (low >= lows[j]) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return k;
+      }
+    }
+    return 0;
+  },
+
+  detectChartPivots(bars) {
+    const BC = window.boardChart;
+    const leftMin = BC.ENVELOPE_PIVOT_LEFT_MIN;
+    const leftMax = BC.ENVELOPE_PIVOT_LEFT_MAX;
+    const right = BC.ENVELOPE_PIVOT_RIGHT;
+    const peaks = [];
+    const troughs = [];
+    if (!bars?.length) return { peaks, troughs };
+    const highs = bars.map((b) => Number(b.high));
+    const lows = bars.map((b) => Number(b.low));
+    const n = bars.length;
+    for (let i = leftMin; i < n - right; i++) {
+      if (BC._peakLeftStrength(highs, i, leftMin, leftMax, right) >= leftMin) {
+        peaks.push({ index: i, confirmIndex: i + right, price: highs[i] });
+      }
+      if (BC._troughLeftStrength(lows, i, leftMin, leftMax, right) >= leftMin) {
+        troughs.push({ index: i, confirmIndex: i + right, price: lows[i] });
+      }
+    }
+    return { peaks, troughs };
+  },
+
+  _envelopeRawTargets(bars) {
+    const BC = window.boardChart;
+    const pct = BC.ENVELOPE_PCT;
+    const extra = BC.ENVELOPE_EXTRA_PCT;
+    const influence = BC.ENVELOPE_SMOOTH;
+    const sma = BC.smaAtEachBar(bars);
+    const { peaks, troughs } = BC.detectChartPivots(bars);
+    const rawUp = [];
+    const rawLo = [];
+    for (let i = 0; i < bars.length; i++) {
+      const s = sma[i];
+      if (s == null) {
+        rawUp.push(null);
+        rawLo.push(null);
+        continue;
+      }
+      let up = s * (1 + pct);
+      let lo = s * (1 - pct);
+      const capUp = s * (1 + pct + extra);
+      const capLo = s * (1 - pct - extra);
+      let peakHit = null;
+      for (const p of peaks) {
+        if (p.confirmIndex <= i && i - p.confirmIndex <= influence) peakHit = p;
+      }
+      if (peakHit) {
+        up = Math.min(Math.max(up, peakHit.price), capUp);
+      }
+      let troughHit = null;
+      for (const t of troughs) {
+        if (t.confirmIndex <= i && i - t.confirmIndex <= influence) troughHit = t;
+      }
+      if (troughHit) {
+        lo = Math.max(Math.min(lo, troughHit.price), capLo);
+      }
+      rawUp.push(up);
+      rawLo.push(lo);
+    }
+    return { rawUp, rawLo };
+  },
+
+  _smoothEnvelopeSeries(raw, bars, period) {
+    const out = [];
+    const p = period ?? window.boardChart.ENVELOPE_SMOOTH;
+    for (let i = 0; i < raw.length; i++) {
+      if (raw[i] == null) continue;
+      let sum = 0;
+      let cnt = 0;
+      for (let j = Math.max(0, i - p + 1); j <= i; j++) {
+        if (raw[j] == null) continue;
+        sum += raw[j];
+        cnt++;
+      }
+      if (cnt < Math.min(p, 3)) continue;
+      out.push({ time: bars[i].time, value: sum / cnt });
+    }
+    return out;
+  },
+
+  envelopeLineData(bars) {
+    const BC = window.boardChart;
+    const { rawUp, rawLo } = BC._envelopeRawTargets(bars);
+    return {
+      upper: BC._smoothEnvelopeSeries(rawUp, bars),
+      lower: BC._smoothEnvelopeSeries(rawLo, bars),
+    };
   },
 
   ensureSmaSeries(runtime) {
@@ -1305,11 +1486,42 @@ window.boardChart = {
     });
   },
 
+  ensureSmaEnvelopeSeries(runtime) {
+    if (!runtime?.chart) return;
+    const dash = window.LightweightCharts?.LineStyle?.Dashed ?? 2;
+    if (!runtime.smaUpperSeries) {
+      runtime.smaUpperSeries = runtime.chart.addLineSeries({
+        color: "rgba(167, 139, 250, 0.72)",
+        lineWidth: 1,
+        lineStyle: dash,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        title: "SMA+1%",
+      });
+    }
+    if (!runtime.smaLowerSeries) {
+      runtime.smaLowerSeries = runtime.chart.addLineSeries({
+        color: "rgba(167, 139, 250, 0.72)",
+        lineWidth: 1,
+        lineStyle: dash,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        title: "SMA−1%",
+      });
+    }
+  },
+
   updateSma50(runtime, bars) {
     const BC = window.boardChart;
     if (!runtime?.chart) return;
     BC.ensureSmaSeries(runtime);
+    BC.ensureSmaEnvelopeSeries(runtime);
     runtime.smaSeries?.setData(BC.smaLineData(bars));
+    const env = BC.envelopeLineData(bars);
+    runtime.smaUpperSeries?.setData(env.upper);
+    runtime.smaLowerSeries?.setData(env.lower);
   },
 
   createPrefetchStore() {
@@ -1490,6 +1702,8 @@ window.boardChart = {
       runtime.series = null;
       runtime.volumeSeries = null;
       runtime.smaSeries = null;
+      runtime.smaUpperSeries = null;
+      runtime.smaLowerSeries = null;
     }
     runtime._chartContainer = container;
     if (runtime.chart) {
@@ -1520,6 +1734,7 @@ window.boardChart = {
     });
     runtime.chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.78, bottom: 0 } });
     BC.ensureSmaSeries(runtime);
+    BC.ensureSmaEnvelopeSeries(runtime);
     window.boardChart.ensureBookOverlay(runtime, container);
     const resize = () => {
       if (!runtime.chart || container.clientWidth <= 0) return;

@@ -720,7 +720,7 @@ function updateChartLegend(detail) {
   const o4 = window.boardChart.formatOiChange(h4);
   el.innerHTML = `
     <span class="lg-price">Свечи (цена)</span>
-    <span class="lg-sma" style="color:#c084fc">— SMA50</span>
+    <span class="lg-sma" style="color:#c084fc">— SMA50 · ±1%</span>
     <span class="lg-vol">■ Объём</span>
     <span class="lg-meta">OI 1ч <span class="${o1.cls}">${o1.text}</span> · OI 4ч <span class="${o4.cls}">${o4.text}</span> · Фин. ${fr} · Тейкеры ${tk}</span>`;
 }
