@@ -35,6 +35,9 @@ def _trend_closes(start: float, step: float, n: int) -> list[float]:
 def test_ma333_down_allows_short_blocks_long():
     closes = _trend_closes(100.0, -0.15, 150)
     state, now_ms = _state_with_closes(closes)
+    probe = ma333_regime_detail(state, now_ms, "short")
+    ema60 = float(probe["ema60"])
+    state.last_price = ema60 * 0.995
     d_short = ma333_regime_detail(state, now_ms, "short")
     d_long = ma333_regime_detail(state, now_ms, "long")
     assert d_short["regime"] == "down"
@@ -45,6 +48,9 @@ def test_ma333_down_allows_short_blocks_long():
 def test_ma333_up_allows_long_blocks_short():
     closes = _trend_closes(100.0, 0.15, 150)
     state, now_ms = _state_with_closes(closes)
+    probe = ma333_regime_detail(state, now_ms, "long")
+    ema60 = float(probe["ema60"])
+    state.last_price = ema60 * 1.002
     d_long = ma333_regime_detail(state, now_ms, "long")
     d_short = ma333_regime_detail(state, now_ms, "short")
     assert d_long["regime"] == "up"
