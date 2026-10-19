@@ -22,6 +22,8 @@ window.boardChart = {
   AVG_SMA_LOWER_COLOR: "#3dd68c",
   AVG_SMA_FILL_UPPER: "rgba(255, 93, 115, 0.05)",
   AVG_SMA_FILL_LOWER: "rgba(61, 214, 140, 0.05)",
+  EMA_PERIOD: 50,
+  EMA_LINE_COLOR: "#58a6ff",
   INTERVAL_MINUTES: { 1: 1, 5: 5, 15: 15, 30: 30, 60: 60, 240: 240, D: 1440 },
   INTERVAL_SEC: { 1: 60, 5: 300, 15: 900, 30: 1800, 60: 3600, 240: 14400, D: 86400 },
   /** Подписи оси времени: Москва (UTC+3, без DST). Данные биржи — UTC. */
@@ -472,6 +474,7 @@ window.boardChart = {
       runtime.volumeSeries?.setData([]);
       runtime._avgCorridorBands = null;
       if (runtime.avgCorridorOverlayEl) runtime.avgCorridorOverlayEl.innerHTML = "";
+      runtime.ema50Series?.setData([]);
     }
   },
 
@@ -1296,6 +1299,7 @@ window.boardChart = {
       volumeSeries: null,
       avgCorridorOverlayEl: null,
       _avgCorridorBands: null,
+      ema50Series: null,
       priceRange: { min: 0, max: 0 },
       chartGen: 0,
     };
@@ -1332,6 +1336,60 @@ window.boardChart = {
       if (i >= p - 1) out[i] = sum / p;
     }
     return out;
+  },
+
+  emaRollingValues(values, period) {
+    const p = period;
+    const out = new Array(values?.length || 0).fill(null);
+    if (p < 1 || !values?.length) return out;
+    const k = 2 / (p + 1);
+    let ema = null;
+    for (let i = 0; i < values.length; i++) {
+      const v = Number(values[i]);
+      if (Number.isNaN(v)) continue;
+      if (ema == null) {
+        if (i < p - 1) continue;
+        let sum = 0;
+        for (let j = i - p + 1; j <= i; j++) sum += Number(values[j]);
+        ema = sum / p;
+        out[i] = ema;
+        continue;
+      }
+      ema = v * k + ema * (1 - k);
+      out[i] = ema;
+    }
+    return out;
+  },
+
+  ema50LineData(bars) {
+    const BC = window.boardChart;
+    const closes = (bars || []).map((b) => Number(b.close));
+    const ema = BC.emaRollingValues(closes, BC.EMA_PERIOD);
+    const out = [];
+    for (let i = 0; i < (bars?.length || 0); i++) {
+      if (ema[i] != null) out.push({ time: bars[i].time, value: ema[i] });
+    }
+    return out;
+  },
+
+  ensureEma50Series(runtime) {
+    const BC = window.boardChart;
+    if (!runtime?.chart || runtime.ema50Series) return;
+    runtime.ema50Series = runtime.chart.addLineSeries({
+      color: BC.EMA_LINE_COLOR,
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      title: "EMA50",
+    });
+  },
+
+  updateEma50(runtime, bars) {
+    const BC = window.boardChart;
+    if (!runtime?.chart) return;
+    BC.ensureEma50Series(runtime);
+    runtime.ema50Series?.setData(BC.ema50LineData(bars));
   },
 
   computeAvgCorridorBands(bars) {
@@ -1462,6 +1520,7 @@ window.boardChart = {
     if (runtime._chartContainer) BC.ensureAvgCorridorOverlay(runtime, runtime._chartContainer);
     runtime._avgCorridorBands = BC.computeAvgCorridorBands(bars);
     BC.syncAvgCorridorOverlay(runtime);
+    BC.updateEma50(runtime, bars);
   },
 
   createPrefetchStore() {
@@ -1643,6 +1702,7 @@ window.boardChart = {
       runtime.volumeSeries = null;
       runtime.avgCorridorOverlayEl = null;
       runtime._avgCorridorBands = null;
+      runtime.ema50Series = null;
       runtime._avgCorridorHooks = false;
       runtime._corridorSyncRaf = 0;
       if (runtime._corridorResizeObs) {
