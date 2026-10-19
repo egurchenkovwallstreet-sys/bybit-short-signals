@@ -1529,7 +1529,7 @@ function renderVacuumLhInfo() {
       <button type="button" class="psc-close-chart">Закрыть</button>
     </div>
     ${vacuumInfoTradeBlock(sym)}
-    <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): pivot на экстремумах (L10–30, справа 2, шаг ≥10).</p>
+    <p>График <strong>${chartTf}</strong> (ось <strong>MSK</strong>): pivot на экстремумах (L10–30, справа 2, шаг ≥10; плато из 2 свечей — на 2-й).</p>
     <p>Цена: <strong data-vac-live="price">${vacuumPaperLastPrice(sym) || row.last_price || "—"}</strong></p>
     <p class="vacuum-lh-info-sub">Вершины LH</p>
     <ul class="vacuum-lh-peaks">${peakList || "<li>—</li>"}</ul>

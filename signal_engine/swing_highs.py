@@ -107,13 +107,82 @@ def pivot_lows_asymmetric(bars: list[Bar], left: int = 7, right: int = 2) -> lis
     ]
 
 
+def _pivot_price_equal(a: float, b: float) -> bool:
+    return abs(float(a) - float(b)) <= 1e-12
+
+
+def _peak_left_strength(
+    rows: list[dict],
+    i: int,
+    left_min: int,
+    left_max: int,
+    *,
+    skip_bar: int | None = None,
+) -> int:
+    high = float(rows[i]["h"])
+    cap = min(left_max, i)
+    for k in range(cap, left_min - 1, -1):
+        left_highs = [
+            float(rows[j]["h"])
+            for j in range(i - k, i)
+            if skip_bar is None or j != skip_bar
+        ]
+        if left_highs and high > max(left_highs):
+            return k
+    return 0
+
+
+def _is_plateau_peak_second(rows: list[dict], i: int) -> bool:
+    """Вторая свеча пары подряд с одинаковым high (не третья+ в плато)."""
+    if i < 1:
+        return False
+    high = float(rows[i]["h"])
+    if not _pivot_price_equal(high, rows[i - 1]["h"]):
+        return False
+    return i < 2 or not _pivot_price_equal(high, rows[i - 2]["h"])
+
+
+def _trough_left_strength(
+    rows: list[dict],
+    i: int,
+    left_min: int,
+    left_max: int,
+    *,
+    skip_bar: int | None = None,
+) -> int:
+    low = float(rows[i]["l"])
+    cap = min(left_max, i)
+    for k in range(cap, left_min - 1, -1):
+        left_lows = [
+            float(rows[j]["l"])
+            for j in range(i - k, i)
+            if skip_bar is None or j != skip_bar
+        ]
+        if left_lows and low < min(left_lows):
+            return k
+    return 0
+
+
+def _is_plateau_trough_second(rows: list[dict], i: int) -> bool:
+    if i < 1:
+        return False
+    low = float(rows[i]["l"])
+    if not _pivot_price_equal(low, rows[i - 1]["l"]):
+        return False
+    return i < 2 or not _pivot_price_equal(low, rows[i - 2]["l"])
+
+
 def pivot_highs_floating_left_indexed(
     bars: list[Bar],
     left_min: int = 7,
     left_max: int = 20,
     right: int = 2,
 ) -> list[dict]:
-    """High выше high `right` справа; слева — макс. K in [left_min..left_max], где high выше всех K свечей."""
+    """High выше high `right` справа; слева — макс. K in [left_min..left_max], где high выше всех K свечей.
+
+    Плато: две подряд свечи с одинаковым high — pivot на второй, если следующие `right` ниже;
+    сосед слева с тем же high в окне L не учитывается.
+    """
     rows = _bars_as_dicts(bars)
     if left_min < 1 or left_max < left_min or right < 1 or len(rows) < left_min + right + 1:
         return []
@@ -123,13 +192,9 @@ def pivot_highs_floating_left_indexed(
         right_highs = [float(rows[j]["h"]) for j in range(i + 1, i + right + 1)]
         if high <= max(right_highs):
             continue
-        cap = min(left_max, i)
-        left_strength = 0
-        for k in range(cap, left_min - 1, -1):
-            left_highs = [float(rows[j]["h"]) for j in range(i - k, i)]
-            if high > max(left_highs):
-                left_strength = k
-                break
+        left_strength = _peak_left_strength(rows, i, left_min, left_max)
+        if left_strength < left_min and _is_plateau_peak_second(rows, i):
+            left_strength = _peak_left_strength(rows, i, left_min, left_max, skip_bar=i - 1)
         if left_strength < left_min:
             continue
         out.append(
@@ -236,13 +301,9 @@ def pivot_lows_floating_left_indexed(
         right_lows = [float(rows[j]["l"]) for j in range(i + 1, i + right + 1)]
         if low >= min(right_lows):
             continue
-        cap = min(left_max, i)
-        left_strength = 0
-        for k in range(cap, left_min - 1, -1):
-            left_lows = [float(rows[j]["l"]) for j in range(i - k, i)]
-            if low < min(left_lows):
-                left_strength = k
-                break
+        left_strength = _trough_left_strength(rows, i, left_min, left_max)
+        if left_strength < left_min and _is_plateau_trough_second(rows, i):
+            left_strength = _trough_left_strength(rows, i, left_min, left_max, skip_bar=i - 1)
         if left_strength < left_min:
             continue
         out.append(

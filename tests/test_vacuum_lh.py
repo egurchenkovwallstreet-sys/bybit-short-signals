@@ -110,6 +110,26 @@ class VacuumLhPeaksTest(unittest.TestCase):
         out = filter_pivots_min_bar_gap(pivots, 10, kind="peak")
         self.assertEqual(len(out), 3)
 
+    def test_plateau_peak_second_bar_with_two_lower_right(self) -> None:
+        """Две свечи с одним high — pivot на второй, если справа 2 ниже."""
+        t0 = NOW
+        bars: list[Bar] = []
+        for i in range(12):
+            h = 0.5 + i * 0.01
+            bars.append(Bar(t0 + i * H, h - 0.02, h, h - 0.05, h - 0.03, 1.0))
+        i_first = len(bars)
+        bars.append(Bar(t0 + i_first * H, 0.98, 1.0, 0.95, 0.97, 1.0))
+        i_second = len(bars)
+        bars.append(Bar(t0 + i_second * H, 0.99, 1.0, 0.96, 0.98, 1.0))
+        bars.append(Bar(t0 + (i_second + 1) * H, 0.92, 0.94, 0.90, 0.91, 1.0))
+        bars.append(Bar(t0 + (i_second + 2) * H, 0.88, 0.90, 0.86, 0.87, 1.0))
+        pivots = pivot_highs_floating_left_indexed(bars, left_min=10, left_max=30, right=2)
+        idxs = {int(p["bar_index"]) for p in pivots}
+        self.assertIn(i_second, idxs)
+        self.assertNotIn(i_first, idxs)
+        hit = next(p for p in pivots if int(p["bar_index"]) == i_second)
+        self.assertAlmostEqual(float(hit["price"]), 1.0)
+
     def test_floating_left_strength_up_to_twenty(self) -> None:
         lows = [10.0] * 7 + [20.0, 9.0, 8.0]
         bars = [
