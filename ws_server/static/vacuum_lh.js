@@ -42,25 +42,34 @@ const VACUUM_SERIES_BARS = 300;
 const VACUUM_LOAD_CONCURRENCY = 2;
 /** Последние закрытые на стол/график — не полная история. */
 const VACUUM_CLOSED_LIMIT = 20;
+const VACUUM_ANALYTICS_LIMIT = 500;
 
 const VACUUM_DESK = [
   ["scan", "Сканер"],
   ["pyl", "БАБЛОСОС"],
   ["pyl1", "БАБЛОСОС 1"],
   ["pylbtc", "БАБЛОСОС+BTC"],
+  ["333", "333"],
   ["vps5", "Пылесос 5"],
   ["vps15", "Пылесос 15"],
 ];
 
-const VACUUM_TRADE_VARIANTS = ["pyl", "pyl1", "pylbtc", "vps5", "vps15"];
+const VACUUM_TRADE_VARIANTS = ["pyl", "pyl1", "pylbtc", "333", "vps5", "vps15"];
 
 function vacuumIsDeskMode(mode = vacuumLhState.mode) {
-  return mode === "pyl" || mode === "pyl1" || mode === "pylbtc" || mode === "vps5" || mode === "vps15";
+  return (
+    mode === "pyl" ||
+    mode === "pyl1" ||
+    mode === "pylbtc" ||
+    mode === "333" ||
+    mode === "vps5" ||
+    mode === "vps15"
+  );
 }
 
 function vacuumDeskChartInterval(mode = vacuumLhState.mode) {
   if (mode === "vps15") return "15";
-  if (mode === "pyl" || mode === "pyl1" || mode === "pylbtc" || mode === "vps5") return "5";
+  if (mode === "pyl" || mode === "pyl1" || mode === "pylbtc" || mode === "333" || mode === "vps5") return "5";
   return vacuumLhState.lhInterval;
 }
 
@@ -68,7 +77,7 @@ const vacuumLhState = {
   mode: "scan",
   paper: null,
   closed: [],
-  closedMap: { pyl: [], pyl1: [], pylbtc: [], vps5: [], vps15: [] },
+  closedMap: { pyl: [], pyl1: [], pylbtc: [], 333: [], vps5: [], vps15: [] },
   symbolClosed: {},
   series: new Map(),
   scanPivots: {},
@@ -2210,7 +2219,46 @@ function vacuumDeskVariant() {
   if (vacuumLhState.mode === "vps15") return "vps15";
   if (vacuumLhState.mode === "pyl1") return "pyl1";
   if (vacuumLhState.mode === "pylbtc") return "pylbtc";
+  if (vacuumLhState.mode === "333") return "333";
   return "pyl";
+}
+
+function vacuumMoscowDayStartMs(nowMs = Date.now()) {
+  const off = 3 * 3600 * 1000;
+  const d = new Date(nowMs + off);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - off;
+}
+
+function vacuumTradesClosedToday(rows) {
+  const start = vacuumMoscowDayStartMs();
+  return (rows || []).filter((t) => (Number(t.closed_at) || 0) >= start);
+}
+
+function vacuumAnalyticsSummaryCell(stats) {
+  if (!stats?.n) return "—";
+  const wr = stats.winRate != null ? `${stats.winRate.toFixed(0)}%` : "—";
+  return `${stats.n} · ${wr} · ${vacuumMoney(stats.net)}`;
+}
+
+function vacuumStrategyOverviewTable() {
+  const variants = VACUUM_TRADE_VARIANTS.map((variant) => {
+    const label = VACUUM_DESK.find(([id]) => id === variant)?.[1] || variant;
+    return { variant, label };
+  });
+  const body = variants
+    .map(({ variant, label }) => {
+      const all = vacuumLhState.closedMap[variant] || [];
+      const today = vacuumTradesClosedToday(all);
+      const sToday = vacuumClosedStats(today);
+      const sAll = vacuumClosedStats(all);
+      const current = variant === vacuumDeskVariant();
+      const cls = current ? ' class="current"' : "";
+      return `<tr${cls} data-vac-mode="${variant}"><td><b>${label}</b></td><td>${vacuumAnalyticsSummaryCell(
+        sToday,
+      )}</td><td>${vacuumAnalyticsSummaryCell(sAll)}</td></tr>`;
+    })
+    .join("");
+  return `<thead><tr><th>Стратегия</th><th>Сегодня (MSK)</th><th>Всё время</th></tr></thead><tbody>${body}</tbody>`;
 }
 
 function vacuumRateText(stats) {
@@ -2244,6 +2292,7 @@ function vacuumAnalyticsTable() {
     ["pyl", "БАБЛОСОС"],
     ["pyl1", "БАБЛОСОС 1"],
     ["pylbtc", "БАБЛОСОС+BTC"],
+    ["333", "333"],
     ["vps5", "Пылесос 5"],
     ["vps15", "Пылесос 15"],
   ].map(([variant, label]) => {
@@ -2334,6 +2383,7 @@ function vacuumDeskWatch() {
   if (vacuumLhState.mode === "vps15") return data.vps15_watch || [];
   if (vacuumLhState.mode === "pyl1") return data.pyl1_watch || [];
   if (vacuumLhState.mode === "pylbtc") return data.pylbtc_watch || [];
+  if (vacuumLhState.mode === "333") return data["333_watch"] || data._333_watch || [];
   return data.pyl_watch || [];
 }
 
@@ -2379,7 +2429,7 @@ async function fetchVacuumDeskClosed(force) {
     const pairs = await Promise.all(
       VACUUM_TRADE_VARIANTS.map(async (variant) => {
         const res = await fetch(
-          `/api/paper/trades?status=closed&limit=${VACUUM_CLOSED_LIMIT}&variant=${encodeURIComponent(variant)}`,
+          `/api/paper/trades?status=closed&limit=${VACUUM_ANALYTICS_LIMIT}&variant=${encodeURIComponent(variant)}`,
         );
         if (!res.ok) return [variant, []];
         const body = await res.json();
@@ -2422,7 +2472,9 @@ function renderVacuumDesk() {
             ? "БАБЛОСОС 1"
             : vacuumLhState.mode === "pylbtc"
               ? "БАБЛОСОС+BTC"
-              : "БАБЛОСОС";
+              : vacuumLhState.mode === "333"
+                ? "333"
+                : "БАБЛОСОС";
     const rule =
       vacuumLhState.mode === "vps5"
         ? "LH/HL L15–L30, вход на 3-й 5m (max L слева). Закрытие: противоп. pivot после 2-й 5m справа. Стоп −15%, с +3% +0.5%, с +7% трейл − 20."
@@ -2432,12 +2484,16 @@ function renderVacuumDesk() {
             ? "Как БАБЛОСОС + размах ≥2% за час. Запрет при расширении (high↑ и low↓). Лонг: min выше prev; шорт: max ниже prev. Стоп ±5% от пивота."
             : vacuumLhState.mode === "pylbtc"
               ? "Как БАБЛОСОС + BTC за 5 мин в сторону сделки (лонг — рост, шорт — падение). Стоп ±5% ROE от pivot."
-              : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
+              : vacuumLhState.mode === "333"
+                ? "Как БАБЛОСОС, но вход только если не узкий боковик (range 5m). Выход и стоп как БАБЛОСОС."
+                : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
     summary.innerHTML = `
       <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
       <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>
       <div class="paper-card"><span class="label">Правило</span><div class="value">${deskLabel}</div><div class="sub">${rule}</div></div>`;
   }
+  const overviewTable = document.getElementById("vacuum-desk-overview");
+  if (overviewTable) overviewTable.innerHTML = vacuumStrategyOverviewTable();
   const statsTable = document.getElementById("vacuum-desk-stats");
   if (statsTable) statsTable.innerHTML = vacuumAnalyticsTable();
   const opens = ((vacuumLhState.paper || {}).open_trades || []).filter((t) => t.variant === vacuumDeskVariant());

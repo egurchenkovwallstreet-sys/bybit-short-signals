@@ -278,9 +278,9 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
-PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "pyl1", "pylbtc", "vps15", "vps5")
+PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "pyl1", "pylbtc", "333", "vps15", "vps5")
 # Стол во вкладке «Пылесос»: бумага крутится здесь, в тесте стратегии скрыты.
-PAPER_DESK_VARIANTS = ("pyl", "pyl1", "pylbtc", "vps5")
+PAPER_DESK_VARIANTS = ("pyl", "pyl1", "pylbtc", "333", "vps5", "vps15")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -332,6 +332,13 @@ PAPER_PYL_INTERVAL = "5"
 PAPER_PYL_STOP_ROE = _env_float("PAPER_PYL_STOP_ROE", 5.0)
 # БАБЛОСОС 1: только монеты с размахом цены за час ≥ этого порога (%).
 PAPER_PYL1_HOUR_RANGE_PCT = _env_float("PAPER_PYL1_HOUR_RANGE_PCT", 2.0)
+# 333: как БАБЛОСОС + фильтр узкого боковика на вход.
+PAPER_333_VARIANT = "333"
+PAPER_CHOP_WINDOW_BARS = _env_int("PAPER_CHOP_WINDOW_BARS", 20)
+PAPER_CHOP_MIN_BARS = _env_int("PAPER_CHOP_MIN_BARS", 10)
+PAPER_CHOP_TIGHT_RANGE_PCT = _env_float("PAPER_CHOP_TIGHT_RANGE_PCT", 1.5)
+PAPER_CHOP_MIN_WIDE_RANGE_PCT = _env_float("PAPER_CHOP_MIN_WIDE_RANGE_PCT", 3.5)
+PAPER_CHOP_TIGHT_BAR_RATIO = _env_float("PAPER_CHOP_TIGHT_BAR_RATIO", 4.0)
 PAPER_PIVOT_CONFIRM_SLACK_MS = _env_int("PAPER_PIVOT_CONFIRM_SLACK_MS", 10_000)
 # Пылесос 15: окно закрытия по противоп. pivot (вход по-прежнему 10 с).
 PAPER_VPS15_EXIT_CONFIRM_SLACK_MS = _env_int("PAPER_VPS15_EXIT_CONFIRM_SLACK_MS", 120_000)
@@ -428,7 +435,7 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
-    if variant in (PAPER_PYL_VARIANT, PAPER_PYL1_VARIANT, PAPER_PYLBTC_VARIANT):
+    if variant in (PAPER_PYL_VARIANT, PAPER_PYL1_VARIANT, PAPER_PYLBTC_VARIANT, PAPER_333_VARIANT):
         return "bab"
     if variant == PAPER_VAC_VARIANT:
         return "pyl"
