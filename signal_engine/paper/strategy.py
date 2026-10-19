@@ -63,6 +63,7 @@ from signal_engine.paper.pyl_detect import (
     PYL333_CHECK_LABELS,
     PYL333_MANDATORY_5,
     PYL33315_CHECK_LABELS,
+    PYL33315_MANDATORY,
     PYL_CHECK_LABELS,
     PYL_MANDATORY,
     evaluate_htf_pivot_entry,

@@ -7,6 +7,7 @@ from typing import Any
 
 import config
 from signal_engine.paper.analytics import compute_analytics, list_candidates, list_trades
+from signal_engine.paper.detect import VARIANT_LABELS
 
 
 class PaperCache:
@@ -34,17 +35,52 @@ def _connect() -> sqlite3.Connection | None:
     return conn
 
 
+def _summary_accounts_from_analytics(analytics: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    accounts: dict[str, dict[str, Any]] = {}
+    by_variant = (analytics.get("variants") or {}) if analytics else {}
+    for variant in config.PAPER_VARIANTS:
+        trades = (by_variant.get(variant) or {}).get("trades") or {}
+        balance = trades.get("balance")
+        if balance is None:
+            balance = config.PAPER_START_BALANCE_USD
+        balance = float(balance)
+        open_n = int(trades.get("open") or 0)
+        accounts[variant] = {
+            "label": VARIANT_LABELS.get(variant, variant),
+            "balance": round(balance, 2),
+            "equity": round(balance, 2),
+            "unrealized": 0.0,
+            "used_margin": 0.0,
+            "free_margin": round(balance, 2),
+            "open_trades": open_n,
+        }
+    return accounts
+
+
 def snapshot_from_db() -> dict[str, Any]:
     conn = _connect()
     if conn is None:
         return {"summary": None, "open_trades": [], "candidates": [], "analytics": {}}
     try:
         open_rows = list_trades(conn, "open", 500)
+        analytics = compute_analytics(conn)
+        accounts = _summary_accounts_from_analytics(analytics)
         return {
-            "summary": None,
+            "summary": {
+                "start_balance": config.PAPER_START_BALANCE_USD,
+                "accounts": accounts,
+                "candidates": 0,
+                "shadows_open": 0,
+                "btc_4h_pct": None,
+                "btc_strict": False,
+                "margin_pct": config.PAPER_MARGIN_PCT,
+                "leverage": config.PAPER_LEVERAGE,
+                "fee_rate": config.PAPER_FEE_RATE_TAKER,
+            },
             "open_trades": open_rows,
             "candidates": [],
-            "analytics": compute_analytics(conn),
+            "analytics": analytics,
+            "desk_variants": list(config.PAPER_DESK_VARIANTS),
         }
     finally:
         conn.close()

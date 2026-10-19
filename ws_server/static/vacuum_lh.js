@@ -436,18 +436,29 @@ function setVacuumMode(mode) {
   }
 }
 
-async function ensureVacuumPaper() {
-  if (vacuumLhState.paper) return;
+function vacuumPaperAccountsReady(data) {
+  const acc = data?.summary?.accounts;
+  return !!acc && Object.keys(acc).length > 0;
+}
+
+async function ensureVacuumPaper(force = false) {
+  if (!force && vacuumLhState.paper && vacuumPaperAccountsReady(vacuumLhState.paper)) return;
   await fetchVacuumPaperSnapshot();
 }
 
 async function fetchVacuumPaperSnapshot() {
   try {
     const res = await fetch("/api/paper/snapshot");
-    if (res.ok) {
-      vacuumLhState.paper = await res.json();
-      onVacuumPaper(vacuumLhState.paper);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (vacuumPaperAccountsReady(data)) {
+      vacuumLhState.paper = data;
+    } else if (vacuumLhState.paper) {
+      Object.assign(vacuumLhState.paper, data);
+    } else {
+      vacuumLhState.paper = data;
     }
+    onVacuumPaper(vacuumLhState.paper);
   } catch (_err) {
     /* ignore */
   }
@@ -2481,7 +2492,13 @@ function vacuumAnalyticsTable() {
 
 function vacuumDeskAccount() {
   const data = vacuumLhState.paper || window.paperTest?.data || {};
+  if (!vacuumPaperAccountsReady(data)) return {};
   return (((data.summary || {}).accounts || {})[vacuumDeskVariant()]) || {};
+}
+
+function vacuumDeskMoney(value, fallback = "—") {
+  if (value == null || Number.isNaN(Number(value))) return fallback;
+  return vacuumMoney(value);
 }
 
 function vacuumDeskWatch() {
@@ -2494,9 +2511,19 @@ function vacuumDeskWatch() {
 
 function onVacuumPaper(data) {
   if (!data) return;
-  vacuumLhState.paper = data;
+  if (vacuumPaperAccountsReady(data)) {
+    vacuumLhState.paper = data;
+  } else if (vacuumLhState.paper && vacuumPaperAccountsReady(vacuumLhState.paper)) {
+    const keep = vacuumLhState.paper.summary;
+    vacuumLhState.paper = { ...vacuumLhState.paper, ...data, summary: keep };
+  } else {
+    vacuumLhState.paper = data;
+  }
   vacuumLhState._analyticsKey = "";
   if (!vacuumUiActive()) return;
+  if (vacuumIsDeskMode() && !vacuumPaperAccountsReady(vacuumLhState.paper)) {
+    void ensureVacuumPaper(true);
+  }
   const opens = (data.open_trades || []).filter((t) => VACUUM_TRADE_VARIANTS.includes(t.variant));
   if (vacuumLhState._lastOpenCount != null && opens.length < vacuumLhState._lastOpenCount) {
     void fetchVacuumDeskClosed(true);
@@ -2584,9 +2611,10 @@ function renderVacuumDesk() {
           : vacuumLhState.mode === "333"
             ? "Как БАБЛОСОС + pivot, затем EMA60 (5m): боковик не торгуем; лонг/шорт по EMA60. Минус по стопу — 45 мин без входа на эту монету (333). Стоп: до +5% ±5% pivot; +5%→+0.5% net; +10%→+5%; +14%→+10%; трейл пик−15 п.п."
             : "LH/HL L15–L30, вход на 3-й 5m (max L слева). Выход: лонг — новый LH после входа (2-я 5m справа закрыта); шорт — новый HL. Не каждый маркер на графике. Стоп ±5% ROE от pivot.";
+    const balReady = vacuumPaperAccountsReady(vacuumLhState.paper);
     summary.innerHTML = `
-      <div class="paper-card"><span class="label">Баланс</span><div class="value">${vacuumMoney(acc.balance ?? 1000)}</div><div class="sub">свободно ${vacuumMoney(acc.free_margin ?? 0)}</div></div>
-      <div class="paper-card"><span class="label">Капитал</span><div class="value">${vacuumMoney(acc.equity ?? acc.balance ?? 1000)}</div><div class="sub">в сделках ${acc.open_trades || 0}</div></div>
+      <div class="paper-card"><span class="label">Баланс</span><div class="value">${balReady ? vacuumDeskMoney(acc.balance) : "…"}</div><div class="sub">свободно ${balReady ? vacuumDeskMoney(acc.free_margin, vacuumMoney(0)) : "…"}</div></div>
+      <div class="paper-card"><span class="label">Капитал</span><div class="value">${balReady ? vacuumDeskMoney(acc.equity ?? acc.balance) : "…"}</div><div class="sub">в сделках ${balReady ? acc.open_trades || 0 : "…"}</div></div>
       <div class="paper-card"><span class="label">Правило</span><div class="value">${deskLabel}</div><div class="sub">${rule}</div></div>`;
   }
   const overviewTable = document.getElementById("vacuum-desk-overview");
