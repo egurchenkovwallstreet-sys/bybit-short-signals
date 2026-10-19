@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT))
 import config
 from signal_engine.paper.analytics import list_trades
 
-DESK = ("pyl", "pyl1", "333", "vps5", "vps15")
+DESK = ("pyl", "333", "vps15")
 # Как во вкладке «Пылесос LH» (vacuum_lh.js)
 DESK_LABEL = {
     "pyl": "БАБЛОСОС",

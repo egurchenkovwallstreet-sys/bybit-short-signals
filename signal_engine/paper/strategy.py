@@ -46,7 +46,6 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.graf_detect import GRAF_CHECK_LABELS, GRAF_MANDATORY, evaluate_grafik
 from signal_engine.paper.dps_detect import DPS_CHECK_LABELS, DPS_MANDATORY, evaluate_dps
 from signal_engine.paper.lh_scan_pivot import snapshot_pivot_levels
-from signal_engine.vacuum_lh import hour_range_pct
 from signal_engine.paper.m5_htf import (
     opposite_anchor_pivot_exit,
     opposite_appeared,
@@ -60,8 +59,6 @@ from signal_engine.paper.pivot_clock import (
     vps15_entry_confirmed,
 )
 from signal_engine.paper.pyl_detect import (
-    PYL1_CHECK_LABELS,
-    PYL1_MANDATORY_5,
     PYL333_CHECK_LABELS,
     PYL333_MANDATORY_5,
     PYL_CHECK_LABELS,
@@ -69,7 +66,6 @@ from signal_engine.paper.pyl_detect import (
     evaluate_htf_pivot_entry,
     evaluate_333,
     evaluate_pyl,
-    evaluate_pyl1,
 )
 from signal_engine.paper.position import bab_pivot_stop_price
 from signal_engine.paper.trade_side import liq_price_for_side, resolve_trade_side
@@ -267,8 +263,6 @@ class PaperStrategy:
         self._impulse_used_bars: dict[tuple[str, str], int] = {}
         self._pyl_prev_snap: dict[str, dict] = {}
         self._pyl_watch: list[dict] = []
-        self._pyl1_prev_snap: dict[str, dict] = {}
-        self._pyl1_watch: list[dict] = []
         self._333_prev_snap: dict[str, dict] = {}
         self._333_watch: list[dict] = []
         self._vac_used_bars: dict[tuple[str, str], int] = {}
@@ -276,7 +270,6 @@ class PaperStrategy:
         self._vps_prev_snap: dict[tuple[str, str], dict] = {}
         self._vps_used_signals: dict[tuple[str, str], str] = {}
         self._vps15_watch: list[dict] = []
-        self._vps5_watch: list[dict] = []
         self._confirm_arm: set[str] = set()
         self._confirm_arm_at = 0
         self._confirm_arm_15: set[str] = set()
@@ -578,9 +571,7 @@ class PaperStrategy:
     def bab_open_symbols(self) -> set[str]:
         desk = {
             config.PAPER_PYL_VARIANT,
-            config.PAPER_PYL1_VARIANT,
             config.PAPER_333_VARIANT,
-            config.PAPER_VPS5_VARIANT,
             config.PAPER_VPS15_VARIANT,
         }
         return {t.symbol for t in self.trades.values() if t.variant in desk and t.variant in VARIANTS}
@@ -619,20 +610,13 @@ class PaperStrategy:
         if config.PAPER_SC10_VARIANT in VARIANTS:
             self._evaluate_sc10(states, now_ms)
         self._evaluate_impulse(states, now_ms)
-        if (
-            config.PAPER_PYL_VARIANT in VARIANTS
-            or config.PAPER_PYL1_VARIANT in VARIANTS
-            or config.PAPER_333_VARIANT in VARIANTS
-            or config.PAPER_VPS5_VARIANT in VARIANTS
-        ):
+        if config.PAPER_PYL_VARIANT in VARIANTS or config.PAPER_333_VARIANT in VARIANTS:
             self._refresh_five_min_arm(states, now_ms)
         if config.PAPER_VPS15_VARIANT in VARIANTS:
             self._refresh_fifteen_min_arm(states, now_ms)
         if pivots:
             if config.PAPER_PYL_VARIANT in VARIANTS:
                 self._evaluate_pyl(states, now_ms)
-            if config.PAPER_PYL1_VARIANT in VARIANTS:
-                self._evaluate_pyl1(states, now_ms)
             if config.PAPER_333_VARIANT in VARIANTS:
                 self._evaluate_333(states, now_ms)
             if config.PAPER_VAC_VARIANT in VARIANTS:
@@ -1962,11 +1946,7 @@ class PaperStrategy:
             symbol
             for variant, symbol in self.trades
             if variant
-            in (
-                config.PAPER_PYL_VARIANT,
-                config.PAPER_PYL1_VARIANT,
-                config.PAPER_VPS5_VARIANT,
-            )
+            in (config.PAPER_PYL_VARIANT,)
         }
         if self._confirm_arm and now_ms < self._confirm_arm_at + 30_000:
             self._confirm_arm |= opens
@@ -1996,10 +1976,6 @@ class PaperStrategy:
         specs: list[tuple[str, str, str]] = []
         if config.PAPER_PYL_VARIANT in VARIANTS:
             specs.append((config.PAPER_PYL_VARIANT, config.PAPER_PYL_INTERVAL, "pyl"))
-        if config.PAPER_PYL1_VARIANT in VARIANTS:
-            specs.append((config.PAPER_PYL1_VARIANT, config.PAPER_PYL_INTERVAL, "pyl1"))
-        if config.PAPER_VPS5_VARIANT in VARIANTS:
-            specs.append((config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "vps5"))
         if config.PAPER_VPS15_VARIANT in VARIANTS:
             specs.append((config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "vps15"))
         for variant, interval, _kind in specs:
@@ -2033,17 +2009,6 @@ class PaperStrategy:
             lambda w: setattr(self, "_pyl_watch", w),
         )
 
-    def _evaluate_pyl1(self, states: dict[str, SymbolState], now_ms: int) -> None:
-        self._evaluate_bab_pivot_desk(
-            states,
-            now_ms,
-            config.PAPER_PYL1_VARIANT,
-            evaluate_pyl1,
-            self._pyl1_prev_snap,
-            "pyl1",
-            lambda w: setattr(self, "_pyl1_watch", w),
-        )
-
     def _evaluate_333(self, states: dict[str, SymbolState], now_ms: int) -> None:
         self._evaluate_bab_pivot_desk(
             states,
@@ -2068,24 +2033,14 @@ class PaperStrategy:
         if variant not in VARIANTS:
             return
         interval = config.PAPER_PYL_INTERVAL
-        if variant == config.PAPER_PYL1_VARIANT:
-            trade_kind = "pyl1"
-        elif variant == config.PAPER_333_VARIANT:
-            trade_kind = "333"
-        else:
-            trade_kind = "pyl"
+        trade_kind = "333" if variant == config.PAPER_333_VARIANT else "pyl"
         watch: list[dict] = []
-        pyl1 = variant == config.PAPER_PYL1_VARIANT
         open_symbols = {t.symbol for t in self.trades.values() if t.variant == variant}
         scan_symbols = sorted(set(states.keys()) | open_symbols)
         for symbol in scan_symbols:
             state = states.get(symbol)
             if state is None or not state.last_price:
                 continue
-            track = True
-            if pyl1:
-                hr_gate = hour_range_pct(state, now_ms)
-                track = hr_gate is not None and hr_gate + 1e-12 >= config.PAPER_PYL1_HOUR_RANGE_PCT
             prev = prev_snaps.get(symbol)
             snap = snapshot_pivot_levels(state, interval, now_ms)
             if snap is not None:
@@ -2095,7 +2050,7 @@ class PaperStrategy:
             pc = int(ev_clean.get("passed_count") or 0)
             side = ev_clean.get("side")
             fresh = self._five_min_entry_window(ev_clean, now_ms)
-            if track and (pc > 0 or (ev_clean.get("metrics") or {}).get("peaks")):
+            if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
                 watch.append(
                     {
                         "symbol": symbol,
@@ -2135,7 +2090,7 @@ class PaperStrategy:
                                 variant, symbol, state, ev_clean, margin, now_ms, kind=trade_kind
                             )
                 continue
-            if not track or not fresh or not ev_clean.get("passed"):
+            if not fresh or not ev_clean.get("passed"):
                 continue
             balance = self.balances[variant]
             margin = balance * config.PAPER_MARGIN_PCT / 100.0
@@ -2344,7 +2299,6 @@ class PaperStrategy:
     def _evaluate_vps_variants(self, states: dict[str, SymbolState], now_ms: int) -> None:
         specs = [
             (config.PAPER_VPS15_VARIANT, config.PAPER_VPS15_INTERVAL, "_vps15_watch"),
-            (config.PAPER_VPS5_VARIANT, config.PAPER_VPS5_INTERVAL, "_vps5_watch"),
         ]
         for variant, interval, watch_attr in specs:
             if variant not in VARIANTS:
@@ -2872,9 +2826,6 @@ class PaperStrategy:
             "pyl_check_labels": PYL_CHECK_LABELS,
             "pyl_mandatory": list(PYL_MANDATORY),
             "pyl_watch": list(self._pyl_watch),
-            "pyl1_check_labels": PYL1_CHECK_LABELS,
-            "pyl1_mandatory": list(PYL1_MANDATORY_5),
-            "pyl1_watch": list(self._pyl1_watch),
             "333_check_labels": PYL333_CHECK_LABELS,
             "333_mandatory": list(PYL333_MANDATORY_5),
             "333_watch": list(self._333_watch),
@@ -2884,7 +2835,6 @@ class PaperStrategy:
             "vps_check_labels": VPS_CHECK_LABELS,
             "vps_mandatory": list(VPS_MANDATORY),
             "vps15_watch": list(self._vps15_watch),
-            "vps5_watch": list(self._vps5_watch),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
             "analytics": self._analytics,

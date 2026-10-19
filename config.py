@@ -278,9 +278,9 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
-PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "pyl1", "333", "vps15", "vps5")
+PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "333", "vps15")
 # Стол во вкладке «Пылесос»: бумага крутится здесь, в тесте стратегии скрыты.
-PAPER_DESK_VARIANTS = ("pyl", "pyl1", "333", "vps5", "vps15")
+PAPER_DESK_VARIANTS = ("pyl", "333", "vps15")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
 PAPER_MLN_VARIANT = "mln"
@@ -363,7 +363,7 @@ PAPER_VAC_LOOKBACK_BARS = _env_int("PAPER_VAC_LOOKBACK_BARS", 240)
 # Пылесос 15 / 5: сразу −15% net, дальше ступени Трейл 20 (+3%→+0.5% net, +7%→+5%, трейл 20 п.п.).
 PAPER_VPS15_VARIANT = "vps15"
 PAPER_VPS5_VARIANT = "vps5"
-PAPER_VPS_VARIANTS = (PAPER_VPS15_VARIANT, PAPER_VPS5_VARIANT)
+PAPER_VPS_VARIANTS = (PAPER_VPS15_VARIANT,)
 PAPER_VPS15_INTERVAL = "15"
 # Пылесос 15: вход после 1-й закрытой 15m справа (график LH — по-прежнему 2 справа).
 PAPER_VPS15_ENTRY_PIVOT_RIGHT = _env_int("PAPER_VPS15_ENTRY_PIVOT_RIGHT", 1)
@@ -440,7 +440,7 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
-    if variant in (PAPER_PYL_VARIANT, PAPER_PYL1_VARIANT):
+    if variant == PAPER_PYL_VARIANT:
         return "bab"
     if variant == PAPER_333_VARIANT:
         return "333"
