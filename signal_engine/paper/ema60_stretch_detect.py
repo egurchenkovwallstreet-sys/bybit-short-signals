@@ -1,4 +1,4 @@
-"""EMA60 stretch: вход к EMA60 на 5m при отрыве ≥ порога (6 / 8 / 10%)."""
+"""EMA60 stretch: вход к EMA60 на 5m при отрыве ≥ порога (4–10%)."""
 
 from __future__ import annotations
 
@@ -18,8 +18,12 @@ EMA60_STRETCH_CHECK_LABELS = {
 }
 
 THRESHOLD_BY_VARIANT = {
+    config.PAPER_EM4_VARIANT: config.PAPER_EM4_STRETCH_MIN_PCT,
+    config.PAPER_EM5_VARIANT: config.PAPER_EM5_STRETCH_MIN_PCT,
     config.PAPER_EM6_VARIANT: config.PAPER_EM6_STRETCH_MIN_PCT,
+    config.PAPER_EM7_VARIANT: config.PAPER_EM7_STRETCH_MIN_PCT,
     config.PAPER_EM8_VARIANT: config.PAPER_EM8_STRETCH_MIN_PCT,
+    config.PAPER_EM9_VARIANT: config.PAPER_EM9_STRETCH_MIN_PCT,
     config.PAPER_EM10_VARIANT: config.PAPER_EM10_STRETCH_MIN_PCT,
 }
 
