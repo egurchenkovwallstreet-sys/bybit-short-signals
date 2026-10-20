@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 
 import config
-from signal_engine.paper.detect import paper_t20_p10_tri_blocks
+from signal_engine.paper.detect import paper_entry_blocks, paper_t20_p10_mandatory_checks, paper_t20_p10_tri_blocks
 
 
 class TriGateTest(unittest.TestCase):
@@ -35,6 +35,19 @@ class TriGateTest(unittest.TestCase):
 
     def test_pump_floor_scale_default(self) -> None:
         self.assertAlmostEqual(config.PAPER_PUMP_FLOOR_SCALE, 0.8)
+
+    def test_mandatory_stall_and_oi(self) -> None:
+        self.assertIn("need_stall", paper_t20_p10_mandatory_checks({"stall": {"ok": False}}))
+        self.assertIn("need_oi_down", paper_t20_p10_mandatory_checks({"oi_1h_negative": {"ok": False}}))
+        self.assertEqual(
+            paper_t20_p10_mandatory_checks({"stall": {"ok": True}, "oi_1h_negative": {"ok": True}}),
+            [],
+        )
+
+    def test_no_7d_in_entry_gate(self) -> None:
+        base = {"pump": {"trigger": "4h", "volume_ratio": 10}, "since_peak_min": 30, "drawdown_from_peak_pct": 5}
+        self.assertNotIn("no_7d", paper_entry_blocks(base))
+        self.assertIn("no_7d", paper_entry_blocks({**base, "pump": {"trigger": "7d", "volume_ratio": 10}}))
 
 
 if __name__ == "__main__":

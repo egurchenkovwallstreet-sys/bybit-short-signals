@@ -140,15 +140,18 @@ C3_CHECK_LABELS = {
 
 ENTRY_GATE_LABELS = {
     "no_14d": "триггер 14д запрещён",
+    "no_7d": "триггер 7д запрещён",
     "since_too_soon": f"меньше {config.PAPER_ENTRY_SINCE_PEAK_MIN:g} мин с пика",
-    "since_too_late": (
-        f"больше {config.PAPER_ENTRY_SINCE_PEAK_MAX:g} мин с пика "
-        f"(без OI↓ 1ч/4ч, спада объёма, продаж >{config.PAPER_ENTRY_LATE_EXT_SELL_SHARE_MIN_PCT:g}% "
-        f"и отката ≤{config.PAPER_ENTRY_LATE_EXT_MAX_DRAWDOWN_PCT:g}%)"
-    ),
+    "since_too_late": f"больше {config.PAPER_ENTRY_SINCE_PEAK_MAX:g} мин с пика",
     "late_megavol": f"объём ×{config.PAPER_ENTRY_MEGAVOL_RATIO:g}+ при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
     "late_double_top": f"двойная вершина при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика",
     "drawdown_too_deep": f"откат от пика больше {config.PAPER_ENTRY_MAX_DRAWDOWN_PCT:g}%",
+    "need_stall": "нет торможения у вершины (обязательно)",
+    "need_oi_down": "OI за 1 ч не падает (обязательно)",
+    "tri_no_stall": (
+        f"нет торможения и (7д или >{config.PAPER_TRI_NO_STALL_SINCE_PEAK_MIN:g} мин с пика "
+        f"или откат >{config.PAPER_TRI_NO_STALL_DRAWDOWN_PCT:g}%)"
+    ),
 }
 
 _TF_WEIGHT = {"15": 1.0, "30": 1.5, "60": 2.0, "240": 3.0}
@@ -218,6 +221,7 @@ class Evaluation:
     @property
     def entry_blocked(self) -> list[str]:
         blocked = paper_entry_blocks(self.metrics)
+        blocked.extend(paper_t20_p10_mandatory_checks(self.checks))
         blocked.extend(paper_t20_p10_tri_blocks(self.metrics, self.checks))
         return blocked
 
@@ -605,6 +609,16 @@ def _drawdown_pct(metrics: dict) -> float | None:
     return value
 
 
+def paper_t20_p10_mandatory_checks(checks: dict) -> list[str]:
+    """t20/p10: обязательные пункты из девятки поверх «5 из 9»."""
+    blocked: list[str] = []
+    if not (checks.get("stall") or {}).get("ok"):
+        blocked.append("need_stall")
+    if not (checks.get("oi_1h_negative") or {}).get("ok"):
+        blocked.append("need_oi_down")
+    return blocked
+
+
 def paper_t20_p10_tri_blocks(metrics: dict, checks: dict) -> list[str]:
     """t20/p10: без stall не входить при позднем, глубоком откате или триггере 7d."""
     stall = (checks.get("stall") or {}).get("ok")
@@ -627,11 +641,14 @@ def paper_entry_blocks(metrics: dict) -> list[str]:
     since = metrics.get("since_peak_min")
     vol = pump.get("volume_ratio")
     blocked: list[str] = []
-    if str(pump.get("trigger") or "") == "14d":
+    trigger = str(pump.get("trigger") or "")
+    if trigger == "14d":
         blocked.append("no_14d")
+    if trigger == "7d":
+        blocked.append("no_7d")
     if since is None or since < config.PAPER_ENTRY_SINCE_PEAK_MIN:
         blocked.append("since_too_soon")
-    elif since > config.PAPER_ENTRY_SINCE_PEAK_MAX and not late_entry_extension_ok(metrics):
+    elif since > config.PAPER_ENTRY_SINCE_PEAK_MAX:
         blocked.append("since_too_late")
     late = since is not None and since > config.PAPER_ENTRY_LATE_MIN
     if late and vol is not None and vol >= config.PAPER_ENTRY_MEGAVOL_RATIO:

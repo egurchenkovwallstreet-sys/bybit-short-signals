@@ -516,7 +516,7 @@ class EntryGateTest(unittest.TestCase):
             "sell_share": {"5m": 65.0, "10m": 62.0, "15m": 61.0},
         }
         self.assertTrue(late_entry_extension_ok(base))
-        self.assertNotIn("since_too_late", paper_entry_blocks(base))
+        self.assertIn("since_too_late", paper_entry_blocks(base))
         bad = {**base, "drawdown_from_peak_pct": 31.0}
         self.assertFalse(late_entry_extension_ok(bad))
         self.assertIn("since_too_late", paper_entry_blocks(bad))
@@ -794,7 +794,7 @@ class MiniTestEntryTest(unittest.TestCase):
         )
         failed = mini_view(_mini_ev(metrics))["failed"]
         self.assertIn("since_peak", failed)
-        self.assertNotIn("five_of_nine", failed)
+        self.assertIn("five_of_nine", failed)
 
     def test_loss_profile_is_blocked(self) -> None:
         metrics = _mini_metrics()
