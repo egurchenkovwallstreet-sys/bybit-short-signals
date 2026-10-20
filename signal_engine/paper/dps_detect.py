@@ -33,7 +33,7 @@ DPS_MANDATORY = (
 )
 
 DPS_CHECK_LABELS = {
-    "trigger_4h_24h": "Памп 4ч/24ч (пороги мини-тест 2)",
+    "trigger_4h_24h": "Памп за 1 ч, 2 ч или сутки",
     "rsi_5m_cross": "RSI(7) 5m: пересечение 70 сверху вниз",
     "rsi_1h_hot": "RSI(7) 1h ≥ 70",
     "rsi_15m_floor": "RSI(7) 15m ≥ 35",
@@ -259,7 +259,7 @@ def evaluate_dps(
     turnover = state.turnover_24h_usdt
 
     checks = {
-        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "4h или 24h"),
+        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "1h, 2h или 24h"),
         "rsi_5m_cross": _check_soft(
             cross if r5 is not None else None,
             None if r5 is None else {"prev": _r(r5_prev, 1), "now": _r(r5, 1)},

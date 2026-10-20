@@ -264,8 +264,10 @@ def _trigger_label(row: sqlite3.Row) -> str:
     entry = _loads(row["entry_json"])
     trigger = ((entry.get("metrics") or {}).get("pump") or {}).get("trigger") or "?"
     return {
-        "4h": "Рост за ≤4 ч",
+        "1h": "Рост за 1 ч",
+        "2h": "Рост за 2 ч",
         "24h": "Рост за 24 ч",
+        "4h": "Рост за ≤4 ч",
         "7d": "Рост за 7 д",
         "14d": "Рост за 14 д",
         "fast": "Быстрый памп",

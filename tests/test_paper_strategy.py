@@ -14,7 +14,6 @@ from signal_engine.paper.detect import (
     PumpInfo,
     paper_entry_blocks,
     cursor3_view,
-    mini_pump_floors,
     mini_view,
     mini_chart_view,
     MINI_CHART_MANDATORY,
@@ -56,14 +55,14 @@ def pumped_state(symbol: str = "PUMPUSDT") -> SymbolState:
     for i in range(200):
         ts = first_1m + i * MIN
         minutes_ago = (NOW - ts) // MIN
-        if minutes_ago > 180:
+        if minutes_ago > 150:
             bars.append(Bar(ts, 1.0, 1.005, 0.995, 1.0, 7.0))
         elif minutes_ago > 90:
-            frac = (180 - minutes_ago) / 90
+            frac = (150 - minutes_ago) / 60
             price = 1.0 + 0.395 * frac
-            bars.append(Bar(ts, price, price + 0.004, price - 0.004, price, 133.0))
+            bars.append(Bar(ts, price, price + 0.004, price - 0.004, price, 200.0))
         elif minutes_ago == 90:
-            bars.append(Bar(ts, 1.39, 1.40, 1.38, 1.39, 133.0))
+            bars.append(Bar(ts, 1.39, 1.40, 1.38, 1.39, 200.0))
         else:
             price = 1.35 + (0.025 if minutes_ago % 2 else -0.025)
             bars.append(Bar(ts, price, price, price, price, 20.0))
@@ -230,8 +229,8 @@ class DetectTest(unittest.TestCase):
         self.assertIsNotNone(pump)
         assert pump is not None
         self.assertEqual(pump.kind, "short")
-        self.assertEqual(pump.trigger, "4h")
-        self.assertGreater(pump.growth_pct, 30)
+        self.assertIn(pump.trigger, ("1h", "2h", "24h"))
+        self.assertGreaterEqual(pump.growth_pct, config.PAPER_PUMP_1H_MIN_PCT)
         self.assertEqual(pump.peak_ts, NOW - 90 * MIN)
         self.assertGreaterEqual(pump.volume_ratio, 10)
         self.assertGreaterEqual(pump.buy_share_pct, 70)
@@ -660,7 +659,7 @@ class Cursor3EntryTest(unittest.TestCase):
 
 def _mini_metrics() -> dict:
     return {
-        "pump": {"trigger": "4h", "volume_ratio": 12},
+        "pump": {"trigger": "2h", "volume_ratio": 12},
         "since_peak_min": 40,
         "drawdown_from_peak_pct": 4.0,
         "price_20m_pct": 0.4,
@@ -691,7 +690,7 @@ class DpsEntryTest(unittest.TestCase):
         state, tape = pumped_state(), pumped_tape()
         pump = PumpInfo(
             kind="short",
-            trigger="4h",
+            trigger="2h",
             growth_pct=35.0,
             valley_price=1.0,
             valley_ts=NOW - 120 * MIN,
@@ -719,7 +718,7 @@ class GrafikEntryTest(unittest.TestCase):
         state.last_price = confirm_close
         pump = PumpInfo(
             kind="short",
-            trigger="4h",
+            trigger="2h",
             growth_pct=35.0,
             valley_price=10.0,
             valley_ts=t0,
@@ -746,9 +745,9 @@ class GrafikEntryTest(unittest.TestCase):
 class MiniChartEntryTest(unittest.TestCase):
     def test_passes_without_five_of_nine(self) -> None:
         state, tape = pumped_state(), pumped_tape()
-        pump = find_pump(state, tape, NOW, mini_pump_floors())
+        pump = find_pump(state, tape, NOW)
         assert pump is not None
-        pump.trigger = "4h"
+        pump.trigger = "2h"
         ev = evaluate(state, tape, pump, {}, None, NOW)
         for key in list(ev.checks):
             ev.checks[key]["ok"] = False
@@ -758,7 +757,7 @@ class MiniChartEntryTest(unittest.TestCase):
 
     def test_blocks_deep_drawdown(self) -> None:
         state, tape = pumped_state(), pumped_tape()
-        pump = find_pump(state, tape, NOW, mini_pump_floors())
+        pump = find_pump(state, tape, NOW)
         assert pump is not None
         pump.trigger = "24h"
         ev = evaluate(state, tape, pump, {}, None, NOW)
@@ -767,15 +766,12 @@ class MiniChartEntryTest(unittest.TestCase):
 
 
 class MiniTestEntryTest(unittest.TestCase):
-    def test_soft_floors_are_forty_percent_lower(self) -> None:
-        floors = mini_pump_floors()
-        self.assertEqual(floors["4h"], 18)
-        self.assertEqual(floors["24h"], 30)
-        self.assertEqual(floors["7d"], 48)
-        self.assertEqual(floors["14d"], 60)
-        self.assertIsNone(find_pump(pumped_state(), pumped_tape(), NOW, {"4h": 99, "24h": 99, "7d": 99, "14d": 99}))
-        soft = find_pump(pumped_state(), pumped_tape(), NOW, floors)
-        self.assertIsNotNone(soft)
+    def test_long_pump_triggers_not_used(self) -> None:
+        pump = find_pump(pumped_state(), pumped_tape(), NOW)
+        self.assertIsNotNone(pump)
+        assert pump is not None
+        self.assertEqual(pump.kind, "short")
+        self.assertNotIn(pump.trigger, ("7d", "14d", "4h"))
 
     def test_passes_with_sample_gate_and_loss_cuts(self) -> None:
         view = mini_view(_mini_ev(_mini_metrics()))

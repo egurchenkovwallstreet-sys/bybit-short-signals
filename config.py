@@ -197,12 +197,15 @@ PAPER_TRAIL_GAP_ROE = _env_float("PAPER_TRAIL_GAP_ROE", 20.0)
 # Доп. стоп: после ухода в минус net ROE — не хуже этого уровня (оба варианта).
 PAPER_LOSS_CAP_ROE = _env_float("PAPER_LOSS_CAP_ROE", -15.0)
 
-# Памп: короткий (окно до 4 ч / 24 ч по 15m), длинный (7 д / 14 д по 4H).
+# Памп на вкладке «Тест стратегии»: только 1 ч / 2 ч / 24 ч по 15m (длинные 7d/14d не используются).
+PAPER_PUMP_1H_MIN_PCT = _env_float("PAPER_PUMP_1H_MIN_PCT", 12.0)
+PAPER_PUMP_2H_MIN_PCT = _env_float("PAPER_PUMP_2H_MIN_PCT", 16.0)
+PAPER_PUMP_24H_MIN_PCT = _env_float("PAPER_PUMP_24H_MIN_PCT", 28.0)
+# Устаревшие имена (другие модули / env); paper find_pump их не читает.
 PAPER_SHORT_4H_MIN_PCT = _env_float("PAPER_SHORT_4H_MIN_PCT", 30.0)
 PAPER_SHORT_24H_MIN_PCT = _env_float("PAPER_SHORT_24H_MIN_PCT", 50.0)
 PAPER_LONG_7D_MIN_PCT = _env_float("PAPER_LONG_7D_MIN_PCT", 80.0)
 PAPER_LONG_14D_MIN_PCT = _env_float("PAPER_LONG_14D_MIN_PCT", 100.0)
-# Множитель порогов роста пампа для t20/p10 (1.0 = базовые PAPER_SHORT_* / PAPER_LONG_*).
 PAPER_PUMP_FLOOR_SCALE = _env_float("PAPER_PUMP_FLOOR_SCALE", 0.8)
 # Доп. шлюз t20/p10: без stall — не входить при позднем/глубоком/7d профиле.
 PAPER_TRI_NO_STALL_SINCE_PEAK_MIN = _env_float("PAPER_TRI_NO_STALL_SINCE_PEAK_MIN", 90.0)
@@ -425,7 +428,7 @@ PAPER_MINI_SINCE_PEAK_MIN = _env_float("PAPER_MINI_SINCE_PEAK_MIN", 6.0)
 PAPER_MINI_SINCE_PEAK_MAX = _env_float("PAPER_MINI_SINCE_PEAK_MAX", 180.0)
 PAPER_MINI_MAX_DRAWDOWN_PCT = _env_float("PAPER_MINI_MAX_DRAWDOWN_PCT", 10.0)
 PAPER_MINI_MAX_SCORE = _env_float("PAPER_MINI_MAX_SCORE", 12.0)
-PAPER_MINI_TRIGGERS = ("4h", "24h")
+PAPER_MINI_TRIGGERS = ("1h", "2h", "24h")
 
 # Импульс 5 / Импульс 15: закрытая свеча своего таймфрейма, выход как у t20.
 PAPER_IMP5_VARIANT = "i5"

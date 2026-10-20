@@ -37,7 +37,6 @@ from signal_engine.paper.detect import (
     MINI_CHECK_LABELS,
     MINI_MANDATORY,
     cursor3_view,
-    mini_pump_floors,
     mini_view,
     mini_chart_view,
     MINI_CHART_MANDATORY,
@@ -318,7 +317,7 @@ class PaperStrategy:
             self._ensure_balance(variant)
         if self.store.get_kv("revived_restart_expiry") is None:
             # До защиты от перезапуска кандидаты снимались, пока свечи ещё не подгрузились.
-            since = now - config.PAPER_LONG_LIFETIME_HOURS * 3_600_000
+            since = now - config.PAPER_SHORT_LIFETIME_HOURS * 3_600_000
             revived = self.store.revive_candidates(_REASON_CONDITIONS, since)
             self.store.set_kv("revived_restart_expiry", str(now))
             if revived:
@@ -951,17 +950,11 @@ class PaperStrategy:
             if symbol in self.candidates or not state.last_price:
                 continue
             pump = find_pump(state, self.tape.symbols.get(symbol), now_ms)
-            soft = False
-            if pump is None:
-                pump = find_pump(state, self.tape.symbols.get(symbol), now_ms, mini_pump_floors())
-                soft = pump is not None
             if pump is None:
                 continue
             if self.expired_peaks.get(symbol) == pump.peak_ts:
                 continue
             fields = _pump_fields(pump)
-            if soft:
-                fields["kind"] = "mini"
             cid = self.store.insert_candidate(
                 {
                     "symbol": symbol,
@@ -973,7 +966,7 @@ class PaperStrategy:
                 }
             )
             self.candidates[symbol] = Candidate(
-                id=cid, symbol=symbol, pump=pump, started_at=now_ms, soft=soft
+                id=cid, symbol=symbol, pump=pump, started_at=now_ms, soft=False
             )
             log.info(
                 "Тест: кандидат %s — %s памп +%.1f%% (%s)",
@@ -1033,8 +1026,6 @@ class PaperStrategy:
             return False
         if len(state.bars_htf.get("15") or []) < config.PAPER_READY_15M_BARS:
             return False
-        if cand.pump.kind == "long" and len(state.bars_htf.get("240") or []) < config.PAPER_READY_4H_BARS:
-            return False
         return True
 
     def _evaluate(self, states: dict[str, SymbolState], btc_4h: float | None, now_ms: int) -> None:
@@ -1044,7 +1035,7 @@ class PaperStrategy:
             if state is None or not state.last_price:
                 continue
             tape = self.tape.get(symbol)
-            pump = find_pump(state, tape, now_ms, mini_pump_floors() if cand.soft else None)
+            pump = find_pump(state, tape, now_ms)
             if pump is None:
                 reason = _expire_reason(cand.pump, state, now_ms)
                 if reason == _REASON_CONDITIONS and not self._ready(state, cand, now_ms):
@@ -1068,8 +1059,6 @@ class PaperStrategy:
             data["mini_chart"] = mini_chart_view(ev)
             data["graf"] = evaluate_grafik(state, cand.pump, now_ms, ev.score, ev.strict_btc)
             data["dps"] = evaluate_dps(state, tape, cand.pump, now_ms, ev.score, ev.strict_btc)
-            if cand.soft:
-                data["variants"] = []
             cand.last_eval = data
             cand.dirty = True
             notes = []
@@ -1077,9 +1066,7 @@ class PaperStrategy:
                 notes.append(
                     "Вход закрыт: " + "; ".join(ENTRY_GATE_LABELS.get(k, k) for k in ev.entry_blocked)
                 )
-            if cand.soft:
-                notes.append("мягкий памп: только Мини тест")
-            for variant in () if cand.soft else ev.variants:
+            for variant in ev.variants:
                 if variant not in VARIANTS:
                     continue
                 if (variant, symbol) in self.trades:
@@ -1092,7 +1079,7 @@ class PaperStrategy:
                     notes.append(f"{VARIANT_LABELS.get(variant, variant)}: нет свободной маржи")
                     continue
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
-            if e5s_ev.passed and not cand.soft:
+            if e5s_ev.passed:
                 for variant in e5s_ev.to_data()["variants"]:
                     if variant not in VARIANTS:
                         continue
@@ -1108,7 +1095,7 @@ class PaperStrategy:
                         notes.append(f"{label}: нет свободной маржи")
                         continue
                     self._open_trade(variant, cand, state, e5s_ev, margin, now_ms)
-            if plus_ev.passed and not cand.soft:
+            if plus_ev.passed:
                 peak_ts = int(cand.pump.peak_ts or 0)
                 if peak_ts and peak_ts in self.plus_blocked.get(symbol, ()):
                     notes.append("копии: этот пик уже закрыт первым стопом")
@@ -1128,7 +1115,7 @@ class PaperStrategy:
                             notes.append(f"{label}: нет свободной маржи")
                             continue
                         self._open_trade(variant, cand, state, plus_ev, margin, now_ms)
-            if c3["passed"] and not cand.soft and config.PAPER_C3_VARIANT in VARIANTS:
+            if c3["passed"] and config.PAPER_C3_VARIANT in VARIANTS:
                 variant = config.PAPER_C3_VARIANT
                 label = VARIANT_LABELS.get(variant, variant)
                 if (variant, symbol) in self.trades:
@@ -1209,7 +1196,7 @@ class PaperStrategy:
                             variant, cand, state, _EvalView(data["dps"]), margin, now_ms
                         )
             cand.note = "; ".join(notes) or None
-            if not cand.soft and not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
+            if not ev.entry_blocked and len(ev.failed) == 1 and not cand.near_miss:
                 self._start_shadow(cand, state, ev.failed[0], now_ms)
 
     def _evaluate_growth(self, states: dict[str, SymbolState], now_ms: int) -> None:
@@ -3094,7 +3081,7 @@ def _expire_reason(pump: PumpInfo, state: SymbolState, now_ms: int) -> str:
     if pump.peak_price > 0 and last > 0:
         if (1 - last / pump.peak_price) * 100.0 > config.PAPER_MAX_DRAWDOWN_FROM_PEAK_PCT:
             return "откат от пика"
-    hours = config.PAPER_SHORT_LIFETIME_HOURS if pump.kind == "short" else config.PAPER_LONG_LIFETIME_HOURS
+    hours = config.PAPER_SHORT_LIFETIME_HOURS
     if now_ms - pump.peak_ts > hours * 3_600_000:
         return "истекло время после пика"
     return _REASON_CONDITIONS

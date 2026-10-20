@@ -90,7 +90,7 @@ MINI_MANDATORY = (
 
 MINI_CHECK_LABELS = {
     "five_of_nine": "Шлюз образцов и любые 5 из 9",
-    "trigger_4h_24h": "Памп только 4ч или сутки",
+    "trigger_4h_24h": "Памп за 1 ч, 2 ч или сутки",
     "since_peak": f"С пика {config.PAPER_MINI_SINCE_PEAK_MIN:g}–{config.PAPER_MINI_SINCE_PEAK_MAX:g} мин, без позднего допуска",
     "drawdown": f"Откат от пика ≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
     "buys_faded": f"Покупки 15 мин ≤ {config.PAPER_BUYS_FADE_MAX_RATIO * 100:g}% от пика",
@@ -107,7 +107,7 @@ MINI_CHART_MANDATORY = (
 )
 
 MINI_CHART_CHECK_LABELS = {
-    "trigger_4h_24h": "Памп только 4ч или сутки",
+    "trigger_4h_24h": "Памп за 1 ч, 2 ч или сутки",
     "since_peak": f"С пика {config.PAPER_MINI_SINCE_PEAK_MIN:g}–{config.PAPER_MINI_SINCE_PEAK_MAX:g} мин",
     "drawdown": f"Откат от пика ≤ {config.PAPER_MINI_MAX_DRAWDOWN_PCT:g}%",
     "ema_intact": "Ни одна EMA не пробита",
@@ -128,7 +128,7 @@ C3_MANDATORY = (
 )
 
 C3_CHECK_LABELS = {
-    "trigger_4h_24h": "Памп только 4ч или сутки",
+    "trigger_4h_24h": "Памп за 1 ч, 2 ч или сутки",
     "since_peak": f"С пика {config.PAPER_C3_SINCE_PEAK_MIN:g}–{config.PAPER_C3_SINCE_PEAK_MAX:g} мин",
     "drawdown": f"Откат от пика ≤ {config.PAPER_C3_MAX_DRAWDOWN_PCT:g}%",
     "price_20m": f"Цена за 20 мин ≥ {config.PAPER_C3_MIN_PRICE_20M_PCT:g}%",
@@ -327,7 +327,7 @@ def measure_pump_peak(state: SymbolState, now_ms: int) -> tuple[float, int] | No
     bars15 = merged_15m(state)
     if len(bars15) < 8:
         return None
-    lifetime = max(config.PAPER_SHORT_LIFETIME_HOURS, config.PAPER_LONG_LIFETIME_HOURS) * HOUR_MS
+    lifetime = config.PAPER_SHORT_LIFETIME_HOURS * HOUR_MS
     recent = [b for b in bars15 if b.timestamp >= now_ms - lifetime]
     if not recent:
         return None
@@ -356,24 +356,14 @@ def apply_peak_measurement(pump: PumpInfo, state: SymbolState, now_ms: int) -> b
     return changed
 
 
-def mini_pump_floors() -> dict[str, float]:
-    """Пороги роста Мини теста: на 40% ниже образцов. Сравнение окон то же."""
-    scale = config.PAPER_MINI_PUMP_SCALE
-    return {
-        "4h": config.PAPER_SHORT_4H_MIN_PCT * scale,
-        "24h": config.PAPER_SHORT_24H_MIN_PCT * scale,
-        "7d": config.PAPER_LONG_7D_MIN_PCT * scale,
-        "14d": config.PAPER_LONG_14D_MIN_PCT * scale,
-    }
-
-
 def find_pump(
     state: SymbolState,
     tape: SymbolTape | None,
     now_ms: int,
     floors: dict[str, float] | None = None,
 ) -> PumpInfo | None:
-    """Пик за время жизни кандидата и рост к нему из окон 4 ч / 24 ч / 7 д / 14 д."""
+    """Пик за окно жизни кандидата и рост к нему за 1 ч / 2 ч / 24 ч (только короткий памп)."""
+    _ = floors  # совместимость вызовов; один набор порогов для всех вариантов
     bars15 = merged_15m(state)
     if len(bars15) < 8:
         return None
@@ -385,42 +375,33 @@ def find_pump(
     if last <= 0 or (1 - last / peak) * 100.0 > config.PAPER_MAX_DRAWDOWN_FROM_PEAK_PCT:
         return None
 
-    bars4h = live_4h(state)
-    v4h = _valley(bars15, peak_ts, 4 * HOUR_MS)
+    v1h = _valley(bars15, peak_ts, HOUR_MS)
+    v2h = _valley(bars15, peak_ts, 2 * HOUR_MS)
     v24 = _valley(bars15, peak_ts, 24 * HOUR_MS)
-    v7d = _valley(bars4h, peak_ts, 7 * 24 * HOUR_MS)
-    v14 = _valley(bars4h, peak_ts, 14 * 24 * HOUR_MS)
-    growth = {"4h": _growth(peak, v4h), "24h": _growth(peak, v24), "7d": _growth(peak, v7d), "14d": _growth(peak, v14)}
+    growth = {
+        "1h": _growth(peak, v1h),
+        "2h": _growth(peak, v2h),
+        "24h": _growth(peak, v24),
+    }
 
-    if floors is None:
-        scale = config.PAPER_PUMP_FLOOR_SCALE
-        floor_4h = config.PAPER_SHORT_4H_MIN_PCT * scale
-        floor_24h = config.PAPER_SHORT_24H_MIN_PCT * scale
-        floor_7d = config.PAPER_LONG_7D_MIN_PCT * scale
-        floor_14d = config.PAPER_LONG_14D_MIN_PCT * scale
-    else:
-        floor_4h = floors["4h"]
-        floor_24h = floors["24h"]
-        floor_7d = floors["7d"]
-        floor_14d = floors["14d"]
+    floor_1h = config.PAPER_PUMP_1H_MIN_PCT
+    floor_2h = config.PAPER_PUMP_2H_MIN_PCT
+    floor_24h = config.PAPER_PUMP_24H_MIN_PCT
     since_peak = now_ms - peak_ts
-    choice: tuple[str, str, Bar, float] | None = None
+    choice: tuple[str, Bar, float] | None = None
     if since_peak <= config.PAPER_SHORT_LIFETIME_HOURS * HOUR_MS:
-        if growth["4h"] is not None and growth["4h"] > floor_4h:
-            choice = ("short", "4h", v4h, growth["4h"])
+        if growth["1h"] is not None and growth["1h"] >= floor_1h:
+            choice = ("1h", v1h, growth["1h"])
+        elif growth["2h"] is not None and growth["2h"] >= floor_2h:
+            choice = ("2h", v2h, growth["2h"])
         elif growth["24h"] is not None and growth["24h"] >= floor_24h:
-            choice = ("short", "24h", v24, growth["24h"])
-    if choice is None and since_peak <= config.PAPER_LONG_LIFETIME_HOURS * HOUR_MS:
-        if growth["7d"] is not None and growth["7d"] >= floor_7d:
-            choice = ("long", "7d", v7d, growth["7d"])
-        elif growth["14d"] is not None and growth["14d"] >= floor_14d:
-            choice = ("long", "14d", v14, growth["14d"])
+            choice = ("24h", v24, growth["24h"])
     if choice is None:
         return None
-    kind, trigger, valley, pct = choice
+    trigger, valley, pct = choice
     assert valley is not None
     info = PumpInfo(
-        kind=kind,
+        kind="short",
         trigger=trigger,
         growth_pct=pct,
         valley_price=valley.low,
@@ -429,8 +410,7 @@ def find_pump(
         peak_ts=peak_ts,
         growth=growth,
     )
-    series = bars15 if kind == "short" else bars4h
-    info.volume_ratio, info.volume_avg_ratio = leg_volume_ratio(series, valley.timestamp, peak_ts)
+    info.volume_ratio, info.volume_avg_ratio = leg_volume_ratio(bars15, valley.timestamp, peak_ts)
     if tape is not None:
         buy, sell, covered = tape.buy_sell_between(valley.timestamp, peak_ts)
         info.tape_minutes = covered
@@ -765,7 +745,7 @@ def mini_view(ev: Evaluation) -> dict:
         five_value = f"{five_value}, шлюз: {', '.join(gate)}"
     checks = {
         "five_of_nine": _check(five_ok, five_value, f"≥ {config.PAPER_V5_MIN_PASSED} и шлюз открыт"),
-        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "4h или 24h"),
+        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "1h, 2h или 24h"),
         "since_peak": _check(
             since is not None and config.PAPER_MINI_SINCE_PEAK_MIN <= since <= config.PAPER_MINI_SINCE_PEAK_MAX,
             None if since is None else round(since),
@@ -825,7 +805,7 @@ def mini_chart_view(ev: Evaluation) -> dict:
         and vol_f >= config.PAPER_ENTRY_MEGAVOL_RATIO
     )
     checks = {
-        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "4h или 24h"),
+        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "1h, 2h или 24h"),
         "since_peak": _check(
             since is not None
             and config.PAPER_MINI_SINCE_PEAK_MIN <= since <= config.PAPER_MINI_SINCE_PEAK_MAX,

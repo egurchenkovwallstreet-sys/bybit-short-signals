@@ -15,7 +15,7 @@ GRAF_MANDATORY = (
 )
 
 GRAF_CHECK_LABELS = {
-    "trigger_4h_24h": "Памп только 4ч или сутки (пороги мини)",
+    "trigger_4h_24h": "Памп за 1 ч, 2 ч или сутки",
     "main_high": "Есть абсолютный хай пампа на 15m",
     "lower_high": "Вторая вершина — локальный хай ниже главного",
     "confirm_close": "След. 15m закрылась ниже close второй вершины",
@@ -109,7 +109,7 @@ def evaluate_grafik(
     )
 
     checks = {
-        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "4h или 24h"),
+        "trigger_4h_24h": _check(trigger in config.PAPER_MINI_TRIGGERS, trigger or "нет", "1h, 2h или 24h"),
         "main_high": _check(
             main_high is not None and abs_idx is not None,
             None if main_high is None else _r(main_high, 6),
