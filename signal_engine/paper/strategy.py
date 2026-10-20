@@ -139,7 +139,7 @@ from signal_engine.paper.growth_detect import (
     find_growth,
     refresh_growth_peak,
 )
-from signal_engine.paper.position import Position, trail333_initial_stop
+from signal_engine.paper.position import Position
 from signal_engine.paper.store import PaperStore
 from signal_engine.paper.tape import TapeBook, minute_start
 from signal_engine.state import Bar, SymbolState
@@ -2370,12 +2370,7 @@ class PaperStrategy:
         pivot_low = float(m.get("pivot_low") or 0)
         stop = bab_pivot_stop_price(side, pivot_high, pivot_low)
         if config.is_paper_333_family(variant):
-            est_fee = price * (margin * config.PAPER_LEVERAGE / price) * config.PAPER_FEE_RATE_TAKER
-            stop = trail333_initial_stop(
-                side, price, margin=margin, entry_fee=est_fee, funding_paid=0.0
-            )
             m["desk_initial_stop"] = stop
-            m["pivot_stop"] = bab_pivot_stop_price(side, pivot_high, pivot_low)
             entry["metrics"] = m
         tape = self.tape.symbols.get(symbol)
         nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
