@@ -58,6 +58,12 @@ from signal_engine.paper.pivot_clock import (
     symbols_waiting_second_bar,
     vps15_entry_confirmed,
 )
+from signal_engine.paper.htf333_wait import (
+    htf_opposing_too_close,
+    htf_senior_direction_ok,
+    htf_wait_pivots_broken,
+    wait_record_from_meta,
+)
 from signal_engine.paper.pyl_detect import (
     PYL333_CHECK_LABELS,
     PYL333_MANDATORY_5,
@@ -268,6 +274,7 @@ class PaperStrategy:
         self._pyl_watch: list[dict] = []
         self._333_prev_snap: dict[str, dict] = {}
         self._333_watch: list[dict] = []
+        self._333_htf_wait: dict[str, dict] = {}
         self._33315_prev_snap: dict[str, dict] = {}
         self._33315_watch: list[dict] = []
         self._333_loss_stop_until: dict[tuple[str, str], int] = {}
@@ -2120,8 +2127,14 @@ class PaperStrategy:
         if variant not in VARIANTS:
             return
         watch: list[dict] = []
+        pending_333: list[tuple[int, str, SymbolState, dict, float, int, str]] = []
         open_symbols = {t.symbol for t in self.trades.values() if t.variant == variant}
-        scan_symbols = sorted(set(states.keys()) | open_symbols)
+        wait_syms = (
+            self._333_htf_wait.keys()
+            if variant == config.PAPER_333_VARIANT
+            else ()
+        )
+        scan_symbols = sorted(set(states.keys()) | open_symbols | set(wait_syms))
         for symbol in scan_symbols:
             state = states.get(symbol)
             if state is None or not state.last_price:
@@ -2140,19 +2153,20 @@ class PaperStrategy:
                 fresh = self._333_entry_window(ev_clean, now_ms, config.PAPER_33315_INTERVAL)
             else:
                 fresh = self._third_bar_entry_window(ev_clean, now_ms, interval)
-            if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks"):
-                watch.append(
-                    {
-                        "symbol": symbol,
-                        "passed_count": pc,
-                        "failed": list(ev_clean.get("failed") or []),
-                        "eval": {eval_key: ev_clean},
-                        "grade": ev_clean.get("grade"),
-                        "score": ev_clean.get("score"),
-                        "ready": fresh,
-                        "side": side,
-                    }
-                )
+            if pc > 0 or (ev_clean.get("metrics") or {}).get("peaks") or symbol in self._333_htf_wait:
+                row = {
+                    "symbol": symbol,
+                    "passed_count": pc,
+                    "failed": list(ev_clean.get("failed") or []),
+                    "eval": {eval_key: ev_clean},
+                    "grade": ev_clean.get("grade"),
+                    "score": ev_clean.get("score"),
+                    "ready": fresh,
+                    "side": side,
+                }
+                if variant == config.PAPER_333_VARIANT and symbol in self._333_htf_wait:
+                    row["htf_wait"] = dict(self._333_htf_wait[symbol])
+                watch.append(row)
             open_key = (variant, symbol)
             if open_key in self.trades:
                 # 333: только стоп, без закрытия/перевхода по противоп. pivot (как pyl).
@@ -2192,8 +2206,53 @@ class PaperStrategy:
             margin = balance * config.PAPER_MARGIN_PCT / 100.0
             if margin <= 0 or balance - self.used_margin(variant) < margin:
                 continue
+            if variant == config.PAPER_333_VARIANT:
+                side_s = str(ev_clean.get("side") or (ev_clean.get("metrics") or {}).get("side") or "")
+                wait = self._333_htf_wait.get(symbol)
+                if wait and htf_wait_pivots_broken(state, wait):
+                    del self._333_htf_wait[symbol]
+                    wait = None
+                aligned, align_detail = htf_senior_direction_ok(state, now_ms, side_s)
+                priority = 0
+                if wait and wait.get("side") == side_s and aligned:
+                    priority = 1
+                    metrics = dict(ev_clean.get("metrics") or {})
+                    metrics["htf_wait_priority"] = True
+                    metrics["htf_align"] = align_detail
+                    ev_clean["metrics"] = metrics
+                    del self._333_htf_wait[symbol]
+                elif wait and wait.get("side") == side_s and not aligned:
+                    continue
+                elif not wait:
+                    too_close, meta = htf_opposing_too_close(state, now_ms, side_s)
+                    if too_close:
+                        self._333_htf_wait[symbol] = wait_record_from_meta(side_s, meta, now_ms)
+                        continue
+                else:
+                    del self._333_htf_wait[symbol]
+                    too_close, meta = htf_opposing_too_close(state, now_ms, side_s)
+                    if too_close:
+                        self._333_htf_wait[symbol] = wait_record_from_meta(side_s, meta, now_ms)
+                        continue
+                pending_333.append((priority, symbol, state, ev_clean, margin, now_ms, trade_kind))
+                continue
             self._open_pyl_trade(variant, symbol, state, ev_clean, margin, now_ms, kind=trade_kind)
-        watch.sort(key=lambda r: (-int(r["passed_count"]), r["symbol"]))
+        if variant == config.PAPER_333_VARIANT and pending_333:
+            pending_333.sort(key=lambda row: (-row[0], row[1]))
+            for _pri, sym, st, entry, marg, ts, kind in pending_333:
+                if (variant, sym) in self.trades:
+                    continue
+                bal = self.balances[variant]
+                if marg <= 0 or bal - self.used_margin(variant) < marg:
+                    continue
+                self._open_pyl_trade(variant, sym, st, entry, marg, ts, kind=kind)
+        watch.sort(
+            key=lambda r: (
+                -(1 if r.get("htf_wait") else 0),
+                -int(r["passed_count"]),
+                r["symbol"],
+            )
+        )
         set_watch(watch[:100])
 
     def _open_pyl_trade(
@@ -2925,6 +2984,9 @@ class PaperStrategy:
             "333_check_labels": PYL333_CHECK_LABELS,
             "333_mandatory": list(PYL333_MANDATORY_5),
             "333_watch": list(self._333_watch),
+            "333_htf_wait": [
+                {"symbol": sym, **data} for sym, data in sorted(self._333_htf_wait.items())
+            ],
             "33315_check_labels": PYL33315_CHECK_LABELS,
             "33315_mandatory": list(PYL33315_MANDATORY),
             "33315_watch": list(self._33315_watch),
