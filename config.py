@@ -281,7 +281,21 @@ PAPER_STRONG_TOP_MIN_BARS_30M = _env_int("PAPER_STRONG_TOP_MIN_BARS_30M", 10)
 PAPER_SHORT_VARIANTS = ("t20", "p10")
 PAPER_PLUS_VARIANTS = ("t20p", "mlnp")
 # Активные счета: баланс на VPS > $1000 (2026-10-16). Остальное снято с вкладки.
-PAPER_VARIANTS = ("t20", "p10", "t20p", "mlnp", "mt2", "graf", "pyl", "333", "33315", "vps15")
+PAPER_VARIANTS = (
+    "t20",
+    "p10",
+    "t20p",
+    "mlnp",
+    "mt2",
+    "graf",
+    "em6",
+    "em8",
+    "em10",
+    "pyl",
+    "333",
+    "33315",
+    "vps15",
+)
 # Стол во вкладке «Пылесос»: бумага крутится здесь, в тесте стратегии скрыты.
 PAPER_DESK_VARIANTS = ("pyl", "333", "33315", "vps15")
 PAPER_T20_VARIANT = "t20"
@@ -443,6 +457,21 @@ PAPER_IMP5_MIN_BODY_PCT = _env_float("PAPER_IMP5_MIN_BODY_PCT", 0.25)
 PAPER_IMP5_CLOSE_EDGE_MAX = _env_float("PAPER_IMP5_CLOSE_EDGE_MAX", 0.35)
 PAPER_IMP5_MAX_SNAPBACK_PCT = _env_float("PAPER_IMP5_MAX_SNAPBACK_PCT", 0.08)
 
+# EMA60 stretch (5m): отрыв от EMA60 ≥ 6 / 8 / 10%, вход к EMA, только вкладка «Тест».
+PAPER_EM6_VARIANT = "em6"
+PAPER_EM8_VARIANT = "em8"
+PAPER_EM10_VARIANT = "em10"
+PAPER_EMA60_STRETCH_VARIANTS = (PAPER_EM6_VARIANT, PAPER_EM8_VARIANT, PAPER_EM10_VARIANT)
+PAPER_EM6_STRETCH_MIN_PCT = _env_float("PAPER_EM6_STRETCH_MIN_PCT", 6.0)
+PAPER_EM8_STRETCH_MIN_PCT = _env_float("PAPER_EM8_STRETCH_MIN_PCT", 8.0)
+PAPER_EM10_STRETCH_MIN_PCT = _env_float("PAPER_EM10_STRETCH_MIN_PCT", 10.0)
+PAPER_EMA60_STRETCH_INITIAL_STOP_ROE = _env_float("PAPER_EMA60_STRETCH_INITIAL_STOP_ROE", -15.0)
+PAPER_EMA60_STRETCH_LOCK1_ARM_ROE = _env_float("PAPER_EMA60_STRETCH_LOCK1_ARM_ROE", 5.0)
+PAPER_EMA60_STRETCH_LOCK1_ROE = _env_float("PAPER_EMA60_STRETCH_LOCK1_ROE", 2.0)
+PAPER_EMA60_STRETCH_LOCK2_ARM_ROE = _env_float("PAPER_EMA60_STRETCH_LOCK2_ARM_ROE", 10.0)
+PAPER_EMA60_STRETCH_LOCK2_ROE = _env_float("PAPER_EMA60_STRETCH_LOCK2_ROE", 5.0)
+PAPER_EMA60_STRETCH_TRAIL_GAP_ROE = _env_float("PAPER_EMA60_STRETCH_TRAIL_GAP_ROE", 5.0)
+
 
 def paper_is_long(variant: str) -> bool:
     return variant == PAPER_LT20_VARIANT
@@ -463,6 +492,8 @@ def paper_stop_style(variant: str) -> str:
         return "mln"
     if variant in PAPER_IMPULSE_VARIANTS:
         return "impulse"
+    if variant in PAPER_EMA60_STRETCH_VARIANTS:
+        return "ema_stretch"
     if variant == PAPER_PYL_VARIANT:
         return "bab"
     if is_paper_333_family(variant):

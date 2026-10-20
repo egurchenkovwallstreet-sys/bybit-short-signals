@@ -76,6 +76,9 @@ VARIANT_LABELS = {
     "vps": "Пылесос 15",
     "i5": "Импульс 5",
     "i15": "Импульс 15",
+    "em6": "EMA60-6",
+    "em8": "EMA60-8",
+    "em10": "EMA60-10",
 }
 
 MINI_MANDATORY = (

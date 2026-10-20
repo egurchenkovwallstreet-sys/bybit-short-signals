@@ -580,6 +580,68 @@ def trail_stop(
     return stop
 
 
+def ema60_stretch_trail_stop(
+    entry: float,
+    best_price: float,
+    leverage: int | None = None,
+    *,
+    margin: float = 0.0,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
+    side: str = "short",
+) -> float:
+    """EMA60 stretch: −15% ROE, +5%→+2% ROE, +10%→+5% ROE, дальше трейл пик − 5 п.п. ROE."""
+    lev = leverage or config.PAPER_LEVERAGE
+    arm1 = config.PAPER_EMA60_STRETCH_LOCK1_ARM_ROE
+    arm2 = config.PAPER_EMA60_STRETCH_LOCK2_ARM_ROE
+    gap = config.PAPER_EMA60_STRETCH_TRAIL_GAP_ROE
+    if side == "long":
+        peak = long_roe_pct(entry, best_price, lev)
+        initial = net_roe_stop_price_long(
+            entry, margin, config.PAPER_EMA60_STRETCH_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+        )
+        if peak < arm1:
+            return initial
+        stop = initial
+        if peak >= arm1 and margin > 0:
+            stop = max(
+                stop,
+                net_roe_stop_price_long(
+                    entry, margin, config.PAPER_EMA60_STRETCH_LOCK1_ROE, lev, entry_fee, funding_paid
+                ),
+            )
+        if peak >= arm2 and margin > 0:
+            stop = max(
+                stop,
+                net_roe_stop_price_long(
+                    entry, margin, config.PAPER_EMA60_STRETCH_LOCK2_ROE, lev, entry_fee, funding_paid
+                ),
+            )
+            trail = price_for_long_roe(entry, peak - gap, lev)
+            stop = max(stop, trail)
+        return stop
+    peak = roe_pct(entry, best_price, lev)
+    initial = net_roe_stop_price(
+        entry, margin, config.PAPER_EMA60_STRETCH_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
+    )
+    if peak < arm1:
+        return initial
+    stop = initial
+    if peak >= arm1 and margin > 0:
+        stop = min(
+            stop,
+            net_roe_stop_price(entry, margin, config.PAPER_EMA60_STRETCH_LOCK1_ROE, lev, entry_fee, funding_paid),
+        )
+    if peak >= arm2 and margin > 0:
+        stop = min(
+            stop,
+            net_roe_stop_price(entry, margin, config.PAPER_EMA60_STRETCH_LOCK2_ROE, lev, entry_fee, funding_paid),
+        )
+        trail = price_for_roe(entry, peak - gap, lev)
+        stop = min(stop, trail)
+    return stop
+
+
 def impulse_long_stop(
     entry: float,
     best_price: float,
@@ -710,6 +772,21 @@ class Position:
                 funding_paid=self.funding_paid,
             )
             self.stop_price = min(self.liq_price, trail)
+            return
+        if self.stop_style == "ema_stretch":
+            trail = ema60_stretch_trail_stop(
+                self.entry_price,
+                self.best_price,
+                self.leverage,
+                margin=self.margin,
+                entry_fee=self.entry_fee,
+                funding_paid=self.funding_paid,
+                side=self.side,
+            )
+            if self.side == "long":
+                self.stop_price = max(self.liq_price, trail)
+            else:
+                self.stop_price = min(self.liq_price, trail)
             return
         if self.stop_style == "impulse":
             if self.side == "long":

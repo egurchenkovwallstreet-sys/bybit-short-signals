@@ -110,6 +110,12 @@ from signal_engine.paper.e5s_detect import (
     E5S_MANDATORY,
     evaluate_e5s,
 )
+from signal_engine.paper.ema60_stretch_detect import (
+    EMA60_STRETCH_CHECK_LABELS,
+    EMA60_STRETCH_MANDATORY,
+    evaluate_ema60_stretch,
+    stretch_passes_variant,
+)
 from signal_engine.paper.impulse_detect import (
     IMPULSE_CHECK_LABELS,
     IMPULSE5_EXTRA_MANDATORY,
@@ -627,6 +633,7 @@ class PaperStrategy:
         if config.PAPER_SC10_VARIANT in VARIANTS:
             self._evaluate_sc10(states, now_ms)
         self._evaluate_impulse(states, now_ms)
+        self._evaluate_ema60_stretch(states, now_ms)
         if config.PAPER_PYL_VARIANT in VARIANTS or config.PAPER_333_VARIANT in VARIANTS:
             self._refresh_five_min_arm(states, now_ms)
         if config.PAPER_33315_VARIANT in VARIANTS:
@@ -1932,6 +1939,96 @@ class PaperStrategy:
             len(impulse_mandatory(ev.minutes)),
         )
 
+    def _evaluate_ema60_stretch(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        active = [v for v in config.PAPER_EMA60_STRETCH_VARIANTS if v in VARIANTS]
+        if not active:
+            return
+        for symbol, state in states.items():
+            if not state.last_price:
+                continue
+            ev = evaluate_ema60_stretch(state, now_ms)
+            if not ev.passed:
+                continue
+            for variant in active:
+                if (variant, symbol) in self.trades:
+                    continue
+                if not stretch_passes_variant(ev, variant):
+                    continue
+                balance = self.balances[variant]
+                margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                if margin <= 0 or balance - self.used_margin(variant) < margin:
+                    continue
+                self._open_ema60_stretch_trade(variant, symbol, state, ev, margin, now_ms)
+
+    def _open_ema60_stretch_trade(
+        self, variant: str, symbol: str, state: SymbolState, ev, margin: float, now_ms: int
+    ) -> None:
+        side = ev.side or "short"
+        price = float(state.last_price)
+        tape = self.tape.symbols.get(symbol)
+        nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
+        pos = Position(
+            symbol=symbol,
+            opened_at=now_ms,
+            entry_price=price,
+            margin=margin,
+            next_funding_ts=nft,
+            side=side,
+            stop_style=config.paper_stop_style(variant),
+        )
+        entry = ev.to_data()
+        trade_id = self.store.insert_trade(
+            {
+                "symbol": symbol,
+                "variant": variant,
+                "candidate_id": None,
+                "kind": f"ema60_stretch_{side}",
+                "status": "open",
+                "opened_at": now_ms,
+                "entry_price": price,
+                "margin": margin,
+                "leverage": pos.leverage,
+                "notional": pos.notional,
+                "qty": pos.qty,
+                "liq_price": pos.liq_price,
+                "stop_price": pos.stop_price,
+                "best_price": pos.best_price,
+                "worst_price": pos.worst_price,
+                "last_price": price,
+                "entry_fee": pos.entry_fee,
+                "funding_paid": 0.0,
+                "next_funding_ts": nft,
+                "score": ev.score,
+                "grade": grade_for(ev.score),
+                "strict_btc": False,
+                "balance_before": self.balances[variant],
+                "entry_json": entry,
+            }
+        )
+        self.trades[(variant, symbol)] = OpenTrade(
+            id=trade_id,
+            variant=variant,
+            symbol=symbol,
+            kind=f"ema60_stretch_{side}",
+            pos=pos,
+            score=ev.score,
+            grade=grade_for(ev.score),
+            strict_btc=False,
+            entry=entry,
+            candidate_id=None,
+            last_check=now_ms,
+        )
+        self._next_analytics = 0
+        log.info(
+            "Тест [%s]: открыт %s %s по %s, отрыв EMA60 %.2f%%, маржа %.2f USD",
+            variant,
+            side,
+            symbol,
+            price,
+            float(ev.metrics.get("stretch_pct") or 0),
+            margin,
+        )
+
     def confirm_fetch_symbols(self) -> list[str]:
         """Монеты, которым в момент закрытия 5м нужна свежая свеча: ожидание второй или открытая сделка."""
         return sorted(self._confirm_arm)
@@ -2965,6 +3062,7 @@ class PaperStrategy:
             "graf_check_labels": GRAF_CHECK_LABELS,
             "dps_check_labels": DPS_CHECK_LABELS,
             "impulse_check_labels": IMPULSE_CHECK_LABELS,
+            "ema60_stretch_check_labels": EMA60_STRETCH_CHECK_LABELS,
             "mandatory": list(MANDATORY),
             "growth_mandatory": list(GROWTH_CORE),
             "growth_flex": list(GROWTH_FLEX),
@@ -2998,6 +3096,7 @@ class PaperStrategy:
             "vps15_watch": list(self._vps15_watch),
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
+            "ema60_stretch_mandatory": list(EMA60_STRETCH_MANDATORY),
             "analytics": self._analytics,
         }
 
