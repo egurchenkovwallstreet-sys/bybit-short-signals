@@ -662,7 +662,8 @@ def paper_p10_sim_blocks(variant: str, metrics: dict, ev: Evaluation) -> list[st
     if variant == config.PAPER_P10G_VARIANT:
         return blocked
     if variant == config.PAPER_P10Q_VARIANT:
-        if ev.passed_count < config.PAPER_V5_MIN_PASSED:
+        passed = sum(1 for k in MANDATORY if (ev.checks.get(k) or {}).get("ok"))
+        if passed < config.PAPER_V5_MIN_PASSED:
             blocked.append("need_five_of_nine")
         return blocked
     if variant == config.PAPER_P10M_VARIANT:
@@ -687,8 +688,9 @@ def paper_p10_sim_view(ev: Evaluation, variant: str) -> dict:
     checks = {
         "gate_clear": _check(not paper_entry_blocks(ev.metrics), None, "шлюз"),
         "five_of_nine": _check(
-            ev.passed_count >= config.PAPER_V5_MIN_PASSED,
-            ev.passed_count,
+            sum(1 for k in MANDATORY if (ev.checks.get(k) or {}).get("ok"))
+            >= config.PAPER_V5_MIN_PASSED,
+            ev.passed_count if all(k in ev.checks for k in MANDATORY) else None,
             f"≥ {config.PAPER_V5_MIN_PASSED}",
         ),
         "no_late_megavol_extra": _check(
