@@ -378,6 +378,13 @@ class PivotConfirmClockTest(unittest.TestCase):
         self.assertTrue(vps15_entry_confirmed(pivot, entry_close + 1_000))
         self.assertFalse(vps15_entry_confirmed(pivot, entry_close + 11_000))
 
+    def test_fifteen_min_entry_on_third_bar(self) -> None:
+        step15 = 900_000
+        pivot = T0 - (T0 % step15)
+        self.assertEqual(third_bar_open_ms(pivot, "15"), pivot + 3 * step15)
+        self.assertTrue(entry_on_third_bar(pivot, pivot + 3 * step15, "15"))
+        self.assertFalse(entry_on_third_bar(pivot, pivot + 2 * step15, "15"))
+
     def test_five_min_entry_on_third_bar_only(self) -> None:
         pivot = T0
         self.assertEqual(third_bar_open_ms(pivot, "5"), pivot + 3 * STEP)

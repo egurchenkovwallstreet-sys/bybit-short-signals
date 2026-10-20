@@ -153,10 +153,8 @@ def _tz_pivot_times_ms(snap: dict) -> list[int]:
 
 def _pivot_in_entry_window(ts: int, now_ms: int, interval: str, step: int) -> bool:
     del step
-    if interval == "5":
-        return entry_on_third_bar(ts, now_ms, "5")
-    if interval == "15":
-        return vps15_entry_confirmed(ts, now_ms)
+    if interval in ("5", "15"):
+        return entry_on_third_bar(ts, now_ms, interval)
     return int(now_ms) >= second_bar_close_ms(ts, interval)
 
 
@@ -183,10 +181,10 @@ def _engulfing_first_bar(first_right: Bar, target: Bar, side: str) -> bool:
 
 
 def htf_pivot_early_engulf_setup(state: SymbolState, now_ms: int, interval: str = "5") -> dict | None:
-    """333: 1-я 5m справа поглощает pivot или prev — вход сразу после её close (окно slack)."""
-    if interval != "5":
+    """333 / 333-15: 1-я свеча справа поглощает pivot или prev — вход после close (окно slack)."""
+    step = _BAR_STEP.get(interval)
+    if step is None:
         return None
-    step = M5
     if not _meets_turnover(state):
         return None
     snap = snapshot_pivot_levels(state, interval, now_ms)
@@ -200,7 +198,7 @@ def htf_pivot_early_engulf_setup(state: SymbolState, now_ms: int, interval: str 
     for p in snap.get("peaks") or []:
         ts = int(p["time_ms"])
         ls = _pivot_left_strength(p)
-        if ls is None or not just_confirmed(ts, now_ms, "5", right=1):
+        if ls is None or not just_confirmed(ts, now_ms, interval, right=1):
             continue
         if not pivot_has_one_right_bar(index, ts, step):
             continue
@@ -220,7 +218,7 @@ def htf_pivot_early_engulf_setup(state: SymbolState, now_ms: int, interval: str 
     for p in snap.get("troughs") or []:
         ts = int(p["time_ms"])
         ls = _pivot_left_strength(p)
-        if ls is None or not just_confirmed(ts, now_ms, "5", right=1):
+        if ls is None or not just_confirmed(ts, now_ms, interval, right=1):
             continue
         if not pivot_has_one_right_bar(index, ts, step):
             continue
@@ -290,12 +288,10 @@ def _setup_vps15_entry(state: SymbolState, now_ms: int) -> dict | None:
 
 
 def _setup_from_tz_pivots(state: SymbolState, now_ms: int, interval: str) -> dict | None:
-    """Pivot L15–L30; 5m — 2 справа; 15m vps15 — 1 справа для входа."""
+    """Pivot L15–L30; 5m/15m (pyl/333/333-15) — 2 справа, вход на 3-й свече."""
     step = _BAR_STEP.get(interval)
     if step is None:
         return None
-    if interval == "15":
-        return _setup_vps15_entry(state, now_ms)
     snap = snapshot_pivot_levels(state, interval, now_ms)
     if not snap:
         return None

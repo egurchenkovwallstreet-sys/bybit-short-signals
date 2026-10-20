@@ -318,6 +318,9 @@ def evaluate_333(state: SymbolState, now_ms: int, prev_snap: dict | None = None)
 
 def evaluate_33315(state: SymbolState, now_ms: int, prev_snap: dict | None = None) -> dict:
     iv = config.PAPER_33315_INTERVAL
+    pivot_signal = htf_pivot_setup(state, now_ms, iv)
+    if pivot_signal is None:
+        pivot_signal = htf_pivot_early_engulf_setup(state, now_ms, iv)
     base = evaluate_htf_pivot_entry(
         state,
         now_ms,
@@ -325,6 +328,7 @@ def evaluate_33315(state: SymbolState, now_ms: int, prev_snap: dict | None = Non
         iv,
         kind="33315",
         variant=config.PAPER_33315_VARIANT,
+        pivot_signal=pivot_signal,
     )
     side = base.get("side") or (base.get("metrics") or {}).get("side")
     ma_ok, ma_detail, ma_meta = ma333_regime_allows(state, now_ms, side, iv)
