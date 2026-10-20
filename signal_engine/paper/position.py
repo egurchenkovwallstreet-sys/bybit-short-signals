@@ -590,8 +590,9 @@ def ema60_stretch_trail_stop(
     funding_paid: float = 0.0,
     side: str = "short",
 ) -> float:
-    """EMA60 stretch: −15% ROE, +5%→+2% ROE, +10%→+5% ROE, дальше трейл пик − 5 п.п. ROE."""
+    """EMA60 stretch: −15% ROE; +3.5%→+0.01% net; +5%→+2%; +10%→+5% и трейл пик − 5 п.п."""
     lev = leverage or config.PAPER_LEVERAGE
+    arm0 = config.PAPER_EMA60_STRETCH_LOCK0_ARM_ROE
     arm1 = config.PAPER_EMA60_STRETCH_LOCK1_ARM_ROE
     arm2 = config.PAPER_EMA60_STRETCH_LOCK2_ARM_ROE
     gap = config.PAPER_EMA60_STRETCH_TRAIL_GAP_ROE
@@ -600,9 +601,16 @@ def ema60_stretch_trail_stop(
         initial = net_roe_stop_price_long(
             entry, margin, config.PAPER_EMA60_STRETCH_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
         )
-        if peak < arm1:
+        if peak < arm0:
             return initial
         stop = initial
+        if peak >= arm0 and margin > 0:
+            stop = max(
+                stop,
+                net_roe_stop_price_long(
+                    entry, margin, config.PAPER_EMA60_STRETCH_LOCK0_NET_ROE, lev, entry_fee, funding_paid
+                ),
+            )
         if peak >= arm1 and margin > 0:
             stop = max(
                 stop,
@@ -624,9 +632,16 @@ def ema60_stretch_trail_stop(
     initial = net_roe_stop_price(
         entry, margin, config.PAPER_EMA60_STRETCH_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
     )
-    if peak < arm1:
+    if peak < arm0:
         return initial
     stop = initial
+    if peak >= arm0 and margin > 0:
+        stop = min(
+            stop,
+            net_roe_stop_price(
+                entry, margin, config.PAPER_EMA60_STRETCH_LOCK0_NET_ROE, lev, entry_fee, funding_paid
+            ),
+        )
     if peak >= arm1 and margin > 0:
         stop = min(
             stop,

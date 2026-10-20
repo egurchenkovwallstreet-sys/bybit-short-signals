@@ -74,6 +74,16 @@ class Ema60StretchDetectTest(unittest.TestCase):
 
 
 class Ema60StretchStopTest(unittest.TestCase):
+    def test_short_lock0_at_3_5(self) -> None:
+        entry = 1.0
+        margin = 50.0
+        fee = entry * 10 * config.PAPER_FEE_RATE_TAKER
+        lev = config.PAPER_LEVERAGE
+        best = entry * (1.0 - 0.04 / lev)
+        stop = ema60_stretch_trail_stop(entry, best, lev, margin=margin, entry_fee=fee, side="short")
+        lock0 = net_roe_stop_price(entry, margin, config.PAPER_EMA60_STRETCH_LOCK0_NET_ROE, lev, fee, 0.0)
+        self.assertLessEqual(stop, lock0 + 1e-9)
+
     def test_short_stop_ladder(self) -> None:
         entry = 1.0
         margin = 50.0
