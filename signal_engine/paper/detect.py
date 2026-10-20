@@ -79,6 +79,9 @@ VARIANT_LABELS = {
     "em6": "EMA60-6",
     "em8": "EMA60-8",
     "em10": "EMA60-10",
+    "p10g": "10 · шлюз",
+    "p10q": "10 · 5 из 9",
+    "p10m": "10 · без мега",
 }
 
 MINI_MANDATORY = (
@@ -155,6 +158,21 @@ ENTRY_GATE_LABELS = {
         f"нет торможения и (7д или >{config.PAPER_TRI_NO_STALL_SINCE_PEAK_MIN:g} мин с пика "
         f"или откат >{config.PAPER_TRI_NO_STALL_DRAWDOWN_PCT:g}%)"
     ),
+    "need_five_of_nine": f"≥ {config.PAPER_V5_MIN_PASSED} из 9 условий",
+}
+
+P10_SIM_CHECK_LABELS = {
+    "gate_clear": "Шлюз пампа (5 пунктов) без блокировок",
+    "five_of_nine": f"≥ {config.PAPER_V5_MIN_PASSED} из 9 условий",
+    "no_late_megavol_extra": (
+        f"не мегаобъём ×{config.PAPER_ENTRY_MEGAVOL_RATIO:g}+ при >{config.PAPER_ENTRY_LATE_MIN:g} мин с пика"
+    ),
+}
+
+P10_SIM_MANDATORY = {
+    config.PAPER_P10G_VARIANT: ("gate_clear",),
+    config.PAPER_P10Q_VARIANT: ("gate_clear", "five_of_nine"),
+    config.PAPER_P10M_VARIANT: ("gate_clear", "no_late_megavol_extra"),
 }
 
 _TF_WEIGHT = {"15": 1.0, "30": 1.5, "60": 2.0, "240": 3.0}
@@ -636,6 +654,55 @@ def paper_t20_p10_tri_blocks(metrics: dict, checks: dict) -> list[str]:
     if late or deep or trigger == "7d":
         return ["tri_no_stall"]
     return []
+
+
+def paper_p10_sim_blocks(variant: str, metrics: dict, ev: Evaluation) -> list[str]:
+    """Вход p10g/p10q/p10m — как в прогоне E02/E07/E10 (без stall/OI/tri обязательных у p10)."""
+    blocked = list(paper_entry_blocks(metrics))
+    if variant == config.PAPER_P10G_VARIANT:
+        return blocked
+    if variant == config.PAPER_P10Q_VARIANT:
+        if ev.passed_count < config.PAPER_V5_MIN_PASSED:
+            blocked.append("need_five_of_nine")
+        return blocked
+    if variant == config.PAPER_P10M_VARIANT:
+        since = metrics.get("since_peak_min")
+        pump = metrics.get("pump") or {}
+        vol = pump.get("volume_ratio")
+        if since is not None and float(since) > config.PAPER_ENTRY_LATE_MIN:
+            if vol is not None and float(vol) >= config.PAPER_ENTRY_MEGAVOL_RATIO:
+                if "late_megavol" not in blocked:
+                    blocked.append("late_megavol")
+        return blocked
+    return blocked
+
+
+def paper_p10_sim_qualifies(variant: str, ev: Evaluation) -> bool:
+    return not paper_p10_sim_blocks(variant, ev.metrics, ev)
+
+
+def paper_p10_sim_view(ev: Evaluation, variant: str) -> dict:
+    blocked = paper_p10_sim_blocks(variant, ev.metrics, ev)
+    keys = P10_SIM_MANDATORY.get(variant, ())
+    checks = {
+        "gate_clear": _check(not paper_entry_blocks(ev.metrics), None, "шлюз"),
+        "five_of_nine": _check(
+            ev.passed_count >= config.PAPER_V5_MIN_PASSED,
+            ev.passed_count,
+            f"≥ {config.PAPER_V5_MIN_PASSED}",
+        ),
+        "no_late_megavol_extra": _check(
+            "late_megavol" not in blocked and "late_megavol" not in paper_entry_blocks(ev.metrics),
+            None,
+            "нет мегаобъёма на опоздании",
+        ),
+    }
+    return {
+        "checks": {k: checks[k] for k in keys},
+        "blocked": blocked,
+        "passed": not blocked,
+        "passed_count": sum(1 for k in keys if checks[k]["ok"]),
+    }
 
 
 def paper_entry_blocks(metrics: dict) -> list[str]:

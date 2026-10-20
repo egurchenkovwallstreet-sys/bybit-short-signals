@@ -32,6 +32,11 @@ from signal_engine.paper.detect import (
     grade_for,
     measure_pump_peak,
     paper_entry_blocks,
+    P10_SIM_CHECK_LABELS,
+    P10_SIM_MANDATORY,
+    paper_p10_sim_blocks,
+    paper_p10_sim_qualifies,
+    paper_p10_sim_view,
     C3_CHECK_LABELS,
     C3_MANDATORY,
     MINI_CHECK_LABELS,
@@ -1093,6 +1098,25 @@ class PaperStrategy:
                     notes.append(f"{VARIANT_LABELS.get(variant, variant)}: нет свободной маржи")
                     continue
                 self._open_trade(variant, cand, state, ev, margin, now_ms)
+            for variant in config.PAPER_P10_SIM_VARIANTS:
+                if variant not in VARIANTS:
+                    continue
+                if not paper_p10_sim_qualifies(variant, ev):
+                    continue
+                if (variant, symbol) in self.trades:
+                    continue
+                if now_ms - self.last_close.get((variant, symbol), 0) < cooldown:
+                    continue
+                balance = self.balances[variant]
+                margin = balance * config.PAPER_MARGIN_PCT / 100.0
+                if margin <= 0 or balance - self.used_margin(variant) < margin:
+                    notes.append(f"{VARIANT_LABELS.get(variant, variant)}: нет свободной маржи")
+                    continue
+                entry = ev.to_data()
+                entry["entry_blocked"] = paper_p10_sim_blocks(variant, ev.metrics, ev)
+                entry["p10_sim"] = paper_p10_sim_view(ev, variant)
+                entry["variants"] = [variant]
+                self._open_trade(variant, cand, state, ev, margin, now_ms, entry=entry)
             if e5s_ev.passed:
                 for variant in e5s_ev.to_data()["variants"]:
                     if variant not in VARIANTS:
@@ -2698,7 +2722,17 @@ class PaperStrategy:
             signal_key or "?",
         )
 
-    def _open_trade(self, variant: str, cand: Candidate, state: SymbolState, ev, margin: float, now_ms: int) -> None:
+    def _open_trade(
+        self,
+        variant: str,
+        cand: Candidate,
+        state: SymbolState,
+        ev,
+        margin: float,
+        now_ms: int,
+        *,
+        entry: dict | None = None,
+    ) -> None:
         price = float(state.last_price)
         tape = self.tape.symbols.get(cand.symbol)
         nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
@@ -2711,7 +2745,7 @@ class PaperStrategy:
             peak_gap_roe=config.paper_peak_gap_roe(variant),
             stop_style=config.paper_stop_style(variant),
         )
-        entry = ev.to_data()
+        entry = entry if entry is not None else ev.to_data()
         trade_id = self.store.insert_trade(
             {
                 "symbol": cand.symbol,
@@ -3097,6 +3131,8 @@ class PaperStrategy:
             "impulse_mandatory": list(IMPULSE_MANDATORY),
             "impulse5_mandatory": list(IMPULSE5_EXTRA_MANDATORY),
             "ema60_stretch_mandatory": list(EMA60_STRETCH_MANDATORY),
+            "p10_sim_check_labels": P10_SIM_CHECK_LABELS,
+            "p10_sim_mandatory": {k: list(v) for k, v in P10_SIM_MANDATORY.items()},
             "analytics": self._analytics,
         }
 

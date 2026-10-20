@@ -291,6 +291,9 @@ PAPER_VARIANTS = (
     "em6",
     "em8",
     "em10",
+    "p10g",
+    "p10q",
+    "p10m",
     "pyl",
     "333",
     "33315",
@@ -300,6 +303,11 @@ PAPER_VARIANTS = (
 PAPER_DESK_VARIANTS = ("pyl", "333", "33315", "vps15")
 PAPER_T20_VARIANT = "t20"
 PAPER_P10_VARIANT = "p10"
+# 10 п.п. · симуляция прогона (шлюз / 5 из 9 / без мегаобъёма), выход как p10.
+PAPER_P10G_VARIANT = "p10g"
+PAPER_P10Q_VARIANT = "p10q"
+PAPER_P10M_VARIANT = "p10m"
+PAPER_P10_SIM_VARIANTS = (PAPER_P10G_VARIANT, PAPER_P10Q_VARIANT, PAPER_P10M_VARIANT)
 PAPER_MLN_VARIANT = "mln"
 PAPER_T20P_VARIANT = "t20p"
 PAPER_P10P_VARIANT = "p10p"
@@ -507,7 +515,13 @@ def paper_stop_style(variant: str) -> str:
 
 def paper_peak_gap_roe(variant: str) -> float:
     """Лок «пик − gap» у p10 и копии 10 п.п.+; t20/lt20 — свои правила ROE."""
-    if variant in (PAPER_P10_VARIANT, PAPER_P10P_VARIANT, PAPER_MT2_VARIANT, PAPER_MT2C_VARIANT):
+    if variant in (
+        PAPER_P10_VARIANT,
+        PAPER_P10P_VARIANT,
+        *PAPER_P10_SIM_VARIANTS,
+        PAPER_MT2_VARIANT,
+        PAPER_MT2C_VARIANT,
+    ):
         return PAPER_TRAIL_PEAK_GAP_ROE
     return 0.0
 
