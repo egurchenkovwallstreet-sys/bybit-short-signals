@@ -10,14 +10,16 @@
     const s = data.summary || {};
     const el = document.getElementById("em6b-summary");
     if (!el) return;
+    const pnl = Number(s.total_pnl_closed || 0);
+    const pnlCls = pnl >= 0 ? "pos" : "neg";
     el.innerHTML = `
-      <div class="paper-card"><span>Equity Demo</span><strong>$${num(s.wallet_equity)}</strong></div>
-      <div class="paper-card"><span>Доступно</span><strong>$${num(s.wallet_available)}</strong></div>
-      <div class="paper-card"><span>Открыто</span><strong>${s.open_trades ?? 0}</strong></div>
-      <div class="paper-card"><span>Закрыто</span><strong>${s.closed_trades ?? 0}</strong></div>
-      <div class="paper-card"><span>Win rate</span><strong>${pct(s.win_rate)}</strong></div>
-      <div class="paper-card"><span>PnL закрытых</span><strong>$${num(s.total_pnl_closed)}</strong></div>
-      <div class="paper-card"><span>Маржа / плечо</span><strong>${s.margin_pct ?? 5}% × ${s.leverage ?? 10}</strong></div>
+      <div class="paper-card"><span class="label">Equity Demo</span><div class="value">$${num(s.wallet_equity)}</div></div>
+      <div class="paper-card"><span class="label">Доступно</span><div class="value">$${num(s.wallet_available)}</div></div>
+      <div class="paper-card"><span class="label">Открыто</span><div class="value">${s.open_trades ?? 0}</div></div>
+      <div class="paper-card"><span class="label">Закрыто</span><div class="value">${s.closed_trades ?? 0}</div></div>
+      <div class="paper-card"><span class="label">Win rate</span><div class="value">${pct(s.win_rate)}</div></div>
+      <div class="paper-card"><span class="label">PnL закрытых</span><div class="value ${pnlCls}">$${num(s.total_pnl_closed)}</div></div>
+      <div class="paper-card"><span class="label">Маржа / плечо</span><div class="value">${s.margin_pct ?? 5}% × ${s.leverage ?? 10}</div></div>
     `;
   }
 

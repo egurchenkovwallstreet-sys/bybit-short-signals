@@ -2427,16 +2427,27 @@ th { cursor: pointer; color: var(--muted); }
 
   .paper-cards {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    gap: 10px;
+    margin: 4px 0 8px;
   }
 
   .paper-card {
-    padding: 8px 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .paper-card .label {
+    display: block;
+    line-height: 1.35;
   }
 
   .paper-card .value {
-    font-size: 16px;
+    font-size: 17px;
+    margin-top: 0;
     word-break: break-word;
+    line-height: 1.25;
   }
 
   .paper-panel {
