@@ -197,10 +197,7 @@ function showTab(name) {
   }
   if (name === "stats") {
     renderStats();
-    requestAnimationFrame(() => {
-      Object.values(state.gauges).forEach((chart) => chart.resize());
-      if (state.equity) state.equity.resize();
-    });
+    scheduleStatsChartResize();
   }
 }
 
@@ -898,9 +895,23 @@ function renderPending() {
     });
 }
 
+function disposeStatsGauges() {
+  Object.entries(state.gauges).forEach(([key, chart]) => {
+    if (key === "equity") return;
+    try {
+      chart.dispose();
+    } catch (_err) {
+      /* ignore */
+    }
+  });
+  state.gauges = {};
+}
+
 function renderStats() {
   const stats = state.stats;
   if (!stats || !window.echarts || !stats.paper) return;
+
+  disposeStatsGauges();
 
   const toolbar = document.getElementById("stats-toolbar");
   if (toolbar) {
@@ -997,9 +1008,21 @@ function renderStats() {
     renderGaugeSet(variant.id, m);
   });
 
+  scheduleStatsChartResize();
+}
+
+function scheduleStatsChartResize() {
   requestAnimationFrame(() => {
-    Object.values(state.gauges).forEach((c) => c.resize());
-    if (state.equity) state.equity.resize();
+    requestAnimationFrame(() => {
+      Object.values(state.gauges).forEach((c) => {
+        try {
+          c.resize();
+        } catch (_err) {
+          /* ignore */
+        }
+      });
+      if (state.equity) state.equity.resize();
+    });
   });
 }
 
@@ -1102,13 +1125,13 @@ function renderGaugeSet(prefix, m) {
   const pnl = Number(m.total_pnl) || 0;
   const pnlMax = Math.max(50, Math.abs(pnl) * 1.2);
   gauge(`${prefix}-pnl`, pnl, -pnlMax, pnlMax, [
-    [0.5, "#ff5d73"],
-    [0.5, "#f6d365"],
+    [0.45, "#ff5d73"],
+    [0.55, "#f6d365"],
     [1, "#3dd68c"],
   ], "{value}");
   gauge(`${prefix}-pnl_pct`, Number(m.total_pnl_pct) || 0, -20, 20, [
-    [0.5, "#ff5d73"],
-    [0.5, "#f6d365"],
+    [0.45, "#ff5d73"],
+    [0.55, "#f6d365"],
     [1, "#3dd68c"],
   ], "{value}%");
   gauge(`${prefix}-dd`, Math.min(Number(m.max_drawdown_pct) || 0, 40), 0, 40, [
@@ -1119,8 +1142,8 @@ function renderGaugeSet(prefix, m) {
   const closed = Number(m.closed) || 0;
   gauge(`${prefix}-closed`, closed, 0, Math.max(20, closed), [[1, "#5dade2"]], "{value}");
   gauge(`${prefix}-avg`, Number(m.avg_trade) || 0, -10, 10, [
-    [0.5, "#ff5d73"],
-    [0.5, "#f6d365"],
+    [0.45, "#ff5d73"],
+    [0.55, "#f6d365"],
     [1, "#3dd68c"],
   ], "{value}");
   gauge(`${prefix}-fees`, Number(m.fees) || 0, 0, Math.max(5, Number(m.fees) || 0), [[1, "#c39bd3"]], "{value}");
@@ -1193,9 +1216,20 @@ function minNegativeScale(max) {
 }
 
 function gauge(key, value, min, max, colors, formatter) {
-  const node = document.querySelector(`[data-gauge="${key}"]`);
+  const node = document.querySelector(`[data-gauge="${CSS.escape(key)}"]`);
   if (!node) return;
-  const chart = state.gauges[key] || echarts.init(node);
+  let chart = echarts.getInstanceByDom(node);
+  const cached = state.gauges[key];
+  if (cached && cached !== chart) {
+    try {
+      cached.dispose();
+    } catch (_err) {
+      /* ignore */
+    }
+  }
+  if (!chart) {
+    chart = echarts.init(node);
+  }
   state.gauges[key] = chart;
   const splitNumber = max <= 5 ? 4 : 5;
   chart.setOption(
