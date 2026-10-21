@@ -47,6 +47,7 @@ class Em6BybitStrategy:
     _conn: Any = None
     _recovered: bool = False
     _last_status_log_ms: int = 0
+    _reentry_block_until: dict[str, int] = field(default_factory=dict)
 
     def open(self) -> None:
         if not self.broker.configured():
@@ -177,14 +178,29 @@ class Em6BybitStrategy:
             return long_roe_pct(live.entry_price, live.worst_price, live.leverage)
         return roe_pct(live.entry_price, live.worst_price, live.leverage)
 
-    def _push_stop(self, live: LiveOpen) -> None:
+    def _ref_price(self, live: LiveOpen, state: SymbolState | None) -> float:
+        if state is not None and state.last_price:
+            return float(state.last_price)
+        return live.entry_price
+
+    def _push_stop(self, live: LiveOpen, state: SymbolState | None = None) -> None:
+        ref = self._ref_price(live, state)
         try:
-            self.broker.set_stop_loss(live.symbol, live.stop_price)
-            live.last_exchange_stop = live.stop_price
+            resp = self.broker.set_stop_loss(
+                live.symbol, live.stop_price, side=live.side, ref_price=ref
+            )
+            code = resp.get("retCode") if isinstance(resp, dict) else None
+            if code not in (0, "0", None):
+                log.warning("em6 bybit set stop %s: %s", live.symbol, resp)
+                return
+            clamped = self.broker.clamp_stop_for_exchange(
+                live.symbol, live.side, live.stop_price, ref
+            )
+            live.last_exchange_stop = clamped
             self.store.update_open(
                 self._conn,
                 live.id,
-                {"stop_price": live.stop_price, "last_exchange_stop": live.stop_price},
+                {"stop_price": live.stop_price, "last_exchange_stop": live.last_exchange_stop},
             )
         except Exception:
             log.exception("em6 bybit: set stop %s", live.symbol)
@@ -216,7 +232,7 @@ class Em6BybitStrategy:
         }
         self.store.update_open(self._conn, live.id, fields)
         if self._stop_changed(live, new_stop):
-            self._push_stop(live)
+            self._push_stop(live, state)
 
     def _finalize_closed(self, symbol: str, row: dict[str, Any], *, reason: str) -> None:
         live = self.open_trades.pop(symbol, None)
@@ -228,6 +244,8 @@ class Em6BybitStrategy:
                 pnl = (exit_p - live.entry_price) * live.qty
             else:
                 pnl = (live.entry_price - exit_p) * live.qty
+        cooldown_ms = int(config.PAPER_333_LOSS_STOP_COOLDOWN_MIN) * 60_000
+        self._reentry_block_until[symbol] = now + cooldown_ms
         self.store.close_trade(
             self._conn,
             int(row["id"]),
@@ -257,8 +275,19 @@ class Em6BybitStrategy:
                 row = self.store.open_by_symbol(self._conn, sym) or {"id": self.open_trades[sym].id, "symbol": sym}
                 self._finalize_closed(sym, row, reason="trailing_stop")
 
-    def _try_open(self, symbol: str, state: SymbolState, now_ms: int, wallet_avail: float) -> None:
-        if symbol in self.open_trades:
+    def _try_open(
+        self,
+        symbol: str,
+        state: SymbolState,
+        now_ms: int,
+        margin: float,
+        *,
+        on_exchange: set[str],
+    ) -> None:
+        if symbol in self.open_trades or symbol in on_exchange:
+            return
+        until = self._reentry_block_until.get(symbol, 0)
+        if now_ms < until:
             return
         ev = evaluate_ema60_stretch(state, now_ms)
         if not ev.passed or not stretch_passes_variant(ev, VARIANT):
@@ -271,7 +300,6 @@ class Em6BybitStrategy:
         price = float(state.last_price or 0)
         if price <= 0:
             return
-        margin = wallet_avail * config.PAPER_MARGIN_PCT / 100.0
         if margin < 1.0:
             return
         lev = config.PAPER_LEVERAGE
@@ -280,7 +308,9 @@ class Em6BybitStrategy:
         stop = self._compute_stop_for(side, price, price, margin, qty)
         link = f"e6b-{symbol}-{now_ms}"[:36]
         try:
-            resp = self.broker.open_market_with_stop(symbol, side, qty, stop, link)
+            resp = self.broker.open_market_with_stop(
+                symbol, side, qty, stop, link, ref_price=price
+            )
             if resp.get("retCode") not in (0, "0", None):
                 log.warning("em6 bybit open %s: %s", symbol, resp)
                 return
@@ -334,12 +364,17 @@ class Em6BybitStrategy:
                 self._update_live(live, st)
         try:
             wallet = self.broker.wallet_usdt()
-            avail = float(wallet.get("available") or 0)
+            equity = float(wallet.get("equity") or wallet.get("available") or 0)
+            avail = float(wallet.get("available") or equity)
         except Exception:
             log.exception("em6 bybit wallet")
-            avail = 0.0
-        reserved = sum(t.margin for t in self.open_trades.values())
-        free = max(0.0, avail - reserved)
+            equity = avail = 0.0
+        margin_per_trade = equity * config.PAPER_MARGIN_PCT / 100.0
+        try:
+            on_exchange = {p["symbol"] for p in self.broker.linear_positions()}
+        except Exception:
+            log.exception("em6 bybit positions")
+            on_exchange = set()
         ema_ready = 0
         candidates = 0
         for symbol, state in states.items():
@@ -354,18 +389,21 @@ class Em6BybitStrategy:
                     config.ema60_stretch_min_turnover_usdt(VARIANT) or 0
                 ):
                     candidates += 1
-            self._try_open(symbol, state, now_ms, free)
-            if symbol in self.open_trades:
-                free = max(0.0, free - self.open_trades[symbol].margin)
+            self._try_open(
+                symbol, state, now_ms, margin_per_trade, on_exchange=on_exchange
+            )
         if now_ms - self._last_status_log_ms >= 120_000:
             self._last_status_log_ms = now_ms
             log.info(
-                "EMA6 Bybit: монет в движке %s, EMA60 готова %s, кандидатов em6r %s, открыто %s, avail $%.0f",
+                "EMA6 Bybit: монет %s, EMA60 %s, кандидатов %s, открыто %s, "
+                "equity $%.0f, margin/trade $%.2f (%.0f%%)",
                 len(states),
                 ema_ready,
                 candidates,
                 len(self.open_trades),
-                avail,
+                equity,
+                margin_per_trade,
+                config.PAPER_MARGIN_PCT,
             )
         return {"type": BOARD_TYPE, "timestamp": now_ms, "data": self.view(now_ms)}
 

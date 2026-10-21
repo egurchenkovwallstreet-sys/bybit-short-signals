@@ -120,12 +120,32 @@ class Em6BybitBroker:
             if "110043" not in str(exc):
                 log.warning("set_leverage %s: %s", symbol, exc)
 
+    def clamp_stop_for_exchange(
+        self, symbol: str, side: str, stop_price: float, ref_price: float
+    ) -> float:
+        """Bybit: SL лонга строго ниже LastPrice, шорта — выше."""
+        if ref_price <= 0:
+            return stop_price
+        _, tick = self._instrument(symbol)
+        buffer = tick * 2
+        if side == "long":
+            return min(stop_price, ref_price - buffer)
+        return max(stop_price, ref_price + buffer)
+
     def open_market_with_stop(
-        self, symbol: str, side: str, qty: float, stop_price: float, link: str
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        stop_price: float,
+        link: str,
+        *,
+        ref_price: float,
     ) -> dict[str, Any]:
         qty_s = self.format_qty(symbol, qty)
         if not qty_s:
             raise ValueError("qty too small")
+        stop_price = self.clamp_stop_for_exchange(symbol, side, stop_price, ref_price)
         stop_s = self.format_price(symbol, stop_price)
         order_side = "Buy" if side == "long" else "Sell"
         self.set_leverage(symbol)
@@ -141,7 +161,10 @@ class Em6BybitBroker:
         )
         return resp
 
-    def set_stop_loss(self, symbol: str, stop_price: float) -> dict[str, Any]:
+    def set_stop_loss(
+        self, symbol: str, stop_price: float, *, side: str, ref_price: float
+    ) -> dict[str, Any]:
+        stop_price = self.clamp_stop_for_exchange(symbol, side, stop_price, ref_price)
         stop_s = self.format_price(symbol, stop_price)
         return self._client().set_trading_stop(
             category="linear",
