@@ -1038,31 +1038,23 @@ class Position:
             if low <= self.liq_price:
                 self.worst_price = min(self.worst_price, self.liq_price)
                 return "liquidation"
+            self.worst_price = min(self.worst_price, low)
+            if high > self.best_price:
+                self.best_price = high
+            self._sync_stop(last)
             if low <= self.stop_price:
                 self.worst_price = min(self.worst_price, max(low, self.stop_price))
-                return "trailing_stop"
-            self.worst_price = min(self.worst_price, low)
-            best_changed = high > self.best_price
-            if best_changed:
-                self.best_price = high
-            prev_stop = self.stop_price
-            self._sync_stop(last)
-            if self.stop_price > prev_stop + 1e-12 and last <= self.stop_price:
                 return "trailing_stop"
             return None
         if high >= self.liq_price:
             self.worst_price = max(self.worst_price, self.liq_price)
             return "liquidation"
+        self.worst_price = max(self.worst_price, high)
+        if low < self.best_price:
+            self.best_price = low
+        self._sync_stop(last)
         if high >= self.stop_price:
             self.worst_price = max(self.worst_price, min(high, self.stop_price))
-            return "trailing_stop"
-        self.worst_price = max(self.worst_price, high)
-        best_changed = low < self.best_price
-        if best_changed:
-            self.best_price = low
-        prev_stop = self.stop_price
-        self._sync_stop(last)
-        if self.stop_price < prev_stop - 1e-12 and last >= self.stop_price:
             return "trailing_stop"
         return None
 

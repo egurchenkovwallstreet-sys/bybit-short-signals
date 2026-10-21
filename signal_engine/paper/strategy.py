@@ -848,7 +848,13 @@ class PaperStrategy:
             if state is None or not state.last_price:
                 continue
             pos = trade.pos
-            low, high, last = _price_range(state, trade.last_check)
+            since = max(trade.last_check, pos.opened_at)
+            low, high, last = _price_range(
+                state,
+                since,
+                opened_at_ms=pos.opened_at,
+                entry_price=pos.entry_price,
+            )
             trade.last_check = now_ms
             self._funding(pos, trade.symbol, state, now_ms)
             if trade.variant == config.PAPER_CSS2_VARIANT and high < pos.stop_price and high < pos.liq_price:
@@ -880,14 +886,17 @@ class PaperStrategy:
         if variant == config.PAPER_EM6R_VARIANT:
             xfill = simulate_exit_fill(pos.side, pos.qty, state, now_ms)
             if xfill.ok:
-                exit_override = xfill.avg_price
                 book_exit_meta = {
                     "levels": xfill.levels_used,
                     "slippage_bps": round(xfill.slippage_bps, 2),
                     "avg_price": xfill.avg_price,
                 }
-            elif reason == "trailing_stop":
+            if reason == "trailing_stop":
                 exit_override = pos.stop_price
+                if xfill.ok and book_exit_meta:
+                    book_exit_meta["pnl_price"] = pos.stop_price
+            elif xfill.ok:
+                exit_override = xfill.avg_price
         elif variant == config.PAPER_EM6PP_VARIANT and reason in ("trailing_stop", "liquidation"):
             exit_override = pos.liq_price if reason == "liquidation" else pos.stop_price
         result = pos.close_result(reason, exit_price_override=exit_override)
@@ -972,9 +981,16 @@ class PaperStrategy:
             state = states.get(shadow.symbol)
             if state is None or not state.last_price:
                 continue
-            low, high, last = _price_range(state, shadow.last_check)
+            pos = shadow.pos
+            since = max(shadow.last_check, pos.opened_at)
+            low, high, last = _price_range(
+                state,
+                since,
+                opened_at_ms=pos.opened_at,
+                entry_price=pos.entry_price,
+            )
             shadow.last_check = now_ms
-            reason = shadow.pos.update(low, high, last)
+            reason = pos.update(low, high, last)
             if reason:
                 result = shadow.pos.close_result(reason)
                 self.store.update_candidate(
@@ -3325,12 +3341,25 @@ class PaperStrategy:
         }
 
 
-def _price_range(state: SymbolState, since_ms: int) -> tuple[float, float, float]:
+def _price_range(
+    state: SymbolState,
+    since_ms: int,
+    *,
+    opened_at_ms: int | None = None,
+    entry_price: float | None = None,
+) -> tuple[float, float, float]:
     last = float(state.last_price or 0)
     low = high = last
     start = minute_start(since_ms)
+    open_bar = minute_start(opened_at_ms) if opened_at_ms else None
+    entry = float(entry_price or 0)
     for bar in state.bars_1m:
-        if bar.timestamp > start:
+        if bar.timestamp < start:
+            continue
+        if open_bar is not None and minute_start(bar.timestamp) == open_bar and entry > 0:
+            low = min(low, last, entry)
+            high = max(high, last, entry)
+        else:
             low = min(low, bar.low)
             high = max(high, bar.high)
     return low, high, last
