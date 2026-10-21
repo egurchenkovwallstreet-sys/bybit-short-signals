@@ -45,17 +45,6 @@ const state = {
   sortKey: "created_at",
   sortDir: -1,
   lastCandleBarCount: 0,
-  analysisSub: "pump_lab",
-};
-
-const ANALYSIS_SUB_VIEWS = {
-  pump_lab: "view-pump-lab",
-  signals: "view-signals",
-  pump_scan: "view-pump-scan",
-  x2_retrace: "view-x2-retrace",
-  pump_strategy: "view-pump-strategy",
-  vacuum_lh: "view-vacuum-lh",
-  pending: "view-pending",
 };
 
 const tooltip = document.getElementById("tooltip");
@@ -63,75 +52,6 @@ const tooltip = document.getElementById("tooltip");
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => showTab(button.dataset.tab));
 });
-
-function initAnalysisSubtabs() {
-  document.querySelectorAll(".analysis-subtab").forEach((button) => {
-    if (button.dataset.inited) return;
-    button.dataset.inited = "1";
-    button.addEventListener("click", () => {
-      const sub = button.dataset.analysisSub;
-      if (!sub) return;
-      state.analysisSub = sub;
-      showAnalysisSub(sub);
-    });
-  });
-}
-
-function analysisViewId(subName) {
-  return ANALYSIS_SUB_VIEWS[subName] || `view-${String(subName || "").replace(/_/g, "-")}`;
-}
-
-function showAnalysisSub(name) {
-  initAnalysisSubtabs();
-  state.analysisSub = name;
-  document.querySelectorAll(".analysis-subtab").forEach((button) => {
-    button.classList.toggle("active", button.dataset.analysisSub === name);
-  });
-  const activeId = analysisViewId(name);
-  document.querySelectorAll("#view-analysis-hub > section").forEach((el) => {
-    el.hidden = el.id !== activeId;
-  });
-  if (name === "pump_lab" && window.pumpLab) {
-    window.pumpLab.onTab();
-  }
-  if (name === "pump_scan" && window.pumpScan) {
-    window.pumpScan.initPumpScanTab();
-    requestAnimationFrame(() => window.pumpScan.resizeChart?.());
-  }
-  if (name === "x2_retrace" && window.x2Retrace) {
-    window.x2Retrace.initX2RetraceTab();
-    requestAnimationFrame(() => window.x2Retrace.resizeChart?.());
-  }
-  if (name === "pump_strategy" && window.pumpStrategy) {
-    window.pumpStrategy.initPumpStrategyTab();
-    requestAnimationFrame(() => {
-      if (window.pumpStrategy?.resizeChart) window.pumpStrategy.resizeChart();
-    });
-  }
-  if (name === "vacuum_lh") {
-    if (window.vacuumLh) {
-      window.vacuumLh.initVacuumLhTab();
-      requestAnimationFrame(() => window.vacuumLh.resizeChart?.());
-    } else {
-      const cols = document.getElementById("vacuum-lh-columns");
-      if (cols) {
-        cols.innerHTML =
-          '<p class="quiet pump-strategy-empty">Не загрузился скрипт вкладки. Обновите страницу: Ctrl+F5 (полная перезагрузка).</p>';
-      }
-    }
-  }
-  if (name === "pending") {
-    renderPending();
-  }
-  if (name === "signals" && state.chart) {
-    requestAnimationFrame(() => state.chart.resize());
-  }
-}
-
-function openAnalysisSub(name) {
-  showTab("pump_lab");
-  showAnalysisSub(name);
-}
 
 document.querySelectorAll("#signal-table th").forEach((header) => {
   header.addEventListener("click", () => {
@@ -244,73 +164,13 @@ function connectSocket() {
   const message = JSON.parse(event.data);
   if (message.type === "snapshot") {
     setDemo(message.demo);
-    state.board = message.board || [];
     state.stats = message.stats;
-    state.detail = message.detail;
-    state.selected = message.detail && message.detail.signal ? message.detail.signal.symbol : state.selected;
-    renderBoard();
-    renderDetail();
     renderStats();
-    if (message.paper_test) {
-      if (window.paperTest) window.paperTest.onSnapshot(message.paper_test);
-      if (window.vacuumLh?.onPaper) window.vacuumLh.onPaper(message.paper_test);
+    if (message.paper_test && window.paperTest) {
+      window.paperTest.onSnapshot(message.paper_test);
     }
-    if (window.pumpScan) {
-      window.pumpScan.onPumpScanSnapshot(message.pump_scan_board, message.pump_scan_detail);
-    }
-    if (window.x2Retrace) {
-      window.x2Retrace.onX2Snapshot(message.x2_retrace_board, message.x2_retrace_detail);
-    }
-    if (window.pumpStrategy) {
-      window.pumpStrategy.onPumpStrategySnapshot(
-        message.pump_strategy_board,
-        message.pump_strategy_detail,
-      );
-    }
-    if (message.pump_lab_board && window.pumpLab) {
-      window.pumpLab.onPumpLabBoard(message.pump_lab_board);
-    }
-    if (window.vacuumLh) {
-      window.vacuumLh.onVacuumLhSnapshot(message.vacuum_lh_board, message.vacuum_lh_detail);
-    }
-  } else if (message.type === "pump_lab_board" && window.pumpLab) {
-    setDemo(message.demo);
-    window.pumpLab.onPumpLabBoard(message.data);
   } else if (message.type === "paper_test") {
     if (window.paperTest) window.paperTest.onSnapshot(message.data);
-    if (window.vacuumLh?.onPaper) window.vacuumLh.onPaper(message.data);
-  } else if (message.type === "board") {
-    setDemo(message.demo);
-    state.board = message.data || [];
-    renderBoard();
-  } else if (message.type === "pump_scan_board" && window.pumpScan) {
-    setDemo(message.demo);
-    window.pumpScan.onPumpScanBoard(message.data);
-  } else if (message.type === "pump_scan_detail" && window.pumpScan) {
-    window.pumpScan.onPumpScanDetail(message.symbol, message.data);
-  } else if (message.type === "x2_retrace_board" && window.x2Retrace) {
-    setDemo(message.demo);
-    window.x2Retrace.onX2Board(message.data);
-  } else if (message.type === "x2_retrace_detail" && window.x2Retrace) {
-    window.x2Retrace.onX2Detail(message.symbol, message.data);
-  } else if (message.type === "pump_strategy_board" && window.pumpStrategy) {
-    setDemo(message.demo);
-    window.pumpStrategy.onPumpStrategyBoard(message.data);
-  } else if (message.type === "pump_strategy_detail" && window.pumpStrategy) {
-    window.pumpStrategy.onPumpStrategyDetail(message.symbol, message.data);
-  } else if (message.type === "vacuum_lh_board" && window.vacuumLh) {
-    setDemo(message.demo);
-    window.vacuumLh.onVacuumLhBoard(message.data);
-  } else if (message.type === "vacuum_lh_detail" && window.vacuumLh) {
-    window.vacuumLh.onVacuumLhDetail(message.symbol, message.data);
-  } else if (message.type === "detail" && (!state.selected || message.symbol === state.selected)) {
-    const changed = state.selected !== message.symbol;
-    state.selected = message.symbol;
-    state.detail = message.data;
-    if (changed) renderBoard();
-    renderDetail();
-  } else if (message.type === "pnl") {
-    applyPnl(message.items || []);
   } else if (message.type === "stats") {
     state.stats = message.data;
     renderStats();
@@ -319,8 +179,7 @@ function connectSocket() {
 }
 
 connectSocket();
-initAnalysisSubtabs();
-showTab("pump_lab");
+showTab("paper");
 
 function setDemo(demo) {
   state.demo = !!demo;
@@ -333,16 +192,11 @@ function showTab(name) {
   document.querySelectorAll(".tab").forEach((button) => {
     button.classList.toggle("active", button.dataset.tab === name);
   });
-  const hub = document.getElementById("view-analysis-hub");
-  if (hub) hub.hidden = name !== "pump_lab";
   document.getElementById("view-stats").hidden = name !== "stats";
   const paperView = document.getElementById("view-paper");
   if (paperView) paperView.hidden = name !== "paper";
   const balanceView = document.getElementById("view-balance");
   if (balanceView) balanceView.hidden = name !== "balance";
-  if (name === "pump_lab") {
-    showAnalysisSub(state.analysisSub || "pump_lab");
-  }
   if (name === "paper" && window.paperTest) {
     requestAnimationFrame(() => window.paperTest.onTab());
   }
@@ -355,8 +209,6 @@ function showTab(name) {
       Object.values(state.gauges).forEach((chart) => chart.resize());
       if (state.equity) state.equity.resize();
     });
-  } else if (name !== "pump_lab" && state.chart) {
-    requestAnimationFrame(() => state.chart.resize());
   }
 }
 

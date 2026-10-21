@@ -92,44 +92,11 @@ class Hub:
         return calculated
 
     def snapshot(self, client: Client) -> dict[str, Any]:
-        board = self.cache.view_board()
-        symbol = client.symbol or _first_symbol(board)
-        client.symbol = symbol
-        pump_symbol = client.pump_scan_symbol
         return {
             "type": "snapshot",
             "demo": self.demo,
-            "board": board,
-            "pump_scan_board": self.cache.view_pump_scan_board(),
             "stats": self.stats(),
-            "detail": self.cache.detail(symbol, client.interval) if symbol else None,
-            "pump_scan_detail": (
-                self.cache.pump_scan_detail(pump_symbol, client.pump_scan_interval) if pump_symbol else None
-            ),
-            "x2_retrace_board": self.cache.view_x2_retrace_board(),
-            "x2_retrace_detail": (
-                self.cache.x2_retrace_detail(client.x2_retrace_symbol, client.x2_retrace_interval)
-                if client.x2_retrace_symbol
-                else None
-            ),
-            "pump_strategy_board": self.cache.view_pump_strategy_board(),
-            "pump_strategy_detail": (
-                self.cache.pump_strategy_detail(
-                    client.pump_strategy_symbol, client.pump_strategy_interval
-                )
-                if client.pump_strategy_symbol
-                else None
-            ),
             "paper_test": self.paper.view(),
-            "pump_lab_board": self.cache.view_pump_lab_board(),
-            "vacuum_lh_board": self.cache.view_vacuum_lh_board(client.vacuum_lh_interval),
-            "vacuum_lh_detail": (
-                self.cache.vacuum_lh_detail(
-                    client.vacuum_lh_symbol, client.vacuum_lh_chart_interval
-                )
-                if client.vacuum_lh_symbol
-                else None
-            ),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
@@ -291,26 +258,6 @@ class Hub:
         while not self._stopped:
             await asyncio.sleep(tick)
             now = time.monotonic()
-            board = self.cache.view_board() if self.board_dirty else None
-            pump_board = self.cache.view_pump_scan_board() if self.pump_scan_dirty else None
-            x2_board = self.cache.view_x2_retrace_board() if self.x2_retrace_dirty else None
-            pump_strategy = (
-                self.cache.view_pump_strategy_board() if self.pump_strategy_dirty else None
-            )
-            vacuum_lh_payload = None
-            if self.vacuum_lh_dirty and self.cache.vacuum_lh_intervals:
-                vacuum_lh_payload = {
-                    "intervals": {
-                        iv: self.cache.view_vacuum_lh_board(iv)["signals"]
-                        for iv in config.VACUUM_LH_INTERVALS
-                        if iv in self.cache.vacuum_lh_intervals
-                    },
-                    "updated_at": self.cache.vacuum_lh_updated_at,
-                    "default_interval": config.VACUUM_LH_DEFAULT_INTERVAL,
-                    "chart_pivots": self.cache.vacuum_lh_chart_pivots,
-                }
-            pump_lab = self.cache.view_pump_lab_board() if self.pump_lab_dirty else None
-            send_detail = self.market_dirty
             paper = self.paper.view() if self.paper_dirty else None
             self.board_dirty = False
             self.pump_scan_dirty = False
@@ -320,113 +267,8 @@ class Hub:
             self.pump_lab_dirty = False
             self.market_dirty = False
             self.paper_dirty = False
-            pnl = None
-            if now - last_ticker >= ticker_gap:
-                pnl = self.cache.pnl_items()
-                last_ticker = now
             for client in list(self.clients):
                 try:
-                    if board is not None:
-                        await client.websocket.send_json({"type": "board", "data": board, "demo": self.demo})
-                        if not client.symbol:
-                            client.symbol = _first_symbol(board)
-                            client.force_detail = bool(client.symbol)
-                    if pump_board is not None:
-                        await client.websocket.send_json(
-                            {"type": "pump_scan_board", "data": pump_board, "demo": self.demo}
-                        )
-                        if not client.pump_scan_symbol:
-                            client.pump_scan_symbol = _first_symbol(pump_board)
-                            client.force_pump_scan_detail = bool(client.pump_scan_symbol)
-                    if x2_board is not None:
-                        await client.websocket.send_json(
-                            {"type": "x2_retrace_board", "data": x2_board, "demo": self.demo}
-                        )
-                        if not client.x2_retrace_symbol:
-                            client.x2_retrace_symbol = _first_symbol(x2_board)
-                            client.force_x2_retrace_detail = bool(client.x2_retrace_symbol)
-                    if pump_strategy is not None:
-                        await client.websocket.send_json(
-                            {
-                                "type": "pump_strategy_board",
-                                "data": pump_strategy,
-                                "demo": self.demo,
-                            }
-                        )
-                    if vacuum_lh_payload is not None:
-                        await client.websocket.send_json(
-                            {
-                                "type": "vacuum_lh_board",
-                                "data": vacuum_lh_payload,
-                                "demo": self.demo,
-                            }
-                        )
-                    # Скан сам обновляет detail: новый pivot не ждёт market_dirty.
-                    if client.vacuum_lh_symbol and (
-                        send_detail or client.force_vacuum_lh_detail or vacuum_lh_payload is not None
-                    ):
-                        detail = self.cache.vacuum_lh_detail(
-                            client.vacuum_lh_symbol, client.vacuum_lh_chart_interval
-                        )
-                        if detail:
-                            detail = {key: value for key, value in detail.items() if key != "candles"}
-                        await client.websocket.send_json(
-                            {
-                                "type": "vacuum_lh_detail",
-                                "symbol": client.vacuum_lh_symbol,
-                                "data": detail,
-                            }
-                        )
-                        client.force_vacuum_lh_detail = False
-                    if pump_lab is not None:
-                        await client.websocket.send_json(
-                            {"type": "pump_lab_board", "data": pump_lab, "demo": self.demo}
-                        )
-                    if client.symbol and (send_detail or client.force_detail):
-                        await client.websocket.send_json(
-                            {
-                                "type": "detail",
-                                "symbol": client.symbol,
-                                "data": self.cache.detail(client.symbol, client.interval),
-                            }
-                        )
-                        client.force_detail = False
-                    if client.pump_scan_symbol and (send_detail or client.force_pump_scan_detail):
-                        await client.websocket.send_json(
-                            {
-                                "type": "pump_scan_detail",
-                                "symbol": client.pump_scan_symbol,
-                                "data": self.cache.pump_scan_detail(
-                                    client.pump_scan_symbol, client.pump_scan_interval
-                                ),
-                            }
-                        )
-                        client.force_pump_scan_detail = False
-                    if client.x2_retrace_symbol and (send_detail or client.force_x2_retrace_detail):
-                        await client.websocket.send_json(
-                            {
-                                "type": "x2_retrace_detail",
-                                "symbol": client.x2_retrace_symbol,
-                                "data": self.cache.x2_retrace_detail(
-                                    client.x2_retrace_symbol, client.x2_retrace_interval
-                                ),
-                            }
-                        )
-                        client.force_x2_retrace_detail = False
-                    if client.pump_strategy_symbol and (send_detail or client.force_pump_strategy_detail):
-                        await client.websocket.send_json(
-                            {
-                                "type": "pump_strategy_detail",
-                                "symbol": client.pump_strategy_symbol,
-                                "data": self.cache.pump_strategy_detail(
-                                    client.pump_strategy_symbol,
-                                    client.pump_strategy_interval,
-                                ),
-                            }
-                        )
-                        client.force_pump_strategy_detail = False
-                    if pnl is not None:
-                        await client.websocket.send_json({"type": "pnl", "items": pnl})
                     if paper is not None:
                         await client.websocket.send_json({"type": "paper_test", "data": paper})
                 except Exception:

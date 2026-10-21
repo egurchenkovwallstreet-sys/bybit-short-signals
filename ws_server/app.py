@@ -15,7 +15,6 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from ws_server import paper as paper_db
-from ws_server import pump_lab_api
 from ws_server.hub import Client, Hub
 
 
@@ -110,51 +109,6 @@ async def paper_close_trade(trade_id: int) -> dict[str, Any]:
     return {"ok": True, "trade_id": trade_id}
 
 
-@app.get("/api/vacuum-lh/board")
-async def vacuum_lh_board(interval: str = config.VACUUM_LH_DEFAULT_INTERVAL) -> dict[str, Any]:
-    if interval not in config.VACUUM_LH_INTERVALS:
-        raise HTTPException(status_code=400, detail="interval: 30, 60 или 240")
-    hub = app.state.hub
-    hub.cache._reindex_vacuum_lh(interval)
-    return hub.cache.view_vacuum_lh_board(interval)
-
-
-@app.get("/api/pump-lab/board")
-async def pump_lab_board() -> dict[str, Any]:
-    data = app.state.hub.cache.view_pump_lab_board()
-    if data.get("sections"):
-        return data
-    return await asyncio.to_thread(pump_lab_api.board_from_db)
-
-
-@app.get("/api/pump-lab/episode/{episode_id}")
-async def pump_lab_episode(episode_id: int) -> dict[str, Any]:
-    detail = await asyncio.to_thread(pump_lab_api.episode_detail, episode_id)
-    if detail is None:
-        raise HTTPException(status_code=404, detail="эпизод не найден")
-    return detail
-
-
-def _apply_pump_lab_board(board: dict[str, Any]) -> dict[str, Any]:
-    app.state.hub.cache.pump_lab_board = board
-    app.state.hub.pump_lab_dirty = True
-    return board
-
-
-@app.post("/api/pump-lab/episode/{episode_id}/dismiss")
-async def pump_lab_dismiss_episode(episode_id: int) -> dict[str, Any]:
-    board = await asyncio.to_thread(pump_lab_api.dismiss_episode, episode_id)
-    if board is None:
-        raise HTTPException(status_code=404, detail="эпизод не найден")
-    return {"ok": True, "board": _apply_pump_lab_board(board)}
-
-
-@app.post("/api/pump-lab/dismiss-all")
-async def pump_lab_dismiss_all() -> dict[str, Any]:
-    board = await asyncio.to_thread(pump_lab_api.dismiss_all_active)
-    return {"ok": True, "board": _apply_pump_lab_board(board)}
-
-
 @app.get("/api/tooltips")
 async def tooltips() -> FileResponse:
     return FileResponse(STATIC_DIR / "tooltips.json", media_type="application/json")
@@ -171,26 +125,6 @@ async def signals_unprocessed() -> dict[str, Any]:
     from ws_server.journal import list_unprocessed
 
     return {"rows": list_unprocessed(config.SQLITE_PATH)}
-
-
-@app.post("/api/watch/dismiss")
-async def dismiss_board_watch(body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    """Снять монету с доски памп-скан или 2× откат (липкий список)."""
-    board = str(body.get("board") or "").strip()
-    symbol = str(body.get("symbol") or "").strip().upper()
-    if board not in {"pump_scan", "x2_retrace", "pump_strategy"}:
-        raise HTTPException(status_code=400, detail="board: pump_scan, x2_retrace или pump_strategy")
-    if not _SYMBOL.fullmatch(symbol):
-        raise HTTPException(status_code=400, detail="Некорректный тикер")
-    from signal_engine.watch_store import WatchStore
-
-    store = WatchStore(config.SQLITE_PATH)
-    store.open()
-    try:
-        store.dismiss(board, symbol)
-    finally:
-        store.close()
-    return {"ok": True, "board": board, "symbol": symbol}
 
 
 _OI_INTERVALS = {"5min", "15min", "30min", "1h", "4h", "1d"}

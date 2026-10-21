@@ -10,9 +10,8 @@
   <header class="topbar">
     <div class="brand">Сигналы на шорт</div>
     <nav class="tabs">
-      <button type="button" class="tab active" data-tab="pump_lab">Анализ пампа</button>
       <button type="button" class="tab" data-tab="stats">Статистика</button>
-      <button type="button" class="tab" data-tab="paper">Тест стратегии</button>
+      <button type="button" class="tab active" data-tab="paper">Тест стратегии</button>
       <button type="button" class="tab" data-tab="balance">Баланс</button>
     </nav>
     <div id="link-state" class="link-state">подключение…</div>
@@ -21,173 +20,9 @@
     Redis недоступен. На экране пример карточки, это не живой рынок и не рекомендация входа.
   </p>
 
-  <div id="view-analysis-hub" class="analysis-hub">
-    <nav class="analysis-subtabs" aria-label="Разделы анализа пампа">
-      <button type="button" class="analysis-subtab active" data-analysis-sub="pump_lab">Лаборатория</button>
-      <button type="button" class="analysis-subtab" data-analysis-sub="signals">Сигналы</button>
-      <button type="button" class="analysis-subtab" data-analysis-sub="pump_scan">Памп-скан</button>
-      <button type="button" class="analysis-subtab" data-analysis-sub="x2_retrace">2× откат</button>
-      <button type="button" class="analysis-subtab" data-analysis-sub="pump_strategy">Поиск пампов</button>
-      <button type="button" class="analysis-subtab" data-analysis-sub="vacuum_lh">Пылесос LH</button>
-      <button type="button" class="analysis-subtab" data-analysis-sub="pending">Не отработанные</button>
-    </nav>
-
-  <section id="view-signals" class="workspace" hidden>
-    <div id="columns" class="columns"></div>
-    <aside id="detail" class="detail">
-      <p class="empty">Выберите сигнал слева.</p>
-    </aside>
-  </section>
-
-  <section id="view-x2-retrace" class="pump-scan-view" hidden>
-    <p class="quiet pump-scan-intro">До 14d: пик/min ≥2×; две вершины на 4H/1H (LH, double top или 2-я до +15%), ≥4 свечи между. Липкий список.</p>
-    <div id="x2-list-wrap">
-      <div class="pump-scan-body">
-        <div id="x2-columns" class="columns pump-columns"></div>
-      </div>
-    </div>
-    <div id="x2-workspace" class="psc-workspace" hidden>
-      <div class="psc-chart-pane">
-        <div class="psc-tf-row" id="x2-tf-row"></div>
-        <div class="psc-chart-wrap">
-          <div id="x2-candle-chart" class="psc-candle-chart"></div>
-        </div>
-        <p class="quiet psc-chart-hint">Liq слева 30%. На 5 последних свечах — ⚡ и сумма short/long за свечу. Справа стакан ±30%.</p>
-      </div>
-      <aside class="psc-info-pane" id="x2-info-pane"></aside>
-    </div>
-  </section>
-
-  <section id="view-pump-strategy" class="pump-strategy-view" hidden>
-    <p class="quiet pump-scan-intro">
-      Быстрый памп: ≥40% за 1–12 ч. Длинный: минимум ×2 от дна до пика за 10 д. Оборот ≥300&nbsp;000&nbsp;USDT за сутки.
-      Монета остаётся в списке, пока не нажмёте «Снять» или не упадёт оборот.
-    </p>
-    <div id="pump-strategy-list-wrap">
-      <div id="pump-strategy-grid" class="pump-strategy-grid"></div>
-    </div>
-    <div id="pump-strategy-workspace" class="psc-workspace" hidden>
-      <div class="psc-chart-pane">
-        <div class="psc-tf-row" id="psc-tf-row"></div>
-        <div class="psc-chart-wrap">
-          <div id="psc-candle-chart" class="psc-candle-chart"></div>
-        </div>
-        <p class="quiet psc-chart-hint">Liq слева 30%. На 5 последних свечах — ⚡ и сумма short/long за свечу. Справа стакан ±30%.</p>
-      </div>
-      <aside class="psc-info-pane" id="psc-info-pane"></aside>
-    </div>
-  </section>
-
-  <section id="view-vacuum-lh" class="pump-strategy-view" hidden>
-    <p class="quiet" id="vacuum-lh-intro">
-      Оборот за сутки от 1 млн и размах цены за час от 2%. Без цепочки вершин. Экстремум: слева 15–30, справа 2, разнос ≥30.
-    </p>
-    <div class="vacuum-mode-row" id="vacuum-mode-row"></div>
-    <div class="vacuum-lh-toolbar">
-      <div class="psc-tf-row" id="vacuum-lh-tf-row"></div>
-      <span id="vacuum-lh-status" class="quiet"></span>
-    </div>
-    <div id="vacuum-desk" class="vacuum-desk" hidden>
-      <div id="vacuum-desk-summary" class="paper-cards"></div>
-      <section class="paper-panel">
-        <h3>Стратегии — сегодня и всё время (MSK)</h3>
-        <div class="table-wrap"><table id="vacuum-desk-overview" class="paper-table vacuum-analytics"></table></div>
-      </section>
-      <section class="paper-panel">
-        <h3>Детальная аналитика</h3>
-        <div class="table-wrap"><table id="vacuum-desk-stats" class="paper-table vacuum-analytics"></table></div>
-      </section>
-      <section class="paper-panel">
-        <h3>Открытые</h3>
-        <div class="table-wrap paper-scroll"><table id="vacuum-desk-open" class="paper-table"></table></div>
-      </section>
-      <section class="paper-panel">
-        <h3>Сигналы</h3>
-        <div class="table-wrap"><table id="vacuum-desk-watch" class="paper-table"></table></div>
-      </section>
-      <section class="paper-panel">
-        <h3>Закрытые</h3>
-        <div class="table-wrap paper-scroll"><table id="vacuum-desk-closed" class="paper-table"></table></div>
-      </section>
-    </div>
-    <div id="vacuum-lh-list-wrap" class="vacuum-lh-list-wrap">
-      <div id="vacuum-lh-columns" class="columns pump-columns vacuum-lh-columns"></div>
-    </div>
-    <div id="vacuum-lh-workspace" class="psc-workspace" hidden>
-      <div class="psc-chart-pane">
-        <div class="psc-tf-row" id="vacuum-lh-chart-tf-row"></div>
-        <div class="psc-chart-wrap vacuum-lh-chart-wrap">
-          <div id="vacuum-lh-candle-chart" class="psc-candle-chart"></div>
-          <div id="vacuum-trade-overlay" class="vacuum-trade-overlay" aria-hidden="true"></div>
-        </div>
-      </div>
-      <aside class="psc-info-pane" id="vacuum-lh-info-pane"></aside>
-    </div>
-  </section>
-
-  <section id="view-pump-scan" class="pump-scan-view" hidden>
-    <p class="quiet pump-scan-intro">Вход при ≥35% / 24h; дальше монета не пропадает при падении % (выход: 24h &lt; 0 или «Снять»). Колонка меняется после ~15 мин подтверждения.</p>
-    <div id="pump-scan-list-wrap">
-      <div class="pump-scan-body">
-        <div id="pump-columns" class="columns pump-columns"></div>
-      </div>
-    </div>
-    <div id="pump-scan-workspace" class="psc-workspace" hidden>
-      <div class="psc-chart-pane">
-        <div class="psc-tf-row" id="pump-scan-tf-row"></div>
-        <div class="psc-chart-wrap">
-          <div id="pump-scan-candle-chart" class="psc-candle-chart"></div>
-        </div>
-        <p class="quiet psc-chart-hint">Liq слева 30%. На 5 последних свечах — ⚡ и сумма short/long за свечу. Справа стакан ±30%.</p>
-      </div>
-      <aside class="psc-info-pane" id="pump-scan-info-pane"></aside>
-    </div>
-  </section>
-
-  <section id="view-pump-lab" class="pump-lab-view">
-    <div class="pl-toolbar">
-      <button type="button" id="pl-dismiss-all" class="pl-btn-danger">Удалить все карточки</button>
-      <span class="quiet pl-toolbar-hint">Снимает все с отслеживания; новые появятся на следующем скане (до 5 мин).</span>
-    </div>
-    <p class="quiet pump-lab-intro">
-      Все активные пампы: быстрый (6 ч), средний (2 суток), длинный (20 суток).
-      Памп: быстрый ≥40% и объём ×10, средний ≥60% и ×20, длинный ≥100% и ×10. Красный — рост, жёлтый — торможение,
-      зелёный — снижение; «памп прошёл» — откат от пика до дна коррекции (20–40%: быстрый от 20%, средний от 30%, длинный от 40%), дно сформировано — монета снимается. Метрики: зелёный за шорт, жёлтый нейтрально, красный против.
-      Широкий журнал пишет сырые показатели на каждом скане и отдельно помечает пик, остановку и старт снижения. По ним потом ищем вход в дамп.
-      <span id="pl-study-count"></span>
-    </p>
-    <div class="pump-lab-layout">
-      <div id="pump-lab-sections" class="pump-lab-sections"></div>
-      <aside id="pump-lab-detail" class="pump-lab-detail" hidden>
-        <p class="quiet">Выберите монету.</p>
-      </aside>
-    </div>
-  </section>
-
-  <section id="view-pending" class="stats pending-view" hidden>
-    <p class="quiet">Открытые сигналы и недавно снятые с доски до 5/5 — не пропадают при исчезновении карточки.</p>
-    <div class="table-wrap">
-      <table id="pending-table">
-        <thead>
-          <tr>
-            <th>Тикер</th>
-            <th>Статус</th>
-            <th>Колонка</th>
-            <th>Рост 5m/15m</th>
-            <th>Исход</th>
-            <th>P&amp;L %</th>
-            <th>Обновлено</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </section>
-  </div>
-
-  <section id="view-paper" class="paper-view" hidden>
+  <section id="view-paper" class="paper-view">
     <p class="quiet paper-intro">
-      Бумажные сделки ×10, маржа 5% от баланса, изолированная. Активные счета: Трейл 20, Пик −10, Трейл 20+ / Молния+, Мини тест 2, График. БАБЛОСОС, Пылесос 5 и Пылесос 15 — во вкладке «Пылесос LH». Комиссии и funding учтены.
+      Бумажные сделки ×10, маржа 5% от баланса, изолированная. БАБЛОСОС, Пылесос 5 и Пылесос 15 — среди вариантов ниже. Комиссии и funding учтены.
       Ордера на биржу не уходят. У каждого варианта свой счёт $1000.
       Шорт: не 14d; 6–180 мин с пика или поздний шлюз; без мегаобъёма ×80+ и dual-top после 60 мин. Лонг: без шлюза шорта.
     </p>
@@ -285,11 +120,6 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/paper_test.js?v=20261019pnlglyph"></script>
   <script src="/static/board_chart.js?v=20261019ema333engine"></script>
-  <script src="/static/app.js?v=20261017bars300"></script>
-  <script src="/static/pump_scan.js?v=20251008v"></script>
-  <script src="/static/x2_retrace.js?v=20251008v"></script>
-  <script src="/static/pump_strategy.js?v=20251008h"></script>
-  <script src="/static/pump_lab.js?v=20261012study"></script>
-  <script src="/static/vacuum_lh.js?v=20261020333eng"></script>
+  <script src="/static/app.js?v=20261021noanalysis"></script>
 </body>
 </html>

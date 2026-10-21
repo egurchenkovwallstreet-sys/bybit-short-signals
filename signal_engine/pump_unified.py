@@ -1,7 +1,7 @@
 """Единый детект пампа для лаборатории и всех досок (скан, 2×, поиск).
 
 Все пороги — PUMP_UNIFIED_* в config.py. Лаборатория и watch-доски вызывают
-detect_unified_episodes(); мониторинг (фазы, журнал) остаётся в pump_lab.
+detect_unified_episodes() для paper/кандидатов (UI «Анализ пампа» снят).
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import config
 from signal_engine.pump_history import history_pump_metrics
 from signal_engine.paper.detect import merged_15m
-from signal_engine.pump_lab.phases import drawdown_from_peak_pct, pump_class_from_duration
+from signal_engine.pump_phases import drawdown_from_peak_pct, pump_class_from_duration
 from signal_engine.state import Bar, SymbolState
 
 

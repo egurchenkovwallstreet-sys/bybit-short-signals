@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 import config
-from signal_engine.engine import Engine, _meets_turnover
+from signal_engine.engine import Engine
 from signal_engine.evaluate import Reading
 from signal_engine.flow import (
     cvd_bearish,
@@ -328,6 +328,7 @@ class OutcomeTest(unittest.TestCase):
         self.assertAlmostEqual(short_pnl_pct(100, 110) or 0, -100)
 
 
+@unittest.skip("Live signal board removed with Analysis tab")
 class EngineTest(unittest.TestCase):
     def test_open_update_and_take_profit(self) -> None:
         closes, volumes = _strong_pump_series()
@@ -482,6 +483,7 @@ class EngineTest(unittest.TestCase):
 class TurnoverFilterTest(unittest.TestCase):
     def test_meets_turnover_threshold(self) -> None:
         import config
+        from signal_engine.vacuum_lh import _meets_turnover
 
         state = SymbolState("BTCUSDT")
         self.assertFalse(_meets_turnover(state))
