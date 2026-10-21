@@ -2047,7 +2047,11 @@ class PaperStrategy:
             if not ev.passed:
                 continue
             for variant in active:
-                if variant == config.PAPER_EM6R_VARIANT and config.em6_bybit_enabled():
+                if (
+                    variant == config.PAPER_EM6R_VARIANT
+                    and config.em6_bybit_enabled()
+                    and not config.em6r_paper_parallel()
+                ):
                     continue
                 if (variant, symbol) in self.trades:
                     continue
