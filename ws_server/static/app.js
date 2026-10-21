@@ -42,8 +42,9 @@ const state = {
   priceLines: [],
   gauges: {},
   equity: null,
-  sortKey: "created_at",
-  sortDir: -1,
+  statsSort: "net",
+  statsSideFilter: "all",
+  statsPeriodMode: "days",
   lastCandleBarCount: 0,
 };
 
@@ -51,15 +52,6 @@ const tooltip = document.getElementById("tooltip");
 
 document.querySelectorAll(".tab").forEach((button) => {
   button.addEventListener("click", () => showTab(button.dataset.tab));
-});
-
-document.querySelectorAll("#signal-table th").forEach((header) => {
-  header.addEventListener("click", () => {
-    const key = header.dataset.sort;
-    state.sortDir = state.sortKey === key ? -state.sortDir : 1;
-    state.sortKey = key;
-    renderTable();
-  });
 });
 
 document.body.addEventListener("mouseover", (event) => {
@@ -211,6 +203,21 @@ function showTab(name) {
     });
   }
 }
+
+document.getElementById("view-stats")?.addEventListener("change", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLSelectElement)) return;
+  if (target.id === "stats-sort") {
+    state.statsSort = target.value;
+    renderStats();
+  } else if (target.id === "stats-side") {
+    state.statsSideFilter = target.value;
+    renderStats();
+  } else if (target.id === "stats-period") {
+    state.statsPeriodMode = target.value;
+    renderStats();
+  }
+});
 
 function renderBoard() {
   const root = document.getElementById("columns");
@@ -893,60 +900,283 @@ function renderPending() {
 
 function renderStats() {
   const stats = state.stats;
-  if (!stats || !window.echarts) return;
-  const root = document.getElementById("gauges");
-  if (!root.childElementCount) {
-    [
-      ["win_rate", "Win Rate"],
-      ["profit_factor", "Profit Factor"],
-      ["avg_return", "Средняя доходность"],
-      ["max_drawdown", "Max Drawdown"],
-      ["count", "Сигналы"],
-    ].forEach(([key, title]) => {
-      const card = document.createElement("div");
-      card.className = "gauge-card";
-      card.innerHTML = `<div class="plot" data-gauge="${key}"></div><div class="gauge-title">${title}</div>`;
-      card.title = title;
-      root.appendChild(card);
-    });
+  if (!stats || !window.echarts || !stats.paper) return;
+
+  const toolbar = document.getElementById("stats-toolbar");
+  if (toolbar) {
+    toolbar.innerHTML = `
+      <div class="stats-toolbar-row">
+        <span class="stats-as-of">${stats.as_of ? `Обновлено: ${stats.as_of}` : ""}${stats.demo ? " · пример" : ""}</span>
+        <label>Сортировка
+          <select id="stats-sort">
+            <option value="net">Итог P&amp;L</option>
+            <option value="short_net">P&amp;L шортов</option>
+            <option value="long_net">P&amp;L лонгов</option>
+            <option value="win_rate">Win rate</option>
+            <option value="closed">Сделок</option>
+          </select>
+        </label>
+        <label>Фокус
+          <select id="stats-side">
+            <option value="all">Все сделки</option>
+            <option value="short">Только шорты</option>
+            <option value="long">Только лонги</option>
+          </select>
+        </label>
+        <label>Периоды
+          <select id="stats-period">
+            <option value="days">10 дней</option>
+            <option value="weeks">8 недель</option>
+          </select>
+        </label>
+      </div>`;
+    const sortEl = toolbar.querySelector("#stats-sort");
+    const sideEl = toolbar.querySelector("#stats-side");
+    const periodEl = toolbar.querySelector("#stats-period");
+    if (sortEl) sortEl.value = state.statsSort;
+    if (sideEl) sideEl.value = state.statsSideFilter;
+    if (periodEl) periodEl.value = state.statsPeriodMode;
   }
-  gauge("win_rate", stats.win_rate, 0, 100, [
+
+  const globalBlock = document.getElementById("stats-global");
+  const g = stats.global || {};
+  const gm = pickSideMetrics(g.metrics || {}, g.sides || {}, state.statsSideFilter);
+  if (globalBlock) {
+    globalBlock.innerHTML = `
+      <h2 class="stats-section-title">Все стратегии</h2>
+      ${sideSummaryHtml(g.sides)}
+      <div class="gauges stats-gauges">${gaugeCardsHtml("global", gm)}</div>`;
+    renderGaugeSet("global", gm);
+  }
+
+  const equityNode = document.getElementById("equity");
+  if (equityNode) {
+    state.equity = echarts.getInstanceByDom(equityNode) || echarts.init(equityNode);
+    const curve = g.equity || [1000];
+    state.equity.setOption({
+      backgroundColor: "transparent",
+      title: { text: "Капитал по закрытым сделкам (все варианты)", textStyle: { color: "#e8eef6", fontSize: 14 } },
+      grid: { left: 48, right: 16, top: 40, bottom: 28 },
+      xAxis: { type: "category", data: curve.map((_, index) => index), axisLabel: { color: "#8e9aab" } },
+      yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
+      series: [{
+        type: "line",
+        data: curve,
+        areaStyle: { color: "rgba(61,214,140,0.15)" },
+        lineStyle: { color: "#3dd68c" },
+        showSymbol: false,
+      }],
+    }, true);
+  }
+
+  const variantsRoot = document.getElementById("stats-variants");
+  if (!variantsRoot) return;
+  const sorted = sortedVariants(stats.variants || []);
+  variantsRoot.innerHTML = sorted
+    .map((variant) => {
+      const m = pickSideMetrics(variant.metrics || {}, variant.sides || {}, state.statsSideFilter);
+      const periods = state.statsPeriodMode === "weeks" ? variant.weeks : variant.days;
+      const periodTitle = state.statsPeriodMode === "weeks" ? "8 недель (МСК)" : "10 дней (МСК)";
+      const dim = (variant.metrics?.closed || 0) === 0 ? " stats-variant--empty" : "";
+      return `
+        <article class="stats-variant${dim}" data-variant="${variant.id}">
+          <header class="stats-variant-head">
+            <h3><span class="stats-variant-id">${variant.id}</span> ${escapeHtml(variant.label || variant.id)}</h3>
+            ${sideSummaryHtml(variant.sides)}
+          </header>
+          <div class="gauges stats-gauges">${gaugeCardsHtml(variant.id, m)}</div>
+          <div class="stats-period-block">
+            <h4>${periodTitle}</h4>
+            ${periodTableHtml(periods || [], state.statsSideFilter)}
+          </div>
+        </article>`;
+    })
+    .join("");
+  sorted.forEach((variant) => {
+    const m = pickSideMetrics(variant.metrics || {}, variant.sides || {}, state.statsSideFilter);
+    renderGaugeSet(variant.id, m);
+  });
+
+  requestAnimationFrame(() => {
+    Object.values(state.gauges).forEach((c) => c.resize());
+    if (state.equity) state.equity.resize();
+  });
+}
+
+function sortedVariants(variants) {
+  const key = state.statsSort;
+  const score = (v) => {
+    const m = v.metrics || {};
+    const s = v.sides || {};
+    if (key === "short_net") return Number(s.short?.net) || 0;
+    if (key === "long_net") return Number(s.long?.net) || 0;
+    if (key === "win_rate") return Number(m.win_rate) || 0;
+    if (key === "closed") return Number(m.closed) || 0;
+    return Number(m.total_pnl) || 0;
+  };
+  return [...variants].sort((a, b) => score(b) - score(a));
+}
+
+function pickSideMetrics(allMetrics, sides, filter) {
+  if (filter === "short") return sideAsMetrics(sides.short, allMetrics);
+  if (filter === "long") return sideAsMetrics(sides.long, allMetrics);
+  return allMetrics;
+}
+
+function sideAsMetrics(side, fallback) {
+  const n = Number(side?.n) || 0;
+  if (!n) {
+    return {
+      closed: 0,
+      wins: 0,
+      win_rate: 0,
+      total_pnl: 0,
+      total_pnl_pct: side?.net_pct ?? 0,
+      profit_factor_gauge: 0,
+      max_drawdown_pct: 0,
+      avg_trade: 0,
+      avg_win: 0,
+      avg_loss: 0,
+      fees: 0,
+      liquidations: 0,
+    };
+  }
+  const net = Number(side.net) || 0;
+  const winPct = Number(side.win_pct) || 0;
+  return {
+    closed: n,
+    wins: Number(side.wins) || 0,
+    win_rate: winPct,
+    total_pnl: net,
+    total_pnl_pct: side.net_pct ?? 0,
+    profit_factor_gauge: fallback.profit_factor_gauge ?? 0,
+    max_drawdown_pct: fallback.max_drawdown_pct ?? 0,
+    avg_trade: n ? net / n : 0,
+    avg_win: fallback.avg_win ?? 0,
+    avg_loss: fallback.avg_loss ?? 0,
+    fees: fallback.fees ?? 0,
+    liquidations: fallback.liquidations ?? 0,
+  };
+}
+
+function sideSummaryHtml(sides) {
+  if (!sides) return "";
+  const sh = sides.short || {};
+  const lo = sides.long || {};
+  return `
+    <div class="stats-side-row">
+      <span class="stats-side stats-side--short">Шорты: <b>${sh.n ?? 0}</b> · ${formatUsd(sh.net)} (${formatPct(sh.net_pct)})</span>
+      <span class="stats-side stats-side--long">Лонги: <b>${lo.n ?? 0}</b> · ${formatUsd(lo.net)} (${formatPct(lo.net_pct)})</span>
+    </div>`;
+}
+
+function gaugeCardsHtml(prefix, m) {
+  const defs = [
+    ["win_rate", "Win rate", "{value}%"],
+    ["pf", "Profit factor", "{value}"],
+    ["pnl", "P&amp;L $", "{value}"],
+    ["pnl_pct", "P&amp;L %", "{value}%"],
+    ["dd", "Max DD", "{value}%"],
+    ["closed", "Закрыто", "{value}"],
+    ["avg", "Средняя $", "{value}"],
+    ["fees", "Комиссии", "{value}"],
+  ];
+  return defs
+    .map(([key, title]) => {
+      return `<div class="gauge-card"><div class="plot" data-gauge="${prefix}-${key}"></div><div class="gauge-title">${title}</div></div>`;
+    })
+    .join("");
+}
+
+function renderGaugeSet(prefix, m) {
+  gauge(`${prefix}-win_rate`, m.win_rate || 0, 0, 100, [
     [0.4, "#ff5d73"],
     [0.55, "#f6d365"],
     [1, "#3dd68c"],
   ], "{value}%");
-  gauge("profit_factor", Math.min(stats.profit_factor, 3), 0, 3, [
+  gauge(`${prefix}-pf`, Math.min(Number(m.profit_factor_gauge) || 0, 3), 0, 3, [
     [1 / 3, "#ff5d73"],
     [0.5, "#f6d365"],
     [1, "#3dd68c"],
   ], "{value}");
-  gauge("avg_return", stats.avg_return, -5, 5, [
+  const pnl = Number(m.total_pnl) || 0;
+  const pnlMax = Math.max(50, Math.abs(pnl) * 1.2);
+  gauge(`${prefix}-pnl`, pnl, -pnlMax, pnlMax, [
     [0.5, "#ff5d73"],
-    [0.6, "#f6d365"],
+    [0.5, "#f6d365"],
+    [1, "#3dd68c"],
+  ], "{value}");
+  gauge(`${prefix}-pnl_pct`, Number(m.total_pnl_pct) || 0, -20, 20, [
+    [0.5, "#ff5d73"],
+    [0.5, "#f6d365"],
     [1, "#3dd68c"],
   ], "{value}%");
-  gauge("max_drawdown", Math.min(stats.max_drawdown, 40), 0, 40, [
+  gauge(`${prefix}-dd`, Math.min(Number(m.max_drawdown_pct) || 0, 40), 0, 40, [
     [0.25, "#3dd68c"],
     [0.625, "#f6d365"],
     [1, "#ff5d73"],
   ], "{value}%");
-  gauge("count", stats.count, 0, Math.max(20, stats.count), [
-    [1, "#5dade2"],
+  const closed = Number(m.closed) || 0;
+  gauge(`${prefix}-closed`, closed, 0, Math.max(20, closed), [[1, "#5dade2"]], "{value}");
+  gauge(`${prefix}-avg`, Number(m.avg_trade) || 0, -10, 10, [
+    [0.5, "#ff5d73"],
+    [0.5, "#f6d365"],
+    [1, "#3dd68c"],
   ], "{value}");
-  requestAnimationFrame(() => {
-    Object.values(state.gauges).forEach((c) => c.resize());
-  });
-  const equityNode = document.getElementById("equity");
-  state.equity = echarts.getInstanceByDom(equityNode) || echarts.init(equityNode);
-  state.equity.setOption({
-    backgroundColor: "transparent",
-    title: { text: "Доходность по времени", textStyle: { color: "#e8eef6", fontSize: 14 } },
-    grid: { left: 40, right: 16, top: 40, bottom: 28 },
-    xAxis: { type: "category", data: (stats.equity || []).map((_, index) => index), axisLabel: { color: "#8e9aab" } },
-    yAxis: { type: "value", scale: true, axisLabel: { color: "#8e9aab" }, splitLine: { lineStyle: { color: "#2c3544" } } },
-    series: [{ type: "line", data: stats.equity || [], areaStyle: { color: "rgba(61,214,140,0.15)" }, lineStyle: { color: "#3dd68c" }, showSymbol: false }],
-  });
-  renderTable();
+  gauge(`${prefix}-fees`, Number(m.fees) || 0, 0, Math.max(5, Number(m.fees) || 0), [[1, "#c39bd3"]], "{value}");
+}
+
+function periodTableHtml(periods, sideFilter) {
+  if (!periods.length) return `<p class="empty">Нет закрытых сделок.</p>`;
+  const col = sideFilter === "all" ? "all" : sideFilter;
+  const head =
+    sideFilter === "all"
+      ? `<tr><th>Период</th><th>Сделок</th><th>Win%</th><th>P&amp;L $</th><th>Шорты</th><th>Лонги</th></tr>`
+      : `<tr><th>Период</th><th>Сделок</th><th>Win%</th><th>P&amp;L $</th><th>P&amp;L %</th></tr>`;
+  const rows = periods
+    .map((p) => {
+      const st = (p.stats || {})[col] || {};
+      const n = st.n ?? 0;
+      const win = st.win_pct != null ? `${st.win_pct}%` : "—";
+      const net = formatUsd(st.net);
+      if (sideFilter === "all") {
+        const sh = p.stats?.short || {};
+        const lo = p.stats?.long || {};
+        return `<tr><td>${escapeHtml(p.label)}</td><td>${n}</td><td>${win}</td><td class="${pnlClass(st.net)}">${net}</td><td>${sh.n ?? 0} · ${formatUsd(sh.net)}</td><td>${lo.n ?? 0} · ${formatUsd(lo.net)}</td></tr>`;
+      }
+      return `<tr><td>${escapeHtml(p.label)}</td><td>${n}</td><td>${win}</td><td class="${pnlClass(st.net)}">${net}</td><td>${formatPct(st.net_pct)}</td></tr>`;
+    })
+    .join("");
+  return `<div class="table-wrap stats-period-table"><table><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function formatUsd(value) {
+  const n = Number(value);
+  if (Number.isNaN(n)) return "—";
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(2)}$`;
+}
+
+function formatPct(value) {
+  if (value == null || Number.isNaN(Number(value))) return "—";
+  const n = Number(value);
+  const sign = n > 0 ? "+" : "";
+  return `${sign}${n.toFixed(2)}%`;
+}
+
+function pnlClass(value) {
+  const n = Number(value);
+  if (n > 0) return "pos";
+  if (n < 0) return "neg";
+  return "";
+}
+
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function gaugeLabel(value, max) {
@@ -1012,24 +1242,6 @@ function gauge(key, value, min, max, colors, formatter) {
     true,
   );
   chart.resize();
-}
-
-function renderTable() {
-  const body = document.querySelector("#signal-table tbody");
-  if (!body || !state.stats) return;
-  const rows = [...(state.stats.rows || [])].sort((left, right) => {
-    const a = left[state.sortKey];
-    const b = right[state.sortKey];
-    if (a === b) return 0;
-    return a > b ? state.sortDir : -state.sortDir;
-  });
-  body.innerHTML = rows
-    .map((row) => {
-      const when = row.created_at ? new Date(row.created_at).toLocaleString("ru-RU") : "";
-      const pnl = row.pnl_pct == null ? "—" : Number(row.pnl_pct).toFixed(1);
-      return `<tr><td>${row.symbol}</td><td>${row.outcome || ""}</td><td>${pnl}</td><td>${Number(row.rating || 0).toFixed(0)}</td><td>${when}</td></tr>`;
-    })
-    .join("");
 }
 
 window.signalCharts = {

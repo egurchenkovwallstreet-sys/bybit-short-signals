@@ -96,22 +96,10 @@
   </section>
 
   <section id="view-stats" class="stats" hidden>
-    <div id="gauges" class="gauges"></div>
+    <div id="stats-toolbar" class="stats-toolbar"></div>
+    <div id="stats-global" class="stats-global"></div>
     <div id="equity" class="equity"></div>
-    <div class="table-wrap">
-      <table id="signal-table">
-        <thead>
-          <tr>
-            <th data-sort="symbol">Тикер</th>
-            <th data-sort="outcome">Исход</th>
-            <th data-sort="pnl_pct">P&amp;L %</th>
-            <th data-sort="rating">Рейтинг</th>
-            <th data-sort="created_at">Время</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+    <div id="stats-variants" class="stats-variants"></div>
   </section>
 
   <div id="tooltip" class="tooltip" hidden></div>
@@ -120,6 +108,6 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/paper_test.js?v=20261019pnlglyph"></script>
   <script src="/static/board_chart.js?v=20261019ema333engine"></script>
-  <script src="/static/app.js?v=20261021noanalysis"></script>
+  <script src="/static/app.js?v=20261021paperstats"></script>
 </body>
 </html>

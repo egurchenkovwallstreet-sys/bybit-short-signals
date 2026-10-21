@@ -109,21 +109,34 @@ def demo_market(cache_columns: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def demo_stats() -> dict[str, Any]:
-    equity = [100, 108, 121, 117, 126, 119, 132, 128, 141]
-    return {
-        "win_rate": 62.0,
-        "profit_factor": 1.8,
-        "avg_return": 1.4,
-        "max_drawdown": 18.0,
-        "count": 12,
-        "equity": equity,
-        "rows": [
-            {"symbol": "BEAMUSDT", "status": "ВХОД", "outcome": "TP_HIT", "pnl_pct": 32.0, "rating": 128, "created_at": 1_700_090_000_000, "entry_price": 0.021},
-            {"symbol": "WIFUSDT", "status": "ПОЧТИ ГОТОВ", "outcome": "LIQUIDATED", "pnl_pct": -40.0, "rating": 90, "created_at": 1_700_080_000_000, "entry_price": 1.1},
-            {"symbol": "MEMEUSDT", "status": "ОЖИДАНИЕ", "outcome": "TIME_EXIT", "pnl_pct": 4.0, "rating": 70, "created_at": 1_700_070_000_000, "entry_price": 0.012},
-        ],
-        "demo": True,
-    }
+    from signal_engine.paper.stats_dashboard import empty_paper_stats_dashboard
+
+    payload = empty_paper_stats_dashboard()
+    payload["demo"] = True
+    payload["as_of"] = "пример"
+    g = payload["global"]
+    g["metrics"].update(
+        {
+            "closed": 12,
+            "wins": 8,
+            "losses": 4,
+            "win_rate": 66.7,
+            "total_pnl": 41.0,
+            "total_pnl_pct": 4.1,
+            "profit_factor": 1.8,
+            "profit_factor_gauge": 1.8,
+            "max_drawdown_pct": 18.0,
+            "avg_trade": 3.42,
+            "fees": 2.4,
+        }
+    )
+    g["sides"]["short"] = {"n": 9, "wins": 6, "win_pct": 66.7, "net": 28.0, "net_pct": 2.8}
+    g["sides"]["long"] = {"n": 3, "wins": 2, "win_pct": 66.7, "net": 13.0, "net_pct": 1.3}
+    g["equity"] = [1000, 1008, 1021, 1017, 1026, 1019, 1032, 1028, 1041]
+    demo_variant = next(v for v in payload["variants"] if v["id"] == "t20")
+    demo_variant["metrics"] = dict(g["metrics"])
+    demo_variant["sides"] = dict(g["sides"])
+    return payload
 
 
 def _candles(start: float, count: int, step_ms: int, drift: float) -> list[dict[str, Any]]:

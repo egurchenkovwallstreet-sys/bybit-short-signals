@@ -38,25 +38,41 @@ def _signal(symbol: str, pnl: float, created_at: int) -> Signal:
 
 
 class StatsTest(unittest.TestCase):
-    def test_win_rate_factor_and_drawdown(self) -> None:
+    def test_paper_dashboard_global_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "signals.db"
-            store = SignalStore(path)
-            store.open()
-            first = _signal("AAAUSDT", 40, 1_000)
-            second = _signal("BBBUSDT", -100, 2_000)
-            store.insert(first)
-            store.insert(second)
-            store.update(first)
-            store.update(second)
-            store.close()
+            path = Path(folder) / "paper.db"
+            conn = __import__("sqlite3").connect(path)
+            conn.executescript(
+                """
+                CREATE TABLE paper_trades (
+                    id INTEGER PRIMARY KEY, symbol TEXT, variant TEXT, status TEXT, side TEXT, kind TEXT,
+                    opened_at INTEGER, closed_at INTEGER, entry_price REAL, exit_price REAL,
+                    pnl_usd REAL, roe_pct REAL, entry_fee REAL, exit_fee REAL, funding_paid REAL,
+                    entry_json TEXT, exit_reason TEXT
+                );
+                CREATE TABLE paper_equity_v (variant TEXT, ts INTEGER, balance REAL, equity REAL);
+                """
+            )
+            conn.executemany(
+                """
+                INSERT INTO paper_trades (
+                    id, symbol, variant, status, side, opened_at, closed_at, pnl_usd, roe_pct,
+                    entry_fee, exit_fee, funding_paid, entry_json, exit_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '{}', 'trailing_stop')
+                """,
+                [
+                    (1, "AAAUSDT", "t20", "closed", "short", 0, 1000, 40.0, 4.0),
+                    (2, "BBBUSDT", "t20", "closed", "short", 0, 2000, -100.0, -10.0),
+                ],
+            )
+            conn.commit()
+            conn.close()
             stats = compute_stats(path)
-        self.assertEqual(stats["count"], 2)
-        self.assertEqual(stats["win_rate"], 50.0)
-        self.assertEqual(stats["profit_factor"], 0.4)
-        self.assertEqual(stats["avg_return"], -30.0)
-        # 100 → 140 → 40. Просадка от 140 до 40 = 100 / 140.
-        self.assertAlmostEqual(stats["max_drawdown"], 100 / 140 * 100, places=2)
+        self.assertTrue(stats.get("paper"))
+        metrics = stats["global"]["metrics"]
+        self.assertEqual(metrics["closed"], 2)
+        self.assertEqual(metrics["win_rate"], 50.0)
+        self.assertEqual(metrics["profit_factor"], 0.4)
 
 
 class BookTest(unittest.TestCase):

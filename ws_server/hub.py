@@ -84,8 +84,10 @@ class Hub:
         now = time.monotonic()
         if self._stats_cache is not None and now - self._stats_at < 5:
             return self._stats_cache
-        calculated = compute_stats(config.SQLITE_PATH)
-        if calculated["count"] == 0 and self.demo:
+        calculated = compute_stats(config.PAPER_SQLITE_PATH)
+        global_metrics = (calculated.get("global") or {}).get("metrics") or {}
+        closed = int(global_metrics.get("closed") or 0)
+        if closed == 0 and self.demo:
             calculated = demo_stats()
         self._stats_cache = calculated
         self._stats_at = now
