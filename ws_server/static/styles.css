@@ -2302,3 +2302,246 @@ th { cursor: pointer; color: var(--muted); }
   .pl-cards { grid-template-columns: 1fr; }
   .brand { font-size: 14px; }
 }
+
+/* --- Смартфон: Тест / EMA6 Bybit / Статистика / Баланс --- */
+@media (max-width: 768px) {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    height: auto;
+    min-height: 100dvh;
+    min-height: 100vh;
+    overflow-x: hidden;
+    padding-left: env(safe-area-inset-left, 0);
+    padding-right: env(safe-area-inset-right, 0);
+  }
+
+  .topbar {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    padding-top: max(10px, env(safe-area-inset-top, 0));
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .topbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .brand {
+    flex-shrink: 0;
+    font-size: 15px;
+    max-width: 42vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tabs {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 6px;
+    min-width: 0;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tab {
+    flex-shrink: 0;
+    padding: 10px 12px;
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .link-state {
+    flex-shrink: 0;
+    margin-left: 0;
+    width: auto;
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .banner {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .paper-view,
+  .stats,
+  .balance-view {
+    flex: 1 0 auto;
+    min-height: calc(100dvh - 52px);
+    min-height: calc(100vh - 52px);
+    padding: 10px 12px 28px;
+    padding-bottom: max(28px, env(safe-area-inset-bottom, 0));
+  }
+
+  .paper-intro,
+  .quiet {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .paper-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .paper-card {
+    padding: 8px 10px;
+  }
+
+  .paper-card .value {
+    font-size: 16px;
+    word-break: break-word;
+  }
+
+  .paper-panel {
+    padding: 10px 12px;
+  }
+
+  .paper-panel h3 {
+    font-size: 14px;
+  }
+
+  .paper-variant-title {
+    font-size: 14px;
+    line-height: 1.35;
+  }
+
+  .table-wrap {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+
+  .paper-scroll {
+    max-height: none;
+  }
+
+  .paper-table {
+    font-size: 11px;
+  }
+
+  .paper-table th,
+  .paper-table td {
+    padding: 8px 6px;
+  }
+
+  .paper-table td.paper-time {
+    min-width: 7.5rem;
+  }
+
+  .paper-tf-row,
+  .paper-period-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .tf {
+    min-height: 40px;
+    padding: 8px 10px;
+  }
+
+  .paper-chart {
+    height: min(52vh, 360px);
+    min-height: 220px;
+  }
+
+  .paper-detail-body {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-detail-info {
+    max-height: none;
+  }
+
+  .paper-breakdowns {
+    grid-template-columns: 1fr;
+  }
+
+  .paper-btn {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+
+  .stats-toolbar-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .stats-toolbar label {
+    flex-wrap: wrap;
+  }
+
+  .stats-as-of {
+    margin-right: 0;
+    width: 100%;
+  }
+
+  .stats-variant {
+    padding: 10px 12px;
+  }
+
+  .gauges {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .gauge-card .plot {
+    height: 150px;
+  }
+
+  .gauge-title {
+    font-size: 11px;
+  }
+
+  .paper-equity {
+    min-height: 260px;
+  }
+
+  .equity {
+    height: 220px;
+  }
+
+  .paper-eq-toggles {
+    gap: 8px;
+  }
+
+  .paper-eq-toggle {
+    min-height: 40px;
+    padding: 8px 12px;
+  }
+
+  .tooltip {
+    max-width: min(280px, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 400px) {
+  .paper-cards,
+  .gauges {
+    grid-template-columns: 1fr;
+  }
+
+  .tab {
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+
+  .brand {
+    max-width: 36vw;
+  }
+}
