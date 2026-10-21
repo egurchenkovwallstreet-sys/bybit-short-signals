@@ -74,6 +74,17 @@ BYBIT_WS_PUBLIC_LINEAR = _env(
 BYBIT_API_KEY = _env("BYBIT_API_KEY", "")
 BYBIT_API_SECRET = _env("BYBIT_API_SECRET", "")
 
+# Bybit Demo Trading (ключ создаётся в режиме «Демо трейдинг» на bybit.com).
+BYBIT_DEMO_API_KEY = _env("BYBIT_DEMO_API_KEY", "")
+BYBIT_DEMO_API_SECRET = _env("BYBIT_DEMO_API_SECRET", "")
+BYBIT_DEMO_REST_URL = _env("BYBIT_DEMO_REST_URL", "https://api-demo.bybit.com")
+# 1 / true / yes — дублировать em6r на Demo API (VPS .env).
+EM6R_LIVE_ENABLED = _env("EM6R_LIVE_ENABLED", "0")
+
+
+def em6r_live_enabled() -> bool:
+    return EM6R_LIVE_ENABLED.strip().lower() in ("1", "true", "yes", "on")
+
 # Прокси для REST и WebSocket Bybit (HTTP, HTTPS или SOCKS5).
 # Пусто — прямое подключение. Нужен, если CDN Bybit блокирует IP сервера (403 country).
 # Пример: http://user:pass@host:port или socks5://host:1080

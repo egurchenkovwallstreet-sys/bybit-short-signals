@@ -313,6 +313,30 @@ class PaperStrategy:
         self._next_analytics = 0
         self._analytics: dict = {}
         self._opened = False
+        self._em6r_demo_broker = None
+
+    def _em6r_demo(self):
+        from signal_engine.live.em6r_demo import Em6rDemoBroker
+
+        if self._em6r_demo_broker is None:
+            self._em6r_demo_broker = Em6rDemoBroker()
+        return self._em6r_demo_broker
+
+    def _em6r_live_open(self, trade_id: int, symbol: str, side: str, qty: float) -> None:
+        if not config.em6r_live_enabled():
+            return
+        try:
+            self._em6r_demo().open_market(trade_id, symbol, side, qty)
+        except Exception:
+            log.exception("em6r live open failed trade=%s %s", trade_id, symbol)
+
+    def _em6r_live_close(self, trade_id: int, symbol: str, side: str, qty: float) -> None:
+        if not config.em6r_live_enabled():
+            return
+        try:
+            self._em6r_demo().close_market(trade_id, symbol, side, qty)
+        except Exception:
+            log.exception("em6r live close failed trade=%s %s", trade_id, symbol)
 
     # --- жизненный цикл ---
 
@@ -951,6 +975,8 @@ class PaperStrategy:
             },
             commit=False,
         )
+        if variant == config.PAPER_EM6R_VARIANT:
+            self._em6r_live_close(trade.id, trade.symbol, pos.side, pos.qty)
         self.trades.pop((variant, trade.symbol), None)
         self.store.set_kv(f"balance:{variant}", str(self.balances[variant]))
         self._snapshot_equity(variant, now_ms)
@@ -2129,6 +2155,8 @@ class PaperStrategy:
             float(ev.metrics.get("stretch_pct") or 0),
             margin,
         )
+        if variant == config.PAPER_EM6R_VARIANT:
+            self._em6r_live_open(trade_id, symbol, side, pos.qty)
 
     def confirm_fetch_symbols(self) -> list[str]:
         """Монеты, которым в момент закрытия 5м нужна свежая свеча: ожидание второй или открытая сделка."""
