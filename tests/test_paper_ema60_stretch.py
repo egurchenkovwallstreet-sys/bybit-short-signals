@@ -150,23 +150,5 @@ class Ema60StretchStopTest(unittest.TestCase):
         )
         self.assertGreater(pos.stop_price, 1.0)
 
-    def test_trailing_stop_exit_not_worse_than_stop_price(self) -> None:
-        pos = Position(
-            symbol="X",
-            opened_at=0,
-            entry_price=1.0,
-            margin=50.0,
-            side="long",
-            stop_style="ema_stretch",
-            paper_variant=config.PAPER_EM6R_VARIANT,
-        )
-        stop = pos.stop_price
-        worse = stop * 0.9
-        clamped = pos.close_result("trailing_stop", exit_price_override=worse)
-        at_stop = pos.close_result("trailing_stop")
-        self.assertAlmostEqual(clamped["exit_price"], stop, places=8)
-        self.assertAlmostEqual(clamped["roe_pct"], at_stop["roe_pct"], places=4)
-
-
 if __name__ == "__main__":
     unittest.main()

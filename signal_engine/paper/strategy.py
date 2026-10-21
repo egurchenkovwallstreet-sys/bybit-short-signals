@@ -880,12 +880,13 @@ class PaperStrategy:
         if variant == config.PAPER_EM6R_VARIANT:
             xfill = simulate_exit_fill(pos.side, pos.qty, state, now_ms)
             if xfill.ok:
+                exit_override = xfill.avg_price
                 book_exit_meta = {
                     "levels": xfill.levels_used,
                     "slippage_bps": round(xfill.slippage_bps, 2),
                     "avg_price": xfill.avg_price,
                 }
-            if reason == "trailing_stop":
+            elif reason == "trailing_stop":
                 exit_override = pos.stop_price
         elif variant == config.PAPER_EM6PP_VARIANT and reason in ("trailing_stop", "liquidation"):
             exit_override = pos.liq_price if reason == "liquidation" else pos.stop_price

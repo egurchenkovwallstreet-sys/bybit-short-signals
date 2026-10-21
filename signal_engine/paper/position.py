@@ -1066,12 +1066,6 @@ class Position:
             return "trailing_stop"
         return None
 
-    def _clamp_exit_to_stop(self, price: float) -> float:
-        """Бумага: по стопу нельзя закрыться хуже уровня stop_price (лонг — не ниже, шорт — не выше)."""
-        if self.side == "long":
-            return max(price, self.stop_price)
-        return min(price, self.stop_price)
-
     def close_result(self, reason: str, exit_price_override: float | None = None) -> dict:
         """Итог закрытия. Ликвидация списывает всю маржу и комиссию входа."""
         if reason == "liquidation":
@@ -1087,7 +1081,7 @@ class Position:
         else:
             price = self.stop_price
             if exit_price_override and exit_price_override > 0:
-                price = self._clamp_exit_to_stop(float(exit_price_override))
+                price = float(exit_price_override)
             exit_fee = self.exit_fee(price)
             pnl = self.gross_pnl(price) - self.entry_fee - exit_fee + self.funding_paid
         return {
