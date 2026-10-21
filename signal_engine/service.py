@@ -14,6 +14,7 @@ import time
 import config
 from collector.publisher import RedisPublisher, open_redis
 from signal_engine.engine import Engine
+from signal_engine.live.em6_bybit.strategy import Em6BybitStrategy
 from signal_engine.paper.pivot_clock import batch_has_closed_bar
 from signal_engine.paper.strategy import PaperStrategy
 from signal_engine.store import SignalStore
@@ -24,7 +25,12 @@ log = logging.getLogger(__name__)
 
 class SignalService:
     def __init__(self, engine: Engine | None = None) -> None:
-        self.engine = engine or Engine(SignalStore(config.SQLITE_PATH), paper=PaperStrategy())
+        em6b = Em6BybitStrategy() if config.em6_bybit_enabled() else None
+        self.engine = engine or Engine(
+            SignalStore(config.SQLITE_PATH),
+            paper=PaperStrategy(),
+            em6_bybit=em6b,
+        )
         self._market = None
         self._publisher_redis = None
         self._publisher: RedisPublisher | None = None

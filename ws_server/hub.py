@@ -13,6 +13,7 @@ from typing import Any
 
 import config
 from ws_server.cache import MarketCache
+from ws_server.em6_bybit import Em6BybitCache
 from ws_server.paper import PaperCache
 from ws_server.demo import demo_board, demo_market, demo_stats
 from ws_server.stats import compute_stats
@@ -46,8 +47,10 @@ class Hub:
     def __init__(self) -> None:
         self.cache = MarketCache()
         self.paper = PaperCache()
+        self.em6_bybit = Em6BybitCache()
         self.clients: set[Client] = set()
         self.paper_dirty = False
+        self.em6_bybit_dirty = False
         self.demo = False
         self.board_dirty = False
         self.pump_scan_dirty = False
@@ -99,6 +102,7 @@ class Hub:
             "demo": self.demo,
             "stats": self.stats(),
             "paper_test": self.paper.view(),
+            "em6_bybit": self.em6_bybit.view(),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
@@ -221,6 +225,10 @@ class Hub:
                     if self.paper.apply(payload):
                         self.paper_dirty = True
                     continue
+                if payload.get("type") == "em6_bybit":
+                    if self.em6_bybit.apply(payload):
+                        self.em6_bybit_dirty = True
+                    continue
                 kind = self.cache.apply(payload)
                 if kind == "board":
                     self.demo = False
@@ -261,6 +269,7 @@ class Hub:
             await asyncio.sleep(tick)
             now = time.monotonic()
             paper = self.paper.view() if self.paper_dirty else None
+            em6b = self.em6_bybit.view() if self.em6_bybit_dirty else None
             self.board_dirty = False
             self.pump_scan_dirty = False
             self.x2_retrace_dirty = False
@@ -269,10 +278,13 @@ class Hub:
             self.pump_lab_dirty = False
             self.market_dirty = False
             self.paper_dirty = False
+            self.em6_bybit_dirty = False
             for client in list(self.clients):
                 try:
                     if paper is not None:
                         await client.websocket.send_json({"type": "paper_test", "data": paper})
+                    if em6b is not None:
+                        await client.websocket.send_json({"type": "em6_bybit", "data": em6b})
                 except Exception:
                     self.clients.discard(client)
 

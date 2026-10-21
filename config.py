@@ -83,7 +83,16 @@ EM6R_LIVE_ENABLED = _env("EM6R_LIVE_ENABLED", "0")
 
 
 def em6r_live_enabled() -> bool:
+    if em6_bybit_enabled():
+        return False
     return EM6R_LIVE_ENABLED.strip().lower() in ("1", "true", "yes", "on")
+
+
+EM6_BYBIT_ENABLED = _env("EM6_BYBIT_ENABLED", "0")
+
+
+def em6_bybit_enabled() -> bool:
+    return EM6_BYBIT_ENABLED.strip().lower() in ("1", "true", "yes", "on")
 
 # Прокси для REST и WebSocket Bybit (HTTP, HTTPS или SOCKS5).
 # Пусто — прямое подключение. Нужен, если CDN Bybit блокирует IP сервера (403 country).

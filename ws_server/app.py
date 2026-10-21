@@ -14,6 +14,7 @@ from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from ws_server import em6_bybit as em6_bybit_db
 from ws_server import paper as paper_db
 from ws_server.hub import Client, Hub
 
@@ -71,6 +72,14 @@ async def paper_snapshot() -> dict[str, Any]:
     if data:
         return data
     return await asyncio.to_thread(paper_db.snapshot_from_db)
+
+
+@app.get("/api/em6-bybit/snapshot")
+async def em6_bybit_snapshot() -> dict[str, Any]:
+    data = app.state.hub.em6_bybit.view()
+    if data:
+        return data
+    return await asyncio.to_thread(em6_bybit_db.snapshot_from_db)
 
 
 @app.get("/api/paper/trades")

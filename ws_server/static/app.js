@@ -161,8 +161,13 @@ function connectSocket() {
     if (message.paper_test && window.paperTest) {
       window.paperTest.onSnapshot(message.paper_test);
     }
+    if (message.em6_bybit && window.em6Bybit) {
+      window.em6Bybit.onSnapshot(message.em6_bybit);
+    }
   } else if (message.type === "paper_test") {
     if (window.paperTest) window.paperTest.onSnapshot(message.data);
+  } else if (message.type === "em6_bybit") {
+    if (window.em6Bybit) window.em6Bybit.onSnapshot(message.data);
   } else if (message.type === "stats") {
     state.stats = message.data;
     renderStats();
@@ -189,6 +194,11 @@ function showTab(name) {
   if (paperView) paperView.hidden = name !== "paper";
   const balanceView = document.getElementById("view-balance");
   if (balanceView) balanceView.hidden = name !== "balance";
+  const em6View = document.getElementById("view-em6-bybit");
+  if (em6View) em6View.hidden = name !== "em6-bybit";
+  if (name === "em6-bybit" && window.em6Bybit) {
+    requestAnimationFrame(() => window.em6Bybit.onTab());
+  }
   if (name === "paper" && window.paperTest) {
     requestAnimationFrame(() => window.paperTest.onTab());
   }
