@@ -175,6 +175,14 @@ TICKER_BATCH_INTERVAL_MS = _env_int("TICKER_BATCH_INTERVAL_MS", 500)
 
 # Стопы теста и пылесос. Поиск пампов и старые доски — отдельно, втрое реже.
 MARKET_SCAN_INTERVAL_SEC = _env_int("MARKET_SCAN_INTERVAL_SEC", 3)
+
+# После старта signal-engine: REST-прогрев 5m для EMA (не правила входа).
+ENGINE_KLINE_WARMUP = _env("ENGINE_KLINE_WARMUP", "1")
+ENGINE_KLINE_WARMUP_PARALLEL = _env_int("ENGINE_KLINE_WARMUP_PARALLEL", 12)
+
+
+def engine_kline_warmup_on_start() -> bool:
+    return ENGINE_KLINE_WARMUP.strip().lower() in ("1", "true", "yes", "on")
 PUMP_BOARD_INTERVAL_SEC = _env_int("PUMP_BOARD_INTERVAL_SEC", 9)
 
 # Страница и WebSocket. Только локальный просмотр, сервер не торгует.

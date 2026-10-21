@@ -57,6 +57,8 @@ class SignalService:
         next_boards = 0.0
         self._confirm_burst = False
         side_tasks: list[asyncio.Task] = []
+        if config.engine_kline_warmup_on_start():
+            side_tasks.append(asyncio.create_task(self._warmup_klines_5m()))
         if self.engine.paper is not None:
             side_tasks.append(asyncio.create_task(self._paper_kline_loop()))
             side_tasks.append(asyncio.create_task(self._pivot_confirm_loop()))
@@ -118,6 +120,43 @@ class SignalService:
                 continue
             out.add(symbol)
         return out
+
+    async def _warmup_klines_5m(self) -> None:
+        """REST: 5m история в движок после рестарта (EMA60 без 15-минутного ожидания collector)."""
+        from collector.rest_client import BybitRest
+
+        rest = BybitRest()
+        await rest.open()
+        limit = config.PAPER_KLINE_LIMIT
+        parallel = max(1, config.ENGINE_KLINE_WARMUP_PARALLEL)
+        try:
+            symbols = await rest.list_usdt_perpetuals()
+            sem = asyncio.Semaphore(parallel)
+            loaded = 0
+
+            async def one(symbol: str) -> None:
+                nonlocal loaded
+                async with sem:
+                    try:
+                        message = await rest.fetch_klines(symbol, "5", limit, locked=False)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        log.exception("Прогрев 5m %s не получен", symbol)
+                        return
+                    if message:
+                        self.engine.ingest(message)
+                        loaded += 1
+
+            await asyncio.gather(*(one(s) for s in symbols))
+            log.info(
+                "Прогрев 5m для EMA: %s/%s монет (limit=%s)",
+                loaded,
+                len(symbols),
+                limit,
+            )
+        finally:
+            await rest.close()
 
     async def _paper_kline_loop(self) -> None:
         """Свечи теста + 5м в состояние движка для баблососа и пылесоса 5."""
