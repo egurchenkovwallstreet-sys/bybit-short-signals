@@ -291,6 +291,7 @@ PAPER_VARIANTS = (
     "em4",
     "em5",
     "em6",
+    "em6r",
     "em7",
     "em8",
     "em9",
@@ -473,6 +474,8 @@ PAPER_IMP5_MAX_SNAPBACK_PCT = _env_float("PAPER_IMP5_MAX_SNAPBACK_PCT", 0.08)
 PAPER_EM4_VARIANT = "em4"
 PAPER_EM5_VARIANT = "em5"
 PAPER_EM6_VARIANT = "em6"
+# EMA60-6 · real: под live (оборот 3M, −14% / лок @3.7%). В PAPER_VARIANTS — после согласования.
+PAPER_EM6R_VARIANT = "em6r"
 PAPER_EM7_VARIANT = "em7"
 PAPER_EM8_VARIANT = "em8"
 PAPER_EM9_VARIANT = "em9"
@@ -481,6 +484,7 @@ PAPER_EMA60_STRETCH_VARIANTS = (
     PAPER_EM4_VARIANT,
     PAPER_EM5_VARIANT,
     PAPER_EM6_VARIANT,
+    PAPER_EM6R_VARIANT,
     PAPER_EM7_VARIANT,
     PAPER_EM8_VARIANT,
     PAPER_EM9_VARIANT,
@@ -489,6 +493,12 @@ PAPER_EMA60_STRETCH_VARIANTS = (
 PAPER_EM4_STRETCH_MIN_PCT = _env_float("PAPER_EM4_STRETCH_MIN_PCT", 4.0)
 PAPER_EM5_STRETCH_MIN_PCT = _env_float("PAPER_EM5_STRETCH_MIN_PCT", 5.0)
 PAPER_EM6_STRETCH_MIN_PCT = _env_float("PAPER_EM6_STRETCH_MIN_PCT", 6.0)
+PAPER_EM6R_STRETCH_MIN_PCT = _env_float("PAPER_EM6R_STRETCH_MIN_PCT", 6.0)
+PAPER_EM6R_MIN_TURNOVER_24H_USDT = _env_float("PAPER_EM6R_MIN_TURNOVER_24H_USDT", 3_000_000.0)
+PAPER_EM6R_INITIAL_STOP_ROE = _env_float("PAPER_EM6R_INITIAL_STOP_ROE", -14.0)
+PAPER_EM6R_LOCK0_ARM_ROE = _env_float("PAPER_EM6R_LOCK0_ARM_ROE", 3.7)
+PAPER_EM6R_BOOK_MAX_LEVELS = _env_int("PAPER_EM6R_BOOK_MAX_LEVELS", 3)
+PAPER_EM6R_BOOK_MAX_AGE_MS = _env_int("PAPER_EM6R_BOOK_MAX_AGE_MS", 5000)
 PAPER_EM7_STRETCH_MIN_PCT = _env_float("PAPER_EM7_STRETCH_MIN_PCT", 7.0)
 PAPER_EM8_STRETCH_MIN_PCT = _env_float("PAPER_EM8_STRETCH_MIN_PCT", 8.0)
 PAPER_EM9_STRETCH_MIN_PCT = _env_float("PAPER_EM9_STRETCH_MIN_PCT", 9.0)
@@ -501,6 +511,38 @@ PAPER_EMA60_STRETCH_LOCK1_ROE = _env_float("PAPER_EMA60_STRETCH_LOCK1_ROE", 2.0)
 PAPER_EMA60_STRETCH_LOCK2_ARM_ROE = _env_float("PAPER_EMA60_STRETCH_LOCK2_ARM_ROE", 10.0)
 PAPER_EMA60_STRETCH_LOCK2_ROE = _env_float("PAPER_EMA60_STRETCH_LOCK2_ROE", 5.0)
 PAPER_EMA60_STRETCH_TRAIL_GAP_ROE = _env_float("PAPER_EMA60_STRETCH_TRAIL_GAP_ROE", 5.0)
+
+
+def ema60_stretch_exit_params(variant: str | None) -> dict[str, float]:
+    """Ступени выхода EMA60 stretch; em6r — ужесточение под live."""
+    if variant == PAPER_EM6R_VARIANT:
+        return {
+            "initial_stop_roe": PAPER_EM6R_INITIAL_STOP_ROE,
+            "lock0_arm_roe": PAPER_EM6R_LOCK0_ARM_ROE,
+            "lock0_net_roe": PAPER_EMA60_STRETCH_LOCK0_NET_ROE,
+            "lock1_arm_roe": PAPER_EMA60_STRETCH_LOCK1_ARM_ROE,
+            "lock1_roe": PAPER_EMA60_STRETCH_LOCK1_ROE,
+            "lock2_arm_roe": PAPER_EMA60_STRETCH_LOCK2_ARM_ROE,
+            "lock2_roe": PAPER_EMA60_STRETCH_LOCK2_ROE,
+            "trail_gap_roe": PAPER_EMA60_STRETCH_TRAIL_GAP_ROE,
+        }
+    return {
+        "initial_stop_roe": PAPER_EMA60_STRETCH_INITIAL_STOP_ROE,
+        "lock0_arm_roe": PAPER_EMA60_STRETCH_LOCK0_ARM_ROE,
+        "lock0_net_roe": PAPER_EMA60_STRETCH_LOCK0_NET_ROE,
+        "lock1_arm_roe": PAPER_EMA60_STRETCH_LOCK1_ARM_ROE,
+        "lock1_roe": PAPER_EMA60_STRETCH_LOCK1_ROE,
+        "lock2_arm_roe": PAPER_EMA60_STRETCH_LOCK2_ARM_ROE,
+        "lock2_roe": PAPER_EMA60_STRETCH_LOCK2_ROE,
+        "trail_gap_roe": PAPER_EMA60_STRETCH_TRAIL_GAP_ROE,
+    }
+
+
+def ema60_stretch_min_turnover_usdt(variant: str) -> float | None:
+    """Мин. оборот 24h для входа; None — только общий universe."""
+    if variant == PAPER_EM6R_VARIANT:
+        return float(PAPER_EM6R_MIN_TURNOVER_24H_USDT)
+    return None
 
 
 def paper_is_long(variant: str) -> bool:

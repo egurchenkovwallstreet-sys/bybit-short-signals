@@ -589,68 +589,62 @@ def ema60_stretch_trail_stop(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
     side: str = "short",
+    variant: str | None = None,
 ) -> float:
-    """EMA60 stretch: −15% ROE; +3.5%→+0.01% net; +5%→+2%; +10%→+5% и трейл пик − 5 п.п."""
+    """EMA60 stretch: −15% ROE (em6r −14%); +3.5%→+0.01% net (em6r @3.7%); +5%→+2%; +10%→+5% и трейл."""
     lev = leverage or config.PAPER_LEVERAGE
-    arm0 = config.PAPER_EMA60_STRETCH_LOCK0_ARM_ROE
-    arm1 = config.PAPER_EMA60_STRETCH_LOCK1_ARM_ROE
-    arm2 = config.PAPER_EMA60_STRETCH_LOCK2_ARM_ROE
-    gap = config.PAPER_EMA60_STRETCH_TRAIL_GAP_ROE
+    p = config.ema60_stretch_exit_params(variant)
+    arm0 = p["lock0_arm_roe"]
+    arm1 = p["lock1_arm_roe"]
+    arm2 = p["lock2_arm_roe"]
+    gap = p["trail_gap_roe"]
+    initial_roe = p["initial_stop_roe"]
+    lock0_net = p["lock0_net_roe"]
+    lock1_roe = p["lock1_roe"]
+    lock2_roe = p["lock2_roe"]
     if side == "long":
         peak = long_roe_pct(entry, best_price, lev)
-        initial = net_roe_stop_price_long(
-            entry, margin, config.PAPER_EMA60_STRETCH_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
-        )
+        initial = net_roe_stop_price_long(entry, margin, initial_roe, lev, entry_fee, funding_paid)
         if peak < arm0:
             return initial
         stop = initial
         if peak >= arm0 and margin > 0:
             stop = max(
                 stop,
-                net_roe_stop_price_long(
-                    entry, margin, config.PAPER_EMA60_STRETCH_LOCK0_NET_ROE, lev, entry_fee, funding_paid
-                ),
+                net_roe_stop_price_long(entry, margin, lock0_net, lev, entry_fee, funding_paid),
             )
         if peak >= arm1 and margin > 0:
             stop = max(
                 stop,
-                net_roe_stop_price_long(
-                    entry, margin, config.PAPER_EMA60_STRETCH_LOCK1_ROE, lev, entry_fee, funding_paid
-                ),
+                net_roe_stop_price_long(entry, margin, lock1_roe, lev, entry_fee, funding_paid),
             )
         if peak >= arm2 and margin > 0:
             stop = max(
                 stop,
-                net_roe_stop_price_long(
-                    entry, margin, config.PAPER_EMA60_STRETCH_LOCK2_ROE, lev, entry_fee, funding_paid
-                ),
+                net_roe_stop_price_long(entry, margin, lock2_roe, lev, entry_fee, funding_paid),
             )
             trail = price_for_long_roe(entry, peak - gap, lev)
             stop = max(stop, trail)
         return stop
     peak = roe_pct(entry, best_price, lev)
-    initial = net_roe_stop_price(
-        entry, margin, config.PAPER_EMA60_STRETCH_INITIAL_STOP_ROE, lev, entry_fee, funding_paid
-    )
+    initial = net_roe_stop_price(entry, margin, initial_roe, lev, entry_fee, funding_paid)
     if peak < arm0:
         return initial
     stop = initial
     if peak >= arm0 and margin > 0:
         stop = min(
             stop,
-            net_roe_stop_price(
-                entry, margin, config.PAPER_EMA60_STRETCH_LOCK0_NET_ROE, lev, entry_fee, funding_paid
-            ),
+            net_roe_stop_price(entry, margin, lock0_net, lev, entry_fee, funding_paid),
         )
     if peak >= arm1 and margin > 0:
         stop = min(
             stop,
-            net_roe_stop_price(entry, margin, config.PAPER_EMA60_STRETCH_LOCK1_ROE, lev, entry_fee, funding_paid),
+            net_roe_stop_price(entry, margin, lock1_roe, lev, entry_fee, funding_paid),
         )
     if peak >= arm2 and margin > 0:
         stop = min(
             stop,
-            net_roe_stop_price(entry, margin, config.PAPER_EMA60_STRETCH_LOCK2_ROE, lev, entry_fee, funding_paid),
+            net_roe_stop_price(entry, margin, lock2_roe, lev, entry_fee, funding_paid),
         )
         trail = price_for_roe(entry, peak - gap, lev)
         stop = min(stop, trail)
@@ -706,6 +700,7 @@ class Position:
     loss_cap_armed: bool = False
     side: str = "short"
     stop_style: str = "default"
+    paper_variant: str = ""
     scaled_half: bool = False
     desk_initial_stop: float = 0.0
 
@@ -797,6 +792,7 @@ class Position:
                 entry_fee=self.entry_fee,
                 funding_paid=self.funding_paid,
                 side=self.side,
+                variant=self.paper_variant or None,
             )
             if self.side == "long":
                 self.stop_price = max(self.liq_price, trail)
@@ -1070,7 +1066,7 @@ class Position:
             return "trailing_stop"
         return None
 
-    def close_result(self, reason: str) -> dict:
+    def close_result(self, reason: str, exit_price_override: float | None = None) -> dict:
         """Итог закрытия. Ликвидация списывает всю маржу и комиссию входа."""
         if reason == "liquidation":
             price = self.liq_price
@@ -1078,10 +1074,14 @@ class Position:
             pnl = -self.margin - self.entry_fee + self.funding_paid
         elif reason in ("opposite_pivot", "manual"):
             price = self.last_price if self.last_price > 0 else self.stop_price
+            if exit_price_override and exit_price_override > 0:
+                price = float(exit_price_override)
             exit_fee = self.exit_fee(price)
             pnl = self.gross_pnl(price) - self.entry_fee - exit_fee + self.funding_paid
         else:
             price = self.stop_price
+            if exit_price_override and exit_price_override > 0:
+                price = float(exit_price_override)
             exit_fee = self.exit_fee(price)
             pnl = self.gross_pnl(price) - self.entry_fee - exit_fee + self.funding_paid
         return {

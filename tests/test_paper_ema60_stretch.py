@@ -113,6 +113,19 @@ class Ema60StretchStopTest(unittest.TestCase):
         trail = price_for_long_roe(entry, 7.0, lev)
         self.assertGreaterEqual(stop, trail - 1e-9)
 
+    def test_em6r_tighter_initial_and_lock_arm(self) -> None:
+        entry = 1.0
+        margin = 50.0
+        fee = entry * 10 * config.PAPER_FEE_RATE_TAKER
+        lev = config.PAPER_LEVERAGE
+        stop_em6 = ema60_stretch_trail_stop(
+            entry, entry, lev, margin=margin, entry_fee=fee, side="short", variant=config.PAPER_EM6_VARIANT
+        )
+        stop_em6r = ema60_stretch_trail_stop(
+            entry, entry, lev, margin=margin, entry_fee=fee, side="short", variant=config.PAPER_EM6R_VARIANT
+        )
+        self.assertLess(stop_em6r, stop_em6)
+
     def test_position_sync_uses_ema_stretch(self) -> None:
         pos = Position(
             symbol="X",

@@ -121,6 +121,7 @@ from signal_engine.paper.ema60_stretch_detect import (
     evaluate_ema60_stretch,
     stretch_passes_variant,
 )
+from signal_engine.paper.orderbook_fill import simulate_entry_fill, simulate_exit_fill
 from signal_engine.paper.impulse_detect import (
     IMPULSE_CHECK_LABELS,
     IMPULSE5_EXTRA_MANDATORY,
@@ -372,6 +373,7 @@ class PaperStrategy:
                 peak_gap_roe=gap,
                 side=side,
                 stop_style=config.paper_stop_style(variant),
+                paper_variant=variant,
                 scaled_half=bool((entry or {}).get("css2_half")),
             )
             if config.is_paper_333_family(variant):
@@ -873,7 +875,19 @@ class PaperStrategy:
         variant = trade.variant
         if reason in ("opposite_pivot", "manual") and state.last_price:
             pos.last_price = float(state.last_price)
-        result = pos.close_result(reason)
+        exit_override: float | None = None
+        book_exit_meta: dict | None = None
+        if variant == config.PAPER_EM6R_VARIANT:
+            xfill = simulate_exit_fill(pos.side, pos.qty, state, now_ms)
+            if xfill.ok:
+                exit_override = xfill.avg_price
+                book_exit_meta = {
+                    "levels": xfill.levels_used,
+                    "slippage_bps": round(xfill.slippage_bps, 2),
+                }
+            elif reason == "trailing_stop":
+                exit_override = pos.stop_price
+        result = pos.close_result(reason, exit_price_override=exit_override)
         balance_before_close = self.balances[variant]
         self.balances[variant] += result["pnl_usd"]
         points = state.oi_points()
@@ -886,6 +900,8 @@ class PaperStrategy:
             "oi_1h_pct": _r(oi_change_pct(points, 60)) if len(points) >= 2 else None,
             "funding_rate": state.funding_rate,
         }
+        if book_exit_meta:
+            exit_json["book_exit"] = book_exit_meta
         self.store.update_trade(
             trade.id,
             {
@@ -1978,6 +1994,11 @@ class PaperStrategy:
                     continue
                 if not stretch_passes_variant(ev, variant):
                     continue
+                min_turn = config.ema60_stretch_min_turnover_usdt(variant)
+                if min_turn is not None:
+                    turnover = state.turnover_24h_usdt
+                    if turnover is None or float(turnover) < min_turn:
+                        continue
                 balance = self.balances[variant]
                 margin = balance * config.PAPER_MARGIN_PCT / 100.0
                 if margin <= 0 or balance - self.used_margin(variant) < margin:
@@ -1989,6 +2010,13 @@ class PaperStrategy:
     ) -> None:
         side = ev.side or "short"
         price = float(state.last_price)
+        if variant == config.PAPER_EM6R_VARIANT:
+            lev = config.PAPER_LEVERAGE
+            est_qty = margin * lev / price if price > 0 else 0.0
+            fill = simulate_entry_fill(side, est_qty, state, now_ms)
+            if not fill.ok:
+                return
+            price = float(fill.avg_price)
         tape = self.tape.symbols.get(symbol)
         nft = tape.next_funding_ts if tape is not None and tape.next_funding_ts and tape.next_funding_ts > now_ms else None
         pos = Position(
@@ -1999,8 +2027,16 @@ class PaperStrategy:
             next_funding_ts=nft,
             side=side,
             stop_style=config.paper_stop_style(variant),
+            paper_variant=variant,
         )
         entry = ev.to_data()
+        if variant == config.PAPER_EM6R_VARIANT:
+            entry.setdefault("metrics", {})
+            entry["metrics"]["book_entry"] = {
+                "levels": fill.levels_used,
+                "slippage_bps": round(fill.slippage_bps, 2),
+                "max_levels": config.PAPER_EM6R_BOOK_MAX_LEVELS,
+            }
         trade_id = self.store.insert_trade(
             {
                 "symbol": symbol,
