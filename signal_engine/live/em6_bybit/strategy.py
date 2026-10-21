@@ -47,7 +47,6 @@ class Em6BybitStrategy:
     _conn: Any = None
     _recovered: bool = False
     _last_status_log_ms: int = 0
-    _reentry_block_until: dict[str, int] = field(default_factory=dict)
 
     def open(self) -> None:
         if not self.broker.configured():
@@ -244,8 +243,6 @@ class Em6BybitStrategy:
                 pnl = (exit_p - live.entry_price) * live.qty
             else:
                 pnl = (live.entry_price - exit_p) * live.qty
-        cooldown_ms = int(config.PAPER_333_LOSS_STOP_COOLDOWN_MIN) * 60_000
-        self._reentry_block_until[symbol] = now + cooldown_ms
         self.store.close_trade(
             self._conn,
             int(row["id"]),
@@ -285,9 +282,6 @@ class Em6BybitStrategy:
         on_exchange: set[str],
     ) -> None:
         if symbol in self.open_trades or symbol in on_exchange:
-            return
-        until = self._reentry_block_until.get(symbol, 0)
-        if now_ms < until:
             return
         ev = evaluate_ema60_stretch(state, now_ms)
         if not ev.passed or not stretch_passes_variant(ev, VARIANT):
