@@ -8,9 +8,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import config
+from signal_engine.live.em6_bybit.adaptive_entry import AdaptiveStretchRegime, PreEntryWatch
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
 from signal_engine.live.em6_bybit.store import Em6BybitStore
-from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch, stretch_passes_variant
+from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
 from signal_engine.paper.position import (
     ema60_stretch_trail_stop,
     long_roe_pct,
@@ -47,6 +48,8 @@ class Em6BybitStrategy:
     _conn: Any = None
     _recovered: bool = False
     _last_status_log_ms: int = 0
+    _regime: AdaptiveStretchRegime = field(default_factory=AdaptiveStretchRegime)
+    _pre_entry: dict[str, PreEntryWatch] = field(default_factory=dict)
 
     def open(self) -> None:
         if not self.broker.configured():
@@ -233,9 +236,23 @@ class Em6BybitStrategy:
         if self._stop_changed(live, new_stop):
             self._push_stop(live, state)
 
+    def _is_initial_stop_close(self, live: LiveOpen | None, row: dict[str, Any]) -> bool:
+        """Initial −14% ROE: пик не дошёл до lock0."""
+        arm = float(config.PAPER_EM6R_LOCK0_ARM_ROE)
+        if live is not None:
+            return self._max_roe(live) + 1e-6 < arm
+        max_roe = row.get("max_roe")
+        if max_roe is None:
+            return False
+        return float(max_roe) + 1e-6 < arm
+
     def _finalize_closed(self, symbol: str, row: dict[str, Any], *, reason: str) -> None:
         live = self.open_trades.pop(symbol, None)
         now = int(time.time() * 1000)
+        if reason == "trailing_stop" and self._is_initial_stop_close(live, row):
+            watch = self._pre_entry.setdefault(symbol, PreEntryWatch())
+            watch.start_cooldown(now)
+            log.info("em6 bybit: %s initial stop — pre-entry pause 15s", symbol)
         opened_at = int(live.opened_at if live else row.get("opened_at") or 0)
         entry_p = float(live.entry_price if live else row.get("entry_price") or 0)
         exit_p = entry_p
@@ -287,6 +304,18 @@ class Em6BybitStrategy:
                 row = self.store.open_by_symbol(self._conn, sym) or {"id": self.open_trades[sym].id, "symbol": sym}
                 self._finalize_closed(sym, row, reason="trailing_stop")
 
+    def _base_stretch_ok(self, state: SymbolState, now_ms: int) -> tuple[Any, float] | None:
+        ev = evaluate_ema60_stretch(state, now_ms)
+        if not ev.passed or ev.side not in ("long", "short"):
+            return None
+        min_turn = config.ema60_stretch_min_turnover_usdt(VARIANT)
+        if min_turn is not None:
+            turn = state.turnover_24h_usdt
+            if turn is None or float(turn) < min_turn:
+                return None
+        stretch = float(ev.metrics.get("stretch_pct") or 0)
+        return ev, stretch
+
     def _try_open(
         self,
         symbol: str,
@@ -295,17 +324,23 @@ class Em6BybitStrategy:
         margin: float,
         *,
         on_exchange: set[str],
+        threshold_pct: float,
     ) -> None:
         if symbol in self.open_trades or symbol in on_exchange:
+            self._pre_entry.pop(symbol, None)
             return
-        ev = evaluate_ema60_stretch(state, now_ms)
-        if not ev.passed or not stretch_passes_variant(ev, VARIANT):
+        base = self._base_stretch_ok(state, now_ms)
+        if base is None:
+            self._pre_entry.pop(symbol, None)
             return
-        min_turn = config.ema60_stretch_min_turnover_usdt(VARIANT)
-        if min_turn is not None:
-            turn = state.turnover_24h_usdt
-            if turn is None or float(turn) < min_turn:
-                return
+        ev, stretch = base
+        if stretch + 1e-9 < threshold_pct:
+            self._pre_entry.pop(symbol, None)
+            return
+        self._regime.note_candidate(now_ms)
+        watch = self._pre_entry.setdefault(symbol, PreEntryWatch())
+        if not watch.tick(now_ms, stretch):
+            return
         price = float(state.last_price or 0)
         if price <= 0:
             return
@@ -362,7 +397,16 @@ class Em6BybitStrategy:
             opened_at=now_ms,
             last_exchange_stop=stop,
         )
-        log.info("em6 bybit OPEN %s %s margin=%.2f stop=%.6f", side, symbol, margin, stop)
+        self._pre_entry.pop(symbol, None)
+        log.info(
+            "em6 bybit OPEN %s %s margin=%.2f stop=%.6f stretch=%.2f thr=%.2f",
+            side,
+            symbol,
+            margin,
+            stop,
+            stretch,
+            threshold_pct,
+        )
 
     def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict[str, Any]:
         if not self.broker.configured():
@@ -387,31 +431,48 @@ class Em6BybitStrategy:
         except Exception:
             log.exception("em6 bybit positions")
             on_exchange = set()
+        market_stretches: list[float] = []
         ema_ready = 0
         candidates = 0
+        threshold = self._regime.threshold_pct
         for symbol, state in states.items():
             if not state.last_price:
                 continue
             ev = evaluate_ema60_stretch(state, now_ms)
             if ev.checks.get("ema_ready", {}).get("ok"):
                 ema_ready += 1
-            if stretch_passes_variant(ev, VARIANT):
-                turn = state.turnover_24h_usdt
-                if turn is not None and float(turn) >= float(
-                    config.ema60_stretch_min_turnover_usdt(VARIANT) or 0
-                ):
+            base = self._base_stretch_ok(state, now_ms)
+            if base is not None:
+                _, stretch = base
+                market_stretches.append(stretch)
+                if stretch + 1e-9 >= threshold:
                     candidates += 1
+        self._regime.update(now_ms, market_stretches)
+        threshold = self._regime.threshold_pct
+        for symbol, state in states.items():
+            if not state.last_price:
+                continue
             self._try_open(
-                symbol, state, now_ms, margin_per_trade, on_exchange=on_exchange
+                symbol,
+                state,
+                now_ms,
+                margin_per_trade,
+                on_exchange=on_exchange,
+                threshold_pct=threshold,
             )
         if now_ms - self._last_status_log_ms >= 120_000:
             self._last_status_log_ms = now_ms
+            watching = sum(
+                1 for w in self._pre_entry.values() if w.phase(now_ms) != "ready"
+            )
             log.info(
-                "EMA6 Bybit: монет %s, EMA60 %s, кандидатов %s, открыто %s, "
+                "EMA6 Bybit: монет %s, EMA60 %s, канд≥%.2f%% %s, watch %s, открыто %s, "
                 "equity $%.0f, margin/trade $%.2f (%.0f%%)",
                 len(states),
                 ema_ready,
+                threshold,
                 candidates,
+                watching,
                 len(self.open_trades),
                 equity,
                 margin_per_trade,
@@ -453,6 +514,15 @@ class Em6BybitStrategy:
         wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)
         n_closed = len(closed)
         sum_pnl = sum(float(r.get("pnl_usd") or 0) for r in closed)
+        watch_rows = [
+            {
+                "symbol": sym,
+                "phase": w.phase(now_ms),
+                "peak_stretch": round(w.peak_stretch, 3),
+                "cooldown_until_ms": w.cooldown_until_ms,
+            }
+            for sym, w in sorted(self._pre_entry.items())
+        ]
         return {
             "summary": {
                 "label": "EMA6 Bybit Demo",
@@ -464,7 +534,9 @@ class Em6BybitStrategy:
                 "closed_trades": n_closed,
                 "win_rate": round(100.0 * wins / n_closed, 1) if n_closed else 0.0,
                 "total_pnl_closed": round(sum_pnl, 2),
+                "adaptive": self._regime.to_view(),
             },
+            "pre_entry_watch": watch_rows,
             "open_trades": open_rows,
             "closed_trades": closed,
         }

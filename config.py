@@ -95,6 +95,17 @@ def em6_bybit_enabled() -> bool:
     return EM6_BYBIT_ENABLED.strip().lower() in ("1", "true", "yes", "on")
 
 
+# EMA6 Bybit: адаптивный порог отрыва и pre-entry остывание (только live Demo).
+EM6_BYBIT_ADAPT_BUCKET_STEP_PCT = _env_float("EM6_BYBIT_ADAPT_BUCKET_STEP_PCT", 0.5)
+EM6_BYBIT_ADAPT_MIN_COINS = _env_int("EM6_BYBIT_ADAPT_MIN_COINS", 3)
+EM6_BYBIT_ADAPT_FLOOR_PCT = _env_float("EM6_BYBIT_ADAPT_FLOOR_PCT", 4.0)
+EM6_BYBIT_ADAPT_RECALC_MS = _env_int("EM6_BYBIT_ADAPT_RECALC_MS", 180_000)
+EM6_BYBIT_ADAPT_IDLE_MS = _env_int("EM6_BYBIT_ADAPT_IDLE_MS", 300_000)
+EM6_BYBIT_ADAPT_RAISE_IF_COINS = _env_int("EM6_BYBIT_ADAPT_RAISE_IF_COINS", 5)
+EM6_BYBIT_WATCH_SAMPLE_MS = _env_int("EM6_BYBIT_WATCH_SAMPLE_MS", 10_000)
+EM6_BYBIT_WATCH_STABLE_MS = _env_int("EM6_BYBIT_WATCH_STABLE_MS", 20_000)
+EM6_BYBIT_INITIAL_STOP_COOLDOWN_MS = _env_int("EM6_BYBIT_INITIAL_STOP_COOLDOWN_MS", 15_000)
+
 # 1 — бумажный em6r на «Тесте» параллельно EMA6 Bybit (сравнение PnL).
 EM6R_PAPER_PARALLEL = _env("EM6R_PAPER_PARALLEL", "1")
 
