@@ -174,25 +174,66 @@ class Em6BybitBroker:
             positionIdx=0,
         )
 
-    def latest_closed_pnl(self, symbol: str, since_ms: int) -> dict[str, float] | None:
-        """Последнее закрытие по символу с биржи (closed PnL)."""
+    def fetch_closed_pnl(self, symbol: str, start_ms: int, *, limit: int = 100) -> list[dict[str, Any]]:
         try:
             resp = self._client().get_closed_pnl(
                 category="linear",
                 symbol=symbol,
-                startTime=max(0, since_ms - 60_000),
-                limit=10,
+                startTime=max(0, start_ms),
+                limit=min(limit, 100),
             )
         except Exception:
             log.exception("get_closed_pnl %s", symbol)
-            return None
+            return []
         rows = (resp.get("result") or {}).get("list") or []
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def _closed_pnl_key(row: dict[str, Any]) -> str:
+        return f"{row.get('createdTime')}|{row.get('orderId')}|{row.get('closedPnl')}"
+
+    def match_closed_pnl(
+        self,
+        symbol: str,
+        opened_at_ms: int,
+        entry_price: float,
+        *,
+        closed_at_ms: int | None = None,
+        used_keys: set[str] | None = None,
+    ) -> dict[str, float] | None:
+        """Сопоставить сделку с записью closed PnL (не «последнюю по символу»)."""
+        start = max(0, opened_at_ms - 300_000)
+        rows = self.fetch_closed_pnl(symbol, start, limit=100)
         if not rows:
             return None
-        row = rows[0]
+        used = used_keys or set()
+        best: tuple[float, dict[str, Any]] | None = None
+        for row in rows:
+            key = self._closed_pnl_key(row)
+            if key in used:
+                continue
+            ct = int(row.get("createdTime") or row.get("updatedTime") or 0)
+            if ct < opened_at_ms - 180_000:
+                continue
+            if closed_at_ms is not None and ct > closed_at_ms + 900_000:
+                continue
+            avg_ent = float(row.get("avgEntryPrice") or 0)
+            if avg_ent <= 0:
+                continue
+            if abs(avg_ent - entry_price) / avg_ent > 0.025:
+                continue
+            target = closed_at_ms if closed_at_ms is not None else opened_at_ms
+            dist = abs(ct - target)
+            if best is None or dist < best[0]:
+                best = (dist, row)
+        if best is None:
+            return None
+        row = best[1]
+        used.add(self._closed_pnl_key(row))
         return {
             "exit_price": float(row.get("avgExitPrice") or 0),
             "pnl_usd": float(row.get("closedPnl") or 0),
+            "closed_at_ms": int(row.get("createdTime") or row.get("updatedTime") or 0),
         }
 
     def close_market(self, symbol: str, side: str, qty: float, link: str) -> dict[str, Any]:

@@ -237,13 +237,21 @@ class Em6BybitStrategy:
         live = self.open_trades.pop(symbol, None)
         now = int(time.time() * 1000)
         opened_at = int(live.opened_at if live else row.get("opened_at") or 0)
-        exit_p = float(row.get("entry_price") or 0)
+        entry_p = float(live.entry_price if live else row.get("entry_price") or 0)
+        exit_p = entry_p
         pnl = 0.0
-        if self.broker.configured() and opened_at:
-            ex = self.broker.latest_closed_pnl(symbol, opened_at)
+        if self.broker.configured() and opened_at and entry_p > 0:
+            ex = self.broker.match_closed_pnl(
+                symbol,
+                opened_at,
+                entry_p,
+                closed_at_ms=now,
+            )
             if ex and ex.get("exit_price"):
                 exit_p = float(ex["exit_price"])
                 pnl = float(ex.get("pnl_usd") or 0)
+                if ex.get("closed_at_ms"):
+                    now = int(ex["closed_at_ms"])
         if live and pnl == 0.0 and exit_p == float(row.get("entry_price") or 0):
             exit_p = float(live.stop_price or live.entry_price)
             if live.side == "long":
