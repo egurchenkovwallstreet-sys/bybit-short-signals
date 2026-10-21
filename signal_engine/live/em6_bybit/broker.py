@@ -16,6 +16,7 @@ class Em6BybitBroker:
         self._http: Any = None
         self._qty_step: dict[str, float] = {}
         self._tick_size: dict[str, float] = {}
+        self._max_mkt_qty: dict[str, float] = {}
 
     def configured(self) -> bool:
         return bool(
@@ -41,6 +42,7 @@ class Em6BybitBroker:
         if symbol in self._qty_step and symbol in self._tick_size:
             return self._qty_step[symbol], self._tick_size[symbol]
         step, tick = 0.001, 0.0001
+        max_mkt = 0.0
         try:
             resp = self._client().get_instruments_info(category="linear", symbol=symbol)
             row = (resp.get("result") or {}).get("list") or []
@@ -49,15 +51,36 @@ class Em6BybitBroker:
                 price = row[0].get("priceFilter") or {}
                 step = float(lot.get("qtyStep") or lot.get("minOrderQty") or step)
                 tick = float(price.get("tickSize") or tick)
+                max_mkt = float(
+                    lot.get("maxMktOrderQty") or lot.get("maxOrderQty") or 0
+                )
         except Exception:
             log.exception("instrument %s", symbol)
         self._qty_step[symbol] = max(step, 1e-8)
         self._tick_size[symbol] = max(tick, 1e-8)
+        if max_mkt > 0:
+            self._max_mkt_qty[symbol] = max_mkt
         return self._qty_step[symbol], self._tick_size[symbol]
+
+    def cap_order_qty(self, symbol: str, qty: float) -> float:
+        if qty <= 0:
+            return qty
+        self._instrument(symbol)
+        cap = self._max_mkt_qty.get(symbol) or 0.0
+        if cap > 0 and qty > cap:
+            log.warning(
+                "em6 bybit %s: qty %.4f > maxMktOrderQty %.4f, cap",
+                symbol,
+                qty,
+                cap,
+            )
+            return cap
+        return qty
 
     def format_qty(self, symbol: str, qty: float) -> str | None:
         if qty <= 0:
             return None
+        qty = self.cap_order_qty(symbol, qty)
         step, _ = self._instrument(symbol)
         n = math.floor(qty / step + 1e-12)
         if n <= 0:

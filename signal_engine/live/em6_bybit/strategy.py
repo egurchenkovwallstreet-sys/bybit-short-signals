@@ -312,7 +312,10 @@ class Em6BybitStrategy:
         if margin < 1.0:
             return
         lev = config.PAPER_LEVERAGE
-        qty = margin * lev / price
+        qty = self.broker.cap_order_qty(symbol, margin * lev / price)
+        if qty <= 0:
+            return
+        margin = qty * price / lev
         side = ev.side or "short"
         stop = self._compute_stop_for(side, price, price, margin, qty)
         link = f"e6b-{symbol}-{now_ms}"[:36]
