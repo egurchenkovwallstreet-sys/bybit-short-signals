@@ -13,7 +13,7 @@ from typing import Any
 
 import config
 from ws_server.cache import MarketCache
-from ws_server.em6_bybit import Em6BybitCache
+from ws_server.em6_bybit import Em6BybitCache, snapshot_from_db
 from ws_server.paper import PaperCache
 from ws_server.demo import demo_board, demo_market, demo_stats
 from ws_server.stats import compute_stats
@@ -102,7 +102,7 @@ class Hub:
             "demo": self.demo,
             "stats": self.stats(),
             "paper_test": self.paper.view(),
-            "em6_bybit": self.em6_bybit.view(),
+            "em6_bybit": self.em6_bybit.view() or snapshot_from_db(),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:

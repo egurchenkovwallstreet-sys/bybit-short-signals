@@ -161,8 +161,12 @@ function connectSocket() {
     if (message.paper_test && window.paperTest) {
       window.paperTest.onSnapshot(message.paper_test);
     }
-    if (message.em6_bybit && window.em6Bybit) {
-      window.em6Bybit.onSnapshot(message.em6_bybit);
+    if (window.em6Bybit) {
+      if (message.em6_bybit) {
+        window.em6Bybit.onSnapshot(message.em6_bybit);
+      } else {
+        window.em6Bybit.onTab();
+      }
     }
   } else if (message.type === "paper_test") {
     if (window.paperTest) window.paperTest.onSnapshot(message.data);

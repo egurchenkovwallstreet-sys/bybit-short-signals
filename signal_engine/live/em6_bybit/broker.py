@@ -174,6 +174,27 @@ class Em6BybitBroker:
             positionIdx=0,
         )
 
+    def latest_closed_pnl(self, symbol: str, since_ms: int) -> dict[str, float] | None:
+        """Последнее закрытие по символу с биржи (closed PnL)."""
+        try:
+            resp = self._client().get_closed_pnl(
+                category="linear",
+                symbol=symbol,
+                startTime=max(0, since_ms - 60_000),
+                limit=10,
+            )
+        except Exception:
+            log.exception("get_closed_pnl %s", symbol)
+            return None
+        rows = (resp.get("result") or {}).get("list") or []
+        if not rows:
+            return None
+        row = rows[0]
+        return {
+            "exit_price": float(row.get("avgExitPrice") or 0),
+            "pnl_usd": float(row.get("closedPnl") or 0),
+        }
+
     def close_market(self, symbol: str, side: str, qty: float, link: str) -> dict[str, Any]:
         qty_s = self.format_qty(symbol, qty)
         if not qty_s:

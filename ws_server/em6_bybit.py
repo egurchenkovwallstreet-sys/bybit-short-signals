@@ -27,6 +27,18 @@ class Em6BybitCache:
 def snapshot_from_db() -> dict[str, Any]:
     store = Em6BybitStore()
     conn = store.open()
+    wallet_equity = 0.0
+    wallet_available = 0.0
+    try:
+        from signal_engine.live.em6_bybit.broker import Em6BybitBroker
+
+        broker = Em6BybitBroker()
+        if broker.configured():
+            w = broker.wallet_usdt()
+            wallet_equity = float(w.get("equity") or 0)
+            wallet_available = float(w.get("available") or 0)
+    except Exception:
+        pass
     try:
         closed = store.list_trades(conn, "closed", 200)
         open_rows = store.list_trades(conn, "open", 50)
@@ -36,8 +48,8 @@ def snapshot_from_db() -> dict[str, Any]:
         return {
             "summary": {
                 "label": "EMA6 Bybit Demo",
-                "wallet_equity": 0.0,
-                "wallet_available": 0.0,
+                "wallet_equity": round(wallet_equity, 2),
+                "wallet_available": round(wallet_available, 2),
                 "margin_pct": config.PAPER_MARGIN_PCT,
                 "leverage": config.PAPER_LEVERAGE,
                 "open_trades": len(open_rows),

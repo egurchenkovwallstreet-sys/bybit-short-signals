@@ -236,9 +236,16 @@ class Em6BybitStrategy:
     def _finalize_closed(self, symbol: str, row: dict[str, Any], *, reason: str) -> None:
         live = self.open_trades.pop(symbol, None)
         now = int(time.time() * 1000)
-        exit_p = float(live.entry_price if live else row.get("entry_price") or 0)
+        opened_at = int(live.opened_at if live else row.get("opened_at") or 0)
+        exit_p = float(row.get("entry_price") or 0)
         pnl = 0.0
-        if live:
+        if self.broker.configured() and opened_at:
+            ex = self.broker.latest_closed_pnl(symbol, opened_at)
+            if ex and ex.get("exit_price"):
+                exit_p = float(ex["exit_price"])
+                pnl = float(ex.get("pnl_usd") or 0)
+        if live and pnl == 0.0 and exit_p == float(row.get("entry_price") or 0):
+            exit_p = float(live.stop_price or live.entry_price)
             if live.side == "long":
                 pnl = (exit_p - live.entry_price) * live.qty
             else:
