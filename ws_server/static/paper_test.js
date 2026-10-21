@@ -36,7 +36,7 @@
     distribution: "Раздача (объём есть, цена вниз)",
     strong_top: "Сильная двойная вершина",
   };
-  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", pylbtc: "#2a9d8f", vac: "#e9c46a", vps15: "#2a9d8f", vps5: "#48cae4", vps: "#2a9d8f", i5: "#9b5de5", i15: "#f15bb5", em4: "#80ed99", em5: "#57cc99", em6: "#06d6a0", em6r: "#05a678", em7: "#38a3a5", em8: "#118ab2", em9: "#0a6c88", em10: "#073b4c", p10g: "#a78bfa", p10q: "#8b5cf6", p10m: "#7c3aed" };
+  const VARIANT_COLORS = { t20: "#5dade2", p10: "#c084fc", mln: "#4cc9f0", t20p: "#1d4e89", p10p: "#6d28d9", mlnp: "#0e7490", lt20: "#3ddc84", css: "#f5a623", css2: "#e8c547", sc10: "#00c2c7", e5s: "#ff6b8a", e5p: "#ffb703", c3: "#ff8c42", mt1: "#2ec4b6", mt2: "#e76f51", mt2c: "#d62828", graf: "#f94144", dps: "#577590", pyl: "#43aa8b", pylbtc: "#2a9d8f", vac: "#e9c46a", vps15: "#2a9d8f", vps5: "#48cae4", vps: "#2a9d8f", i5: "#9b5de5", i15: "#f15bb5", em4: "#80ed99", em5: "#57cc99", em6: "#06d6a0", em6r: "#05a678", em6pp: "#04c488", em7: "#38a3a5", em8: "#118ab2", em9: "#0a6c88", em10: "#073b4c", p10g: "#a78bfa", p10q: "#8b5cf6", p10m: "#7c3aed" };
   const PLUS_VARIANTS = { t20p: true, p10p: true, mlnp: true };
   const MINI_VARIANTS = { mt1: true, mt2: true };
   const MINI_CHART_VARIANTS = { mt2c: true };
@@ -57,7 +57,7 @@
   }
   const SCAN5_VARIANTS = { pyl: true, vac: true };
   const IMPULSE_VARIANTS = { i5: true, i15: true };
-  const EMA60_STRETCH_VARIANTS = { em4: true, em5: true, em6: true, em6r: true, em7: true, em8: true, em9: true, em10: true };
+  const EMA60_STRETCH_VARIANTS = { em4: true, em5: true, em6: true, em6r: true, em6pp: true, em7: true, em8: true, em9: true, em10: true };
   const P10_SIM_VARIANTS = { p10g: true, p10q: true, p10m: true };
   const INTERVALS = [["5", "5m"], ["15", "15m"], ["60", "1H"], ["240", "4H"]];
 

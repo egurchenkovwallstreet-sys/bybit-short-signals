@@ -80,6 +80,7 @@ VARIANT_LABELS = {
     "em5": "EMA60-5",
     "em6": "EMA60-6",
     "em6r": "EMA60-6 · real",
+    "em6pp": "EMA60-6++",
     "em7": "EMA60-7",
     "em8": "EMA60-8",
     "em9": "EMA60-9",

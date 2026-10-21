@@ -121,7 +121,7 @@ from signal_engine.paper.ema60_stretch_detect import (
     evaluate_ema60_stretch,
     stretch_passes_variant,
 )
-from signal_engine.paper.orderbook_fill import simulate_entry_fill, simulate_exit_fill
+from signal_engine.paper.orderbook_fill import estimate_book_slip, simulate_entry_fill, simulate_exit_fill
 from signal_engine.paper.impulse_detect import (
     IMPULSE_CHECK_LABELS,
     IMPULSE5_EXTRA_MANDATORY,
@@ -887,6 +887,8 @@ class PaperStrategy:
                 }
             elif reason == "trailing_stop":
                 exit_override = pos.stop_price
+        elif variant == config.PAPER_EM6PP_VARIANT and reason in ("trailing_stop", "liquidation"):
+            exit_override = pos.liq_price if reason == "liquidation" else pos.stop_price
         result = pos.close_result(reason, exit_price_override=exit_override)
         balance_before_close = self.balances[variant]
         self.balances[variant] += result["pnl_usd"]
@@ -902,6 +904,18 @@ class PaperStrategy:
         }
         if book_exit_meta:
             exit_json["book_exit"] = book_exit_meta
+        if variant == config.PAPER_EM6PP_VARIANT:
+            arm0 = config.PAPER_EMA60_STRETCH_LOCK0_ARM_ROE
+            peak = pos.max_roe()
+            if reason == "liquidation":
+                exit_json["exit_exec"] = "liquidation"
+            elif reason == "trailing_stop":
+                exit_json["exit_exec"] = "trailing_stop" if peak + 1e-9 >= arm0 else "stop_loss"
+            else:
+                exit_json["exit_exec"] = reason
+            exit_json["book_exit_hint"] = estimate_book_slip(
+                pos.side, pos.qty, state, now_ms, is_entry=False
+            )
         self.store.update_trade(
             trade.id,
             {
@@ -2037,6 +2051,16 @@ class PaperStrategy:
                 "slippage_bps": round(fill.slippage_bps, 2),
                 "max_levels": config.PAPER_EM6R_BOOK_MAX_LEVELS,
             }
+        if variant == config.PAPER_EM6PP_VARIANT:
+            lev = config.PAPER_LEVERAGE
+            est_qty = margin * lev / price if price > 0 else 0.0
+            entry.setdefault("metrics", {})
+            entry["metrics"]["book_entry_hint"] = estimate_book_slip(
+                side, est_qty, state, now_ms, is_entry=True
+            )
+            turn = state.turnover_24h_usdt
+            if turn is not None:
+                entry["metrics"]["turnover_24h_usd"] = float(turn)
         trade_id = self.store.insert_trade(
             {
                 "symbol": symbol,

@@ -123,6 +123,40 @@ def simulate_entry_fill(
     )
 
 
+def estimate_book_slip(
+    trade_side: str,
+    qty: float,
+    state,
+    now_ms: int,
+    *,
+    is_entry: bool,
+) -> dict:
+    """Оценка taker-slip по стакану (em6++): вход не блокирует, только метрики."""
+    if not book_fresh(getattr(state, "book_ts", None), now_ms):
+        return {"book_ok": False, "reason": "stale_book"}
+    ref = float(state.last_price or state.bid1_price or state.ask1_price or 0)
+    action = entry_action_for_side(trade_side) if is_entry else exit_action_for_side(trade_side)
+    bids = getattr(state, "book_bids", None) or {}
+    asks = getattr(state, "book_asks", None) or {}
+    full = simulate_market_fill(action, qty, bids, asks, max_levels=50, ref_price=ref)
+    capped = simulate_market_fill(
+        action,
+        qty,
+        bids,
+        asks,
+        max_levels=config.PAPER_EM6R_BOOK_MAX_LEVELS,
+        ref_price=ref,
+    )
+    return {
+        "book_ok": full.ok,
+        "slippage_bps": round(full.slippage_bps, 2) if full.ok else None,
+        "levels_used": full.levels_used if full.ok else capped.levels_used,
+        "fits_3_levels": capped.ok,
+        "taker_reason": None if full.ok else full.reason,
+        "capped_3_reason": None if capped.ok else capped.reason,
+    }
+
+
 def simulate_exit_fill(trade_side: str, qty: float, state, now_ms: int) -> BookFillResult:
     if not book_fresh(getattr(state, "book_ts", None), now_ms):
         return BookFillResult(False, 0.0, 0, 0.0, 0.0, "stale_book")
