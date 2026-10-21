@@ -46,12 +46,15 @@ class Em6BybitStrategy:
     open_trades: dict[str, LiveOpen] = field(default_factory=dict)
     _conn: Any = None
     _recovered: bool = False
+    _last_status_log_ms: int = 0
 
     def open(self) -> None:
         if not self.broker.configured():
+            log.warning("EMA6 Bybit: выключен (нет Demo API ключей или EM6_BYBIT_ENABLED=0)")
             return
         self._conn = self.store.open()
         self._recover()
+        log.info("EMA6 Bybit: бот активен, восстановлено позиций %s", len(self.open_trades))
 
     def close(self) -> None:
         if self._conn is not None:
@@ -337,12 +340,33 @@ class Em6BybitStrategy:
             avail = 0.0
         reserved = sum(t.margin for t in self.open_trades.values())
         free = max(0.0, avail - reserved)
+        ema_ready = 0
+        candidates = 0
         for symbol, state in states.items():
             if not state.last_price:
                 continue
+            ev = evaluate_ema60_stretch(state, now_ms)
+            if ev.checks.get("ema_ready", {}).get("ok"):
+                ema_ready += 1
+            if stretch_passes_variant(ev, VARIANT):
+                turn = state.turnover_24h_usdt
+                if turn is not None and float(turn) >= float(
+                    config.ema60_stretch_min_turnover_usdt(VARIANT) or 0
+                ):
+                    candidates += 1
             self._try_open(symbol, state, now_ms, free)
             if symbol in self.open_trades:
                 free = max(0.0, free - self.open_trades[symbol].margin)
+        if now_ms - self._last_status_log_ms >= 120_000:
+            self._last_status_log_ms = now_ms
+            log.info(
+                "EMA6 Bybit: монет в движке %s, EMA60 готова %s, кандидатов em6r %s, открыто %s, avail $%.0f",
+                len(states),
+                ema_ready,
+                candidates,
+                len(self.open_trades),
+                avail,
+            )
         return {"type": BOARD_TYPE, "timestamp": now_ms, "data": self.view(now_ms)}
 
     def view(self, now_ms: int) -> dict[str, Any]:

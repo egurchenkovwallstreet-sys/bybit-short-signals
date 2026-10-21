@@ -102,8 +102,9 @@ class SignalService:
                     result = close()
                     if asyncio.iscoroutine(result):
                         await result
+            if self.engine.em6_bybit is not None:
+                self.engine.em6_bybit.close()
             self.engine.store.close()
-            self.engine.watches.close()
 
     def _five_min_symbols(self) -> set[str]:
         """Монеты с оборотом порога LH — им обязательно нужны 5м для баблососа / пылесоса 5."""
