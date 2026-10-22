@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from typing import Any
 
 import config
@@ -248,16 +249,26 @@ class Em6BybitBroker:
         }
 
     def _fetch_closed_pnl_page(
-        self, *, start_ms: int, limit: int, symbol: str | None = None
+        self,
+        *,
+        start_ms: int | None,
+        limit: int,
+        symbol: str | None = None,
     ) -> list[dict[str, Any]]:
         kwargs: dict[str, Any] = {
             "category": "linear",
-            "startTime": max(0, start_ms),
             "limit": min(max(1, limit), 100),
+            "endTime": int(time.time() * 1000),
         }
+        if start_ms is not None:
+            kwargs["startTime"] = max(0, start_ms)
         if symbol:
             kwargs["symbol"] = symbol
         resp = self._client().get_closed_pnl(**kwargs)
+        code = resp.get("retCode") if isinstance(resp, dict) else None
+        if code not in (0, "0", None):
+            log.warning("get_closed_pnl %s: %s", symbol or "all", resp)
+            return []
         return (resp.get("result") or {}).get("list") or []
 
     def list_recent_closed_pnl(
@@ -273,7 +284,14 @@ class Em6BybitBroker:
         try:
             rows = self._fetch_closed_pnl_page(start_ms=start_ms, limit=lim)
         except Exception:
+            log.exception("get_closed_pnl all")
             rows = []
+        if not rows:
+            try:
+                rows = self._fetch_closed_pnl_page(start_ms=None, limit=lim)
+            except Exception:
+                log.exception("get_closed_pnl all (no start)")
+                rows = []
         if not rows and symbols:
             merged: list[dict[str, Any]] = []
             for sym in symbols[:40]:

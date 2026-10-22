@@ -9,6 +9,7 @@ from typing import Any
 
 import config
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
+from signal_engine.live.em6_bybit.history import load_closed_for_dashboard, summary_from_closed
 from signal_engine.live.em6_bybit.grid_entry import (
     entry_price_ok,
     CandidateWatch,
@@ -294,18 +295,6 @@ class Em6BybitStrategy:
             rows.append(row)
         rows.sort(key=lambda r: abs(float(r.get("unrealised_pnl") or 0)), reverse=True)
         return rows
-
-    def _closed_rows_from_exchange(self, *, limit: int = 200) -> list[dict[str, Any]]:
-        start = int(time.time() * 1000) - 90 * 86400 * 1000
-        syms = list(self.open_trades.keys())
-        if self._conn is not None:
-            for r in self.store.list_trades(self._conn, "closed", 80):
-                s = str(r.get("symbol") or "")
-                if s and s not in syms:
-                    syms.append(s)
-        return self.broker.list_recent_closed_pnl(
-            start_ms=start, limit=min(limit, 100), symbols=syms
-        )
 
     def _ensure_trailing(
         self,
@@ -845,11 +834,10 @@ class Em6BybitStrategy:
                 positions = self.broker.linear_positions()
             except Exception:
                 log.exception("em6 bybit view positions")
-        closed: list[dict] = []
-        if self.broker.configured():
-            closed = self._closed_rows_from_exchange(limit=200)
-        if not closed and self._conn is not None:
-            closed = self.store.list_trades(self._conn, "closed", 200)
+        hints = list(self.open_trades.keys())
+        closed = load_closed_for_dashboard(
+            self.broker, symbol_hints=hints, limit=200
+        )
         open_rows: list[dict[str, Any]] = []
         if positions:
             open_rows = self._open_rows_from_exchange(positions)
@@ -883,9 +871,8 @@ class Em6BybitStrategy:
                     }
                 )
         unrealized_total = sum(float(r.get("unrealised_pnl") or 0) for r in open_rows)
-        wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)
-        n_closed = len(closed)
-        sum_pnl = sum(float(r.get("pnl_usd") or 0) for r in closed)
+        closed_stats = summary_from_closed(closed)
+        n_closed = int(closed_stats["closed_trades"])
         cand_rows = []
         by_column: dict[str, list[dict]] = {}
         for w in sorted(self._watch.values(), key=lambda x: x.last_stretch, reverse=True):
@@ -910,8 +897,8 @@ class Em6BybitStrategy:
                 ),
                 "open_trades": len(open_rows),
                 "closed_trades": n_closed,
-                "win_rate": round(100.0 * wins / n_closed, 1) if n_closed else 0.0,
-                "total_pnl_closed": round(sum_pnl, 2),
+                "win_rate": closed_stats["win_rate"],
+                "total_pnl_closed": closed_stats["total_pnl_closed"],
                 "total_unrealised_pnl": round(unrealized_total, 2),
                 "watch_count": len(cand_rows),
                 "stretch_floor_pct": config.EM6_BYBIT_STRETCH_FLOOR_PCT,

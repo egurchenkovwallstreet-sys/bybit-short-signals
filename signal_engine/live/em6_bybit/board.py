@@ -8,6 +8,10 @@ from typing import Any
 import config
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
 from signal_engine.live.em6_bybit.grid_entry import CandidateWatch, band_lo, stretch_column_label
+from signal_engine.live.em6_bybit.history import (
+    load_closed_for_dashboard,
+    summary_from_closed,
+)
 from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
 from signal_engine.live.em6_bybit.stops import (
     em6_bybit_active_trail_roe_pct,
@@ -107,22 +111,17 @@ def snapshot_from_exchange(*, closed_limit: int = 200) -> dict[str, Any]:
             positions = broker.linear_positions()
         except Exception:
             pass
-        start = int(time.time() * 1000) - 90 * 86400 * 1000
-        syms = [p["symbol"] for p in positions]
-        try:
-            closed = broker.list_recent_closed_pnl(
-                start_ms=start,
-                limit=min(closed_limit, 100),
-                symbols=syms,
-            )
-        except Exception:
-            closed = []
         candidates, candidate_columns = _candidate_views_from_rest(broker)
     open_rows = _open_rows_from_positions(positions)
+    syms = [p["symbol"] for p in positions]
+    closed = load_closed_for_dashboard(
+        broker, symbol_hints=syms, limit=min(closed_limit, 200)
+    )
     unrealized = sum(float(r.get("unrealised_pnl") or 0) for r in open_rows)
-    wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)
-    n = len(closed)
-    pnl = sum(float(r.get("pnl_usd") or 0) for r in closed)
+    closed_stats = summary_from_closed(closed)
+    n = int(closed_stats["closed_trades"])
+    pnl = float(closed_stats["total_pnl_closed"])
+    wins_rate = float(closed_stats["win_rate"])
     avail = round(float(wallet.get("available") or 0), 2)
     return {
         "summary": {
@@ -136,7 +135,7 @@ def snapshot_from_exchange(*, closed_limit: int = 200) -> dict[str, Any]:
             ),
             "open_trades": len(open_rows),
             "closed_trades": n,
-            "win_rate": round(100.0 * wins / n, 1) if n else 0.0,
+            "win_rate": wins_rate,
             "total_pnl_closed": round(pnl, 2),
             "total_unrealised_pnl": round(unrealized, 2),
             "watch_count": len(candidates),
@@ -231,15 +230,14 @@ def merge_public_snapshot(engine_cache: dict[str, Any] | None) -> dict[str, Any]
         )
     except Exception:
         pass
-    if not out["closed_trades"]:
-        try:
-            start = int(time.time() * 1000) - 90 * 86400 * 1000
-            syms = [str(r["symbol"]) for r in out["open_trades"]]
-            out["closed_trades"] = broker.list_recent_closed_pnl(
-                start_ms=start, limit=80, symbols=syms or None
-            )
-        except Exception:
-            pass
+    try:
+        hints = [str(r["symbol"]) for r in out["open_trades"]]
+        hints += [str(r["symbol"]) for r in out.get("closed_trades") or []]
+        closed = load_closed_for_dashboard(broker, symbol_hints=hints, limit=200)
+        out["closed_trades"] = closed
+        out["summary"].update(summary_from_closed(closed))
+    except Exception:
+        log.exception("em6 bybit merge closed")
     return out
 
 
@@ -247,14 +245,13 @@ def snapshot_from_db_fallback() -> dict[str, Any]:
     broker = Em6BybitBroker()
     if broker.configured():
         return snapshot_from_exchange()
+    closed = load_closed_for_dashboard(broker, limit=200)
+    closed_stats = summary_from_closed(closed)
     store = Em6BybitStore()
     conn = store.open()
     try:
-        closed = store.list_trades(conn, "closed", 200)
         open_rows = store.list_trades(conn, "open", 50)
-        wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)
-        n = len(closed)
-        pnl = sum(float(r.get("pnl_usd") or 0) for r in closed)
+        n = int(closed_stats["closed_trades"])
         return {
             "summary": {
                 "label": "EMA6 Bybit Demo",
@@ -267,8 +264,8 @@ def snapshot_from_db_fallback() -> dict[str, Any]:
                 ),
                 "open_trades": len(open_rows),
                 "closed_trades": n,
-                "win_rate": round(100.0 * wins / n, 1) if n else 0.0,
-                "total_pnl_closed": round(pnl, 2),
+                "win_rate": closed_stats["win_rate"],
+                "total_pnl_closed": closed_stats["total_pnl_closed"],
                 "total_unrealised_pnl": 0.0,
                 "watch_count": 0,
                 "data_source": "local",
