@@ -318,7 +318,7 @@ class Em6BybitStrategy:
             return
         roe = cur_roe if cur_roe is not None else self._current_roe(live, state)
         max_roe = max(self._max_roe(live), roe)
-        target = em6_bybit_ladder_target_stop_roe(roe, max_roe)
+        target = em6_bybit_ladder_target_stop_roe(roe)
 
         if target is None:
             trail_roe = em6_bybit_initial_trail_roe_pct()
@@ -335,6 +335,7 @@ class Em6BybitStrategy:
                     log.warning("em6 bybit trailing %s: %s", live.symbol, resp)
                     return
                 live.last_trail_roe_pct = trail_roe
+                live.locked_stop_roe = -1000.0
                 log.info(
                     "em6 bybit %s: wide trail %.0f%% @ %.8g (ROE %.2f%%)",
                     live.symbol,
@@ -347,18 +348,31 @@ class Em6BybitStrategy:
             return
 
         new_lock = max(live.locked_stop_roe, target)
-        if new_lock <= live.locked_stop_roe + 1e-6:
+        tight = em6_bybit_use_tight_trail(roe)
+        trail_gap = config.EM6_BYBIT_LADDER_TRAIL_3
+        on_tight_trail = abs(live.last_trail_roe_pct - trail_gap) < 1e-6
+
+        need_amend = new_lock > live.locked_stop_roe + 1e-6
+        if tight:
+            # ≥60%: трейл 5% от текущей mark; переставляем при росте ROE или первом входе в режим
+            need_amend = need_amend or not on_tight_trail
+        elif on_tight_trail and not tight:
+            # Откат ниже 60% — снова SL по храповику (не ниже locked)
+            need_amend = True
+
+        if not need_amend:
             return
 
         try:
-            if em6_bybit_use_tight_trail(roe):
+            if tight:
                 resp = self.broker.set_trailing_stop_roe(
                     live.symbol,
                     ref_price=ref,
                     side=live.side,
-                    trail_roe_pct=config.EM6_BYBIT_LADDER_TRAIL_3,
+                    trail_roe_pct=trail_gap,
                 )
-                mode = f"trail {config.EM6_BYBIT_LADDER_TRAIL_3:g}%"
+                mode = f"trail {trail_gap:g}% @ mark"
+                live.last_trail_roe_pct = trail_gap
             else:
                 stop_px = stop_price_for_roe(
                     live.side, live.entry_price, live.margin, live.qty, new_lock
@@ -367,13 +381,13 @@ class Em6BybitStrategy:
                     live.symbol, stop_px, side=live.side, ref_price=ref
                 )
                 mode = f"SL lock ROE {new_lock:.1f}%"
+                live.last_trail_roe_pct = new_lock
             if resp.get("retCode") not in (0, "0", None):
                 log.warning("em6 bybit ladder %s: %s", live.symbol, resp)
                 return
             prev = live.locked_stop_roe
             live.locked_stop_roe = new_lock
             live.profit_lock_armed = True
-            live.last_trail_roe_pct = new_lock
             live.stop_price = stop_price_for_roe(
                 live.side, live.entry_price, live.margin, live.qty, new_lock
             )
@@ -389,11 +403,11 @@ class Em6BybitStrategy:
                 },
             )
             log.info(
-                "em6 bybit %s: ladder %s (ROE now %.2f%%, max %.2f%%, was lock %.1f%%)",
+                "em6 bybit %s: ladder %s (ROE now %.2f%%, lock %.1f%%, was %.1f%%)",
                 live.symbol,
                 mode,
                 roe,
-                max_roe,
+                new_lock,
                 prev if prev > -900 else 0.0,
             )
         except Exception:

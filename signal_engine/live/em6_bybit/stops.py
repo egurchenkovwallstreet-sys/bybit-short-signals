@@ -17,15 +17,13 @@ def em6_bybit_initial_trail_roe_pct() -> float:
     return config.em6_bybit_trail_initial_roe()
 
 
-def em6_bybit_ladder_target_stop_roe(current_roe: float, max_roe: float) -> float | None:
-    """Минимальный ROE стопа по лестнице (long: чем выше, тем жёстче). До +20% — None (широкий trail)."""
+def em6_bybit_ladder_target_stop_roe(current_roe: float) -> float | None:
+    """ROE стопа от текущей цены (mark). До +20% — None (широкий trail 50%)."""
     if current_roe + 1e-6 < config.em6_bybit_trail_profit_arm_roe():
         return None
     floor = config.em6_bybit_trail_lock_roe()
-    if current_roe + 1e-6 >= config.em6_bybit_trail_profit_arm_roe():
-        floor = max(floor, config.em6_bybit_trail_lock_roe())
-    if max(current_roe, max_roe) + 1e-6 >= config.EM6_BYBIT_LADDER_ROE_2:
-        floor = max(floor, max_roe - config.EM6_BYBIT_LADDER_BELOW_MAX)
+    if current_roe + 1e-6 >= config.EM6_BYBIT_LADDER_ROE_2:
+        floor = max(floor, current_roe - config.EM6_BYBIT_LADDER_BELOW_MAX)
     if current_roe + 1e-6 >= config.EM6_BYBIT_LADDER_ROE_3:
         floor = max(floor, current_roe - config.EM6_BYBIT_LADDER_TRAIL_3)
     return floor
@@ -87,7 +85,7 @@ def em6_bybit_trailing_stop_price(
     if locked_stop_roe is not None and locked_stop_roe > -900:
         target_roe = locked_stop_roe
     else:
-        target = em6_bybit_ladder_target_stop_roe(roe_for_trail, peak)
+        target = em6_bybit_ladder_target_stop_roe(roe_for_trail)
         if target is None:
             trail_gap = em6_bybit_initial_trail_roe_pct()
             target_roe = roe_for_trail - trail_gap if roe_for_trail > 0 else -trail_gap
