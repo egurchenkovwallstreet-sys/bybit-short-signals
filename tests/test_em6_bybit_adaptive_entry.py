@@ -15,9 +15,9 @@ from signal_engine.live.em6_bybit.adaptive_entry import (
 
 class TestAdaptiveBuckets(unittest.TestCase):
     def test_bucket_lower(self) -> None:
-        self.assertEqual(stretch_bucket_lower(3.9), None)
-        self.assertEqual(stretch_bucket_lower(4.0), 4.0)
-        self.assertEqual(stretch_bucket_lower(4.49), 4.0)
+        self.assertEqual(stretch_bucket_lower(5.9), None)
+        self.assertEqual(stretch_bucket_lower(6.0), 6.0)
+        self.assertEqual(stretch_bucket_lower(6.49), 6.0)
         self.assertEqual(stretch_bucket_lower(9.2), 9.0)
 
     def test_threshold_highest_confirmed(self) -> None:
@@ -32,7 +32,7 @@ class TestAdaptiveBuckets(unittest.TestCase):
         self.assertEqual(thr, 9.5)
 
     def test_floor_when_no_cluster(self) -> None:
-        thr, _ = compute_adaptive_threshold([4.1, 5.5])
+        thr, _ = compute_adaptive_threshold([6.1, 7.5])
         self.assertEqual(thr, config.EM6_BYBIT_ADAPT_FLOOR_PCT)
 
 

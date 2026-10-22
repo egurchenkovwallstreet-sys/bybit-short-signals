@@ -126,7 +126,7 @@
       const rows = (data.candidates || []).map(rowCand).join("");
       table.innerHTML = `<thead><tr>
         <th>Symbol</th><th>Сторона</th><th>Отрыв</th><th>Колонка</th><th>Фаза</th>
-        <th>Пик</th><th>Arm band</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>Нет претендентов (≥4%)</td></tr>"}</tbody>`;
+        <th>Пик</th><th>Arm band</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>Нет претендентов (отрыв от EMA60 ≥6%)</td></tr>"}</tbody>`;
     }
     bindChartClicks();
   }

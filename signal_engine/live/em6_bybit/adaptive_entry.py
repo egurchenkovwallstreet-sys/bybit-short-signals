@@ -9,7 +9,7 @@ import config
 
 
 def stretch_bucket_lower(stretch_pct: float) -> float | None:
-    """Нижняя граница корзины 0.5% (пол 4%)."""
+    """Нижняя граница корзины 0.5% (пол от EM6_BYBIT_ADAPT_FLOOR_PCT)."""
     floor = config.EM6_BYBIT_ADAPT_FLOOR_PCT
     step = config.EM6_BYBIT_ADAPT_BUCKET_STEP_PCT
     if stretch_pct + 1e-9 < floor:

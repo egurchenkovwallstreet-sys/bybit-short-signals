@@ -14,13 +14,13 @@ from signal_engine.live.em6_bybit.grid_entry import (
 class TestGridBands(unittest.TestCase):
     def test_band_lo_fractional(self) -> None:
         self.assertEqual(band_lo(6.7), 6.5)
-        self.assertEqual(band_lo(4.0), 4.0)
+        self.assertEqual(band_lo(4.0), 6.0)
 
     def test_pick_top(self) -> None:
         rows = [
-            ("A", "long", 5.0, 1.0),
+            ("A", "long", 6.5, 1.0),
             ("B", "short", 8.0, 1.0),
-            ("C", "long", 4.2, 1.0),
+            ("C", "long", 5.2, 1.0),
         ]
         top = pick_top_candidates(rows, limit=2)
         self.assertEqual([t[0] for t in top], ["B", "A"])

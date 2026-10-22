@@ -10,7 +10,7 @@ import config
 
 
 def band_lo(stretch_pct: float) -> float:
-    """Нижняя граница полосы отрыва (пол 4%, шаг 0.25%)."""
+    """Нижняя граница полосы отрыва (пол 6%, шаг 0.25%)."""
     floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
     step = config.EM6_BYBIT_BAND_STEP_PCT
     if stretch_pct + 1e-9 < floor:
@@ -26,7 +26,7 @@ def stretch_at_price(price: float, ema: float) -> float:
 
 
 def level_bands(anchor_stretch: float) -> list[tuple[float, float]]:
-    """Полосы от 4% до anchor+away вверх и вниз к EMA."""
+    """Полосы от пола отрыва до anchor+away вверх и вниз к EMA."""
     floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
     step = config.EM6_BYBIT_BAND_STEP_PCT
     away = config.EM6_BYBIT_AWAY_BANDS_PCT

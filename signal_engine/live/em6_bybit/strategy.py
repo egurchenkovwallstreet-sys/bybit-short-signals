@@ -671,6 +671,11 @@ class Em6BybitStrategy:
                 continue
             row = self._stretch_row_live(w, state, now_ms)
             if row is None:
+                ema = float(w.ema60 or 0)
+                price = float(state.last_price or 0)
+                floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+                if ema > 0 and price > 0 and stretch_at_price(price, ema) + 1e-9 < floor:
+                    self._watch.pop(symbol, None)
                 continue
             _, side, stretch, ema = row
             w.ema60 = ema
