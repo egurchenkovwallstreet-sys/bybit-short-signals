@@ -198,6 +198,12 @@ class Em6BybitStrategy:
             return float(state.last_price)
         return live.entry_price
 
+    def _current_roe(self, live: LiveOpen, state: SymbolState | None) -> float:
+        ref = self._ref_price(live, state)
+        if live.side == "long":
+            return long_roe_pct(live.entry_price, ref, live.leverage)
+        return roe_pct(live.entry_price, ref, live.leverage)
+
     def _roe_from_upnl(self, upnl: float, margin: float) -> float:
         if margin <= 0:
             return 0.0
@@ -242,8 +248,8 @@ class Em6BybitStrategy:
                 "max_roe": round(max_roe, 2),
                 "min_roe": round(self._min_roe(live), 2) if live else round(min(0.0, roe), 2),
                 "opened_at": int(live.opened_at if live else pos.get("open_time_ms") or 0),
-                "trail_roe_pct": em6_bybit_active_trail_roe_pct(max_roe),
-                "trail_armed": max_roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
+                "trail_roe_pct": em6_bybit_active_trail_roe_pct(roe),
+                "trail_armed": roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
                 "source": "bybit",
                 "ema60": live.ema60 if live else 0.0,
                 "grid_levels": grid,
@@ -266,12 +272,16 @@ class Em6BybitStrategy:
 
     def _ensure_trailing(self, live: LiveOpen, state: SymbolState | None = None) -> None:
         ref = self._ref_price(live, state)
-        peak = self._max_roe(live)
-        trail_roe = em6_bybit_active_trail_roe_pct(peak)
-        # Переставляем на бирже при сужении лестницы (50→40→…) или первой установке.
-        if live.last_trail_roe_pct > 0 and trail_roe >= live.last_trail_roe_pct - 1e-6:
-            if abs(trail_roe - live.last_trail_roe_pct) < 1e-6 and live.last_exchange_stop > 0:
-                return
+        if ref <= 0:
+            return
+        cur_roe = self._current_roe(live, state)
+        trail_roe = em6_bybit_active_trail_roe_pct(cur_roe)
+        if (
+            live.last_trail_roe_pct > 0
+            and abs(trail_roe - live.last_trail_roe_pct) < 1e-6
+            and live.last_exchange_stop > 0
+        ):
+            return
         try:
             resp = self.broker.set_trailing_stop_roe(
                 live.symbol,
@@ -291,13 +301,14 @@ class Em6BybitStrategy:
                 live.id,
                 {"stop_price": live.stop_price, "last_exchange_stop": live.last_exchange_stop},
             )
-            if prev > 0 and abs(prev - trail_roe) > 1e-6:
+            if prev <= 0 or abs(prev - trail_roe) > 1e-6:
                 log.info(
-                    "em6 bybit %s: trail %.0f%% → %.0f%% ROE (peak %.2f%%)",
+                    "em6 bybit %s: trail %.0f%% ROE @ price %.8g (now ROE %.2f%%, was trail %.0f%%)",
                     live.symbol,
-                    prev,
                     trail_roe,
-                    peak,
+                    ref,
+                    cur_roe,
+                    prev if prev > 0 else trail_roe,
                 )
         except Exception:
             log.exception("em6 bybit: trailing %s", live.symbol)
@@ -606,7 +617,7 @@ class Em6BybitStrategy:
                 symbol,
                 ref_price=price,
                 side=side,
-                trail_roe_pct=config.em6_bybit_trail_initial_roe(),
+                trail_roe_pct=em6_bybit_active_trail_roe_pct(0.0),
             )
             if tr.get("retCode") not in (0, "0", None):
                 log.warning("em6 bybit trailing after open %s: %s", symbol, tr)
@@ -779,8 +790,9 @@ class Em6BybitStrategy:
                         "exchange_stop": live.last_exchange_stop,
                         "ema60": live.ema60,
                         "grid_levels": live.grid_levels,
-                        "trail_roe_pct": em6_bybit_active_trail_roe_pct(
-                            self._max_roe(live)
+                        "trail_roe_pct": live.last_trail_roe_pct
+                        or em6_bybit_active_trail_roe_pct(
+                            self._current_roe(live, None)
                         ),
                         "notional_usd": round(live.qty * live.entry_price, 2),
                         "source": "local",
