@@ -75,7 +75,16 @@ class SignalService:
                     and now >= next_em6_open
                 ):
                     ts_open = int(time.time() * 1000)
-                    self.engine.em6_bybit.tick_open(self.engine.symbols, ts_open)
+                    em6 = self.engine.em6_bybit
+                    em6.tick_open(self.engine.symbols, ts_open)
+                    if self._publisher is not None:
+                        self._publisher.publish(
+                            {
+                                "type": "em6_bybit",
+                                "timestamp": ts_open,
+                                "data": em6.view(ts_open),
+                            }
+                        )
                     next_em6_open = now + config.EM6_BYBIT_OPEN_TICK_MS / 1000.0
                 if now >= next_scan:
                     ts = int(time.time() * 1000)
