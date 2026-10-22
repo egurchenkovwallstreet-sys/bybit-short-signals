@@ -17,11 +17,9 @@ from signal_engine.live.em6_bybit.grid_entry import (
 )
 from signal_engine.live.em6_bybit.store import Em6BybitStore
 from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
-from signal_engine.paper.position import (
-    ema60_stretch_trail_stop,
-    long_roe_pct,
-    roe_pct,
-)
+from signal_engine.live.em6_bybit.grid_entry import price_at_stretch
+from signal_engine.live.em6_bybit.stops import em6_bybit_trailing_stop_price
+from signal_engine.paper.position import long_roe_pct, roe_pct
 from signal_engine.state import SymbolState
 
 log = logging.getLogger(__name__)
@@ -43,6 +41,8 @@ class LiveOpen:
     worst_price: float
     opened_at: int
     last_exchange_stop: float = 0.0
+    ema60: float = 0.0
+    grid_levels: list[dict[str, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -130,7 +130,7 @@ class Em6BybitStrategy:
                 opened_at=int(time.time() * 1000),
             )
             self.open_trades[sym] = live
-            self._push_stop(live)
+            self._ensure_trailing(live)
             log.info("em6 bybit: recovered open %s %s", sym, side)
 
         for sym, live in list(self.open_trades.items()):
@@ -154,7 +154,7 @@ class Em6BybitStrategy:
             opened_at=int(row["opened_at"]),
             last_exchange_stop=float(row["last_exchange_stop"] or 0),
         )
-        self._push_stop(self.open_trades[sym])
+        self._ensure_trailing(self.open_trades[sym])
 
     def _entry_fee(self, entry: float, qty: float) -> float:
         return qty * entry * config.PAPER_FEE_RATE_TAKER
@@ -168,15 +168,12 @@ class Em6BybitStrategy:
         qty: float,
     ) -> float:
         fee = self._entry_fee(entry, qty)
-        return ema60_stretch_trail_stop(
+        return em6_bybit_trailing_stop_price(
             entry,
             best,
-            config.em6_bybit_leverage(),
+            side=side,
             margin=margin,
             entry_fee=fee,
-            funding_paid=0.0,
-            side=side,
-            variant=VARIANT,
         )
 
     def _max_roe(self, live: LiveOpen) -> float:
@@ -194,27 +191,24 @@ class Em6BybitStrategy:
             return float(state.last_price)
         return live.entry_price
 
-    def _push_stop(self, live: LiveOpen, state: SymbolState | None = None) -> None:
+    def _ensure_trailing(self, live: LiveOpen, state: SymbolState | None = None) -> None:
         ref = self._ref_price(live, state)
         try:
-            resp = self.broker.set_stop_loss(
-                live.symbol, live.stop_price, side=live.side, ref_price=ref
+            resp = self.broker.set_trailing_stop_roe(
+                live.symbol, ref_price=ref, side=live.side
             )
             code = resp.get("retCode") if isinstance(resp, dict) else None
             if code not in (0, "0", None):
-                log.warning("em6 bybit set stop %s: %s", live.symbol, resp)
+                log.warning("em6 bybit trailing %s: %s", live.symbol, resp)
                 return
-            clamped = self.broker.clamp_stop_for_exchange(
-                live.symbol, live.side, live.stop_price, ref
-            )
-            live.last_exchange_stop = clamped
+            live.last_exchange_stop = live.stop_price
             self.store.update_open(
                 self._conn,
                 live.id,
                 {"stop_price": live.stop_price, "last_exchange_stop": live.last_exchange_stop},
             )
         except Exception:
-            log.exception("em6 bybit: set stop %s", live.symbol)
+            log.exception("em6 bybit: trailing %s", live.symbol)
 
     def _stop_changed(self, live: LiveOpen, new_stop: float) -> bool:
         if live.last_exchange_stop <= 0:
@@ -242,8 +236,7 @@ class Em6BybitStrategy:
             "min_roe": self._min_roe(live),
         }
         self.store.update_open(self._conn, live.id, fields)
-        if self._stop_changed(live, new_stop):
-            self._push_stop(live, state)
+        # Trailing −14% ROE на бирже; stop_price — расчёт для UI.
 
     def _is_initial_stop_close(self, live: LiveOpen | None, row: dict[str, Any]) -> bool:
         arm = float(config.PAPER_EM6R_LOCK0_ARM_ROE)
@@ -403,14 +396,40 @@ class Em6BybitStrategy:
             return
         qty, margin = planned
         stop = self._compute_stop_for(side, price, price, margin, qty)
+        w = self._watch.get(symbol)
+        ema = float(w.ema60 if w and w.ema60 else 0)
+        if ema <= 0:
+            row = self._stretch_row(symbol, state, now_ms)
+            if row:
+                ema = row[3]
+        grid_levels: list[dict[str, float]] = []
+        if w is not None:
+            for lo, hi in w.to_view().get("levels") or []:
+                if side == "long":
+                    p_lo = price_at_stretch(ema, side, hi)
+                    p_hi = price_at_stretch(ema, side, lo)
+                else:
+                    p_lo = price_at_stretch(ema, side, lo)
+                    p_hi = price_at_stretch(ema, side, hi)
+                grid_levels.append(
+                    {
+                        "stretch_lo": lo,
+                        "stretch_hi": hi,
+                        "price_lo": p_lo,
+                        "price_hi": p_hi,
+                    }
+                )
         link = f"e6b-{symbol}-{now_ms}"[:36]
         try:
-            resp = self.broker.open_market_with_stop(
-                symbol, side, qty, stop, link, ref_price=price
-            )
+            resp = self.broker.open_market(symbol, side, qty, link)
             if resp.get("retCode") not in (0, "0", None):
                 log.warning("em6 bybit open %s: %s", symbol, resp)
                 return
+            tr = self.broker.set_trailing_stop_roe(
+                symbol, ref_price=price, side=side
+            )
+            if tr.get("retCode") not in (0, "0", None):
+                log.warning("em6 bybit trailing after open %s: %s", symbol, tr)
         except Exception:
             log.exception("em6 bybit open %s", symbol)
             return
@@ -433,7 +452,7 @@ class Em6BybitStrategy:
                 "last_exchange_stop": stop,
             },
         )
-        self.open_trades[symbol] = LiveOpen(
+        live = LiveOpen(
             id=tid,
             symbol=symbol,
             side=side,
@@ -446,10 +465,13 @@ class Em6BybitStrategy:
             worst_price=price,
             opened_at=now_ms,
             last_exchange_stop=stop,
+            ema60=ema,
+            grid_levels=grid_levels,
         )
+        self.open_trades[symbol] = live
         self._watch.pop(symbol, None)
         log.info(
-            "em6 bybit OPEN %s %s margin=%.2f stretch=%.2f grid",
+            "em6 bybit OPEN %s %s margin=%.2f stretch=%.2f trail−14%% grid",
             side,
             symbol,
             margin,
@@ -553,6 +575,9 @@ class Em6BybitStrategy:
                     "min_roe": self._min_roe(live),
                     "opened_at": live.opened_at,
                     "exchange_stop": live.last_exchange_stop,
+                    "ema60": live.ema60,
+                    "grid_levels": live.grid_levels,
+                    "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
                 }
             )
         wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)

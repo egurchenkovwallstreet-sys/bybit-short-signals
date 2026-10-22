@@ -59,7 +59,7 @@ class SignalService:
         side_tasks: list[asyncio.Task] = []
         if config.engine_kline_warmup_on_start():
             side_tasks.append(asyncio.create_task(self._warmup_klines_5m()))
-        if self.engine.paper is not None:
+        if self.engine.paper is not None and config.paper_test_enabled():
             side_tasks.append(asyncio.create_task(self._paper_kline_loop()))
             side_tasks.append(asyncio.create_task(self._pivot_confirm_loop()))
         try:
@@ -73,7 +73,7 @@ class SignalService:
                     boards = now >= next_boards and not self._confirm_burst
                     pivots = (ts % 300_000) <= config.PAPER_PIVOT_EVAL_WINDOW_MS
                     paper = self.engine.paper
-                    if paper is not None:
+                    if paper is not None and config.paper_test_enabled():
                         from signal_engine.state import SymbolState
 
                         for sym in paper.bab_open_symbols():

@@ -156,6 +156,14 @@ def pick_top_candidates(
     return ok[:limit]
 
 
+def price_at_stretch(ema: float, side: str, stretch_pct: float) -> float:
+    if ema <= 0:
+        return 0.0
+    if side == "long":
+        return ema * (1.0 - stretch_pct / 100.0)
+    return ema * (1.0 + stretch_pct / 100.0)
+
+
 def stretch_column_label(stretch: float) -> str:
     lo = band_lo(stretch)
     hi = round(lo + config.EM6_BYBIT_BAND_STEP_PCT, 2)

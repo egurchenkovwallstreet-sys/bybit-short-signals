@@ -127,6 +127,14 @@ def em6_bybit_leverage() -> int:
     return int(EM6_BYBIT_LEVERAGE)
 
 
+# 0 — не гонять бумажный «Тест стратегии» (разгрузка VPS); вкладка скрыта в UI.
+PAPER_TEST_ENABLED = _env("PAPER_TEST_ENABLED", "0")
+
+
+def paper_test_enabled() -> bool:
+    return PAPER_TEST_ENABLED.strip().lower() in ("1", "true", "yes", "on")
+
+
 # 1 — бумажный em6r на «Тесте» параллельно EMA6 Bybit (сравнение PnL).
 EM6R_PAPER_PARALLEL = _env("EM6R_PAPER_PARALLEL", "1")
 

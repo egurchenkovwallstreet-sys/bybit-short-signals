@@ -7,6 +7,7 @@ import math
 from typing import Any
 
 import config
+from signal_engine.live.em6_bybit.stops import trailing_stop_distance_price
 
 log = logging.getLogger(__name__)
 
@@ -200,6 +201,52 @@ class Em6BybitBroker:
             return min(stop_price, ref_price - buffer)
         return max(stop_price, ref_price + buffer)
 
+    def open_market(
+        self,
+        symbol: str,
+        side: str,
+        qty: float,
+        link: str,
+    ) -> dict[str, Any]:
+        qty_s = self.format_qty(symbol, qty)
+        if not qty_s:
+            raise ValueError("qty too small")
+        order_side = "Buy" if side == "long" else "Sell"
+        self.set_leverage(symbol)
+        return self._client().place_order(
+            category="linear",
+            symbol=symbol,
+            side=order_side,
+            orderType="Market",
+            qty=qty_s,
+            orderLinkId=link[:36],
+        )
+
+    def set_trailing_stop_roe(
+        self, symbol: str, *, ref_price: float, side: str
+    ) -> dict[str, Any]:
+        dist = trailing_stop_distance_price(ref_price)
+        _, tick = self._instrument(symbol)
+        dist = max(dist, tick * 2)
+        dist_s = self.format_price(symbol, dist)
+        client = self._client()
+        try:
+            client.set_trading_stop(
+                category="linear",
+                symbol=symbol,
+                stopLoss="0",
+                positionIdx=0,
+            )
+        except Exception:
+            pass
+        return client.set_trading_stop(
+            category="linear",
+            symbol=symbol,
+            trailingStop=dist_s,
+            slTriggerBy="LastPrice",
+            positionIdx=0,
+        )
+
     def open_market_with_stop(
         self,
         symbol: str,
@@ -210,6 +257,7 @@ class Em6BybitBroker:
         *,
         ref_price: float,
     ) -> dict[str, Any]:
+        """Legacy: market + fixed SL (не используется EMA6 Bybit)."""
         qty_s = self.format_qty(symbol, qty)
         if not qty_s:
             raise ValueError("qty too small")

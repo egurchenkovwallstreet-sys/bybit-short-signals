@@ -1986,6 +1986,10 @@ th { cursor: pointer; color: var(--muted); }
 }
 .em6b-cand-grid h4 { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
 .em6b-cand-grid ul { margin: 0; padding-left: 16px; font-size: 12px; }
+.em6b-open-selectable tbody tr.em6b-open-row { cursor: pointer; }
+.em6b-open-selectable tbody tr.em6b-open-row:hover { background: rgba(120, 160, 255, 0.08); }
+.em6b-chart-wrap { margin-top: 12px; }
+.em6b-chart { width: 100%; min-height: 360px; border-radius: 10px; overflow: hidden; }
 .paper-panel h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); }
 .balance-view {
   flex: 1;

@@ -51,7 +51,7 @@ class Engine:
 
     def scan(self, now_ms: int, *, boards: bool = True, pivots: bool = True) -> list[dict]:
         out: list[dict] = []
-        if self.paper is not None:
+        if self.paper is not None and config.paper_test_enabled():
             try:
                 out.append(self.paper.scan(self.symbols, now_ms, pivots=pivots))
             except Exception:
