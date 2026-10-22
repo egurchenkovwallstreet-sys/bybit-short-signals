@@ -80,7 +80,7 @@ class Em6BybitBroker:
 
     def _qty_string_on_step(self, symbol: str, qty: float) -> str | None:
         step, _ = self._instrument(symbol)
-        steps = int(round(qty / step))
+        steps = int(math.floor(qty / step + 1e-12))
         if steps <= 0:
             return None
         value = steps * step
@@ -98,23 +98,26 @@ class Em6BybitBroker:
         step, _ = self._instrument(symbol)
         raw_qty = target / price
         steps = max(1, int(math.ceil(raw_qty / step - 1e-12)))
-        qty = steps * step
         cap = self._max_mkt_qty.get(symbol) or 0.0
-        if cap > 0 and qty > cap:
-            steps_cap = int(math.floor(cap / step + 1e-12))
-            if steps_cap <= 0:
-                log.warning("em6 bybit %s: cap не даёт $%.0f notional", symbol, target)
-                return None
-            qty = steps_cap * step
+        steps_max = steps + 10_000
+        if cap > 0:
+            steps_max = max(1, int(math.floor(cap / step + 1e-12)))
+        # Шаг лота может дать notional чуть ниже target (IRYS qtyStep=10 → ~499.99$).
+        qty = steps * step
         notional = qty * price
-        if notional + 1e-9 < target:
+        while notional + 1e-6 < target and steps < steps_max:
+            steps += 1
+            qty = steps * step
+            notional = qty * price
+        if notional + 1e-6 < target:
             log.warning(
-                "em6 bybit %s: notional $%.2f < $%.0f (price=%.6f qty=%.4f)",
+                "em6 bybit %s: notional $%.2f < $%.0f (price=%.6f qty=%.4f cap=%.4f)",
                 symbol,
                 notional,
                 target,
                 price,
                 qty,
+                cap,
             )
             return None
         qty_s = self._qty_string_on_step(symbol, qty)
