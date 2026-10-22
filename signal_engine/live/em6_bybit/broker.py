@@ -161,34 +161,33 @@ class Em6BybitBroker:
         return f"{value:.{decimals}f}".rstrip("0").rstrip(".") or str(value)
 
     def wallet_usdt(self) -> dict[str, float]:
+        """Только доступная маржа USDT для новых позиций (не equity всего аккаунта)."""
         resp = self._client().get_wallet_balance(accountType="UNIFIED")
-        total = avail = 0.0
+        avail = 0.0
+        wallet_usdt = 0.0
         for acct in (resp.get("result") or {}).get("list") or []:
-            acct_eq = float(acct.get("totalEquity") or 0)
-            acct_av = float(
-                acct.get("totalAvailableBalance")
-                or acct.get("totalWalletBalance")
-                or 0
-            )
-            if acct_eq > 0:
-                total = acct_eq
+            acct_av = float(acct.get("totalAvailableBalance") or 0)
             if acct_av > 0:
                 avail = acct_av
-            if total > 0 and avail > 0:
-                break
             for coin in acct.get("coin") or []:
                 if str(coin.get("coin")) != "USDT":
                     continue
-                total += float(coin.get("equity") or coin.get("walletBalance") or 0)
-                avail += float(
-                    coin.get("availableToWithdraw")
-                    or coin.get("availableBalance")
-                    or coin.get("walletBalance")
+                wallet_usdt = float(coin.get("walletBalance") or 0)
+                coin_av = float(
+                    coin.get("availableBalance")
+                    or coin.get("availableToWithdraw")
                     or 0
                 )
-        if avail <= 0 and total > 0:
-            avail = total
-        return {"equity": total, "available": avail}
+                if coin_av > 0:
+                    avail = max(avail, coin_av)
+            if avail > 0:
+                break
+        return {
+            "available": avail,
+            "wallet_balance_usdt": wallet_usdt,
+            # legacy key: дублируем available, не totalEquity
+            "equity": avail,
+        }
 
     def linear_positions(self) -> list[dict[str, Any]]:
         resp = self._client().get_positions(category="linear", settleCoin="USDT")

@@ -403,17 +403,20 @@ class Em6BybitStrategy:
         self, symbol: str, state: SymbolState, now_ms: int
     ) -> tuple[str, str, float, float] | None:
         ev = evaluate_ema60_stretch(state, now_ms)
-        if not ev.passed or ev.side not in ("long", "short"):
+        if not ev.checks.get("ema_ready", {}).get("ok"):
+            return None
+        if ev.side not in ("long", "short"):
+            return None
+        ema = float(ev.metrics.get("ema60") or 0)
+        stretch = float(ev.metrics.get("stretch_pct") or 0)
+        floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+        if ema <= 0 or stretch + 1e-9 < floor:
             return None
         min_turn = config.ema60_stretch_min_turnover_usdt(VARIANT)
         if min_turn is not None:
             turn = state.turnover_24h_usdt
             if turn is None or float(turn) < min_turn:
                 return None
-        ema = float(ev.metrics.get("ema60") or 0)
-        stretch = float(ev.metrics.get("stretch_pct") or 0)
-        if ema <= 0:
-            return None
         return symbol, ev.side, stretch, ema
 
     @staticmethod
@@ -703,7 +706,7 @@ class Em6BybitStrategy:
         return {
             "summary": {
                 "label": "EMA6 Bybit Demo",
-                "wallet_equity": round(wallet.get("equity", 0), 2),
+                "wallet_equity": round(wallet.get("available", 0), 2),
                 "wallet_available": round(wallet.get("available", 0), 2),
                 "margin_usd": config.em6_bybit_margin_usd(),
                 "leverage": config.em6_bybit_leverage(),

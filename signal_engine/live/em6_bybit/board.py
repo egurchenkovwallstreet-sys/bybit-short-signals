@@ -82,8 +82,8 @@ def snapshot_from_exchange(*, closed_limit: int = 200) -> dict[str, Any]:
     return {
         "summary": {
             "label": "EMA6 Bybit Demo",
-            "wallet_equity": round(float(wallet.get("equity") or 0), 2),
-            "wallet_available": round(float(wallet.get("available") or 0), 2),
+                "wallet_equity": round(float(wallet.get("available") or 0), 2),
+                "wallet_available": round(float(wallet.get("available") or 0), 2),
             "margin_usd": config.em6_bybit_margin_usd(),
             "leverage": config.em6_bybit_leverage(),
             "notional_usd": round(

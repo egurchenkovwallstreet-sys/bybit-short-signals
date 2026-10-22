@@ -32,9 +32,9 @@
     const pnlClosed = Number(s.total_pnl_closed || 0);
     const pnlOpen = Number(s.total_unrealised_pnl || 0);
     const src = s.data_source === "bybit" ? "Bybit Demo" : "локальный журнал";
+    const marginAvail = Number(s.wallet_available ?? s.wallet_equity ?? 0);
     el.innerHTML = `
-      <div class="paper-card"><span class="label">Equity</span><div class="value">$${num(s.wallet_equity)}</div><span class="hint">${src}</span></div>
-      <div class="paper-card"><span class="label">Доступно</span><div class="value">$${num(s.wallet_available)}</div></div>
+      <div class="paper-card em6b-balance-main"><span class="label">Доступная маржа USDT</span><div class="value">$${num(marginAvail)}</div><span class="hint">${src}</span></div>
       <div class="paper-card"><span class="label">uPnL открытых</span><div class="value ${pnlClass(pnlOpen)}">$${num(pnlOpen)}</div></div>
       <div class="paper-card"><span class="label">Открыто</span><div class="value">${s.open_trades ?? 0}</div></div>
       <div class="paper-card"><span class="label">Закрыто</span><div class="value">${s.closed_trades ?? 0}</div></div>
