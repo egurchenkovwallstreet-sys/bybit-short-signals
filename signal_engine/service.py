@@ -55,6 +55,7 @@ class SignalService:
         )
         next_scan = 0.0
         next_boards = 0.0
+        next_em6_open = 0.0
         self._confirm_burst = False
         side_tasks: list[asyncio.Task] = []
         if config.engine_kline_warmup_on_start():
@@ -68,6 +69,14 @@ class SignalService:
                 if message and message.get("type") == "message":
                     self._ingest_raw(message.get("data"))
                 now = time.monotonic()
+                if (
+                    self.engine.em6_bybit is not None
+                    and config.em6_bybit_enabled()
+                    and now >= next_em6_open
+                ):
+                    ts_open = int(time.time() * 1000)
+                    self.engine.em6_bybit.tick_open(self.engine.symbols, ts_open)
+                    next_em6_open = now + config.EM6_BYBIT_OPEN_TICK_MS / 1000.0
                 if now >= next_scan:
                     ts = int(time.time() * 1000)
                     boards = now >= next_boards and not self._confirm_burst

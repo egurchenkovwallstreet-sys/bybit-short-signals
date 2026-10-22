@@ -276,12 +276,6 @@ class Em6BybitStrategy:
             return
         cur_roe = self._current_roe(live, state)
         trail_roe = em6_bybit_active_trail_roe_pct(cur_roe)
-        if (
-            live.last_trail_roe_pct > 0
-            and abs(trail_roe - live.last_trail_roe_pct) < 1e-6
-            and live.last_exchange_stop > 0
-        ):
-            return
         try:
             resp = self.broker.set_trailing_stop_roe(
                 live.symbol,
@@ -702,6 +696,21 @@ class Em6BybitStrategy:
             if w.tick(now_ms, stretch, price, ema, closed_1m):
                 self._execute_open(symbol, state, side, now_ms, stretch)
 
+    def tick_open(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        """Открытые позиции: цена и trailing каждые EM6_BYBIT_OPEN_TICK_MS (1 с)."""
+        if not self.broker.configured():
+            return
+        if self._conn is None:
+            self.open()
+        if self._last_open_ms >= 0 and now_ms - self._last_open_ms < config.EM6_BYBIT_OPEN_TICK_MS:
+            return
+        self._last_open_ms = now_ms
+        self._sync_closures()
+        for sym, live in list(self.open_trades.items()):
+            st = states.get(sym)
+            if st is not None:
+                self._update_live(live, st)
+
     def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict[str, Any]:
         if not self.broker.configured():
             return {"type": BOARD_TYPE, "timestamp": now_ms, "data": self.view(now_ms)}
@@ -712,14 +721,6 @@ class Em6BybitStrategy:
             self._wallet_avail = float(wallet.get("available") or wallet.get("equity") or 0)
         except Exception:
             log.exception("em6 bybit wallet")
-
-        if self._last_open_ms < 0 or now_ms - self._last_open_ms >= config.EM6_BYBIT_OPEN_TICK_MS:
-            self._last_open_ms = now_ms
-            self._sync_closures()
-            for sym, live in list(self.open_trades.items()):
-                st = states.get(sym)
-                if st is not None:
-                    self._update_live(live, st)
 
         try:
             on_exchange = {p["symbol"] for p in self.broker.linear_positions()}

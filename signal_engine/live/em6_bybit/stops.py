@@ -1,8 +1,6 @@
-"""Выход EMA6 Bybit: trail −50% ROE; лестница сужения каждые +10% пикового ROE."""
+"""EMA6 Bybit: trailing от текущей цены; −50% ROE → с +20% lock +5% → с +50% dist 10%."""
 
 from __future__ import annotations
-
-import math
 
 import config
 from signal_engine.paper.position import (
@@ -16,18 +14,23 @@ from signal_engine.paper.position import (
 
 
 def em6_bybit_active_trail_roe_pct(current_roe: float) -> float:
-    """Дистанция trailingStop (п.п. ROE от **текущей** цены).
+    """Дистанция trailingStop (п.п. ROE) от **текущей** цены.
 
-    Старт 50%; при текущем ROE ≥10% → 40%, ≥20% → 30%, ≥30% → 20%, ≥40% → 10% (пол).
+    • Текущий ROE < +20%: 50% ROE (широкий хвост).
+    • +20% … +50%: хвост 15 п.п. → стоп на +5% ROE при +20%, дальше ползёт вверх с ценой.
+    • ≥ +50%: 10% ROE от текущей цены.
     """
     initial = config.em6_bybit_trail_initial_roe()
-    step = config.em6_bybit_trail_ladder_step_roe()
-    tighten = config.em6_bybit_trail_ladder_tighten_roe()
-    floor = config.em6_bybit_trail_min_roe()
-    if current_roe + 1e-6 < step:
-        return initial
-    tiers = int(math.floor(current_roe / step + 1e-12))
-    return max(floor, initial - tighten * tiers)
+    arm = config.em6_bybit_trail_profit_arm_roe()
+    lock = config.em6_bybit_trail_lock_roe()
+    tight_arm = config.em6_bybit_trail_tight_arm_roe()
+    tight_dist = config.em6_bybit_trail_tight_dist_roe()
+    if current_roe + 1e-6 >= tight_arm:
+        return tight_dist
+    if current_roe + 1e-6 >= arm:
+        gap = max(0.1, arm - lock)
+        return max(gap, current_roe - lock)
+    return initial
 
 
 def em6_bybit_trailing_stop_price(
@@ -38,16 +41,20 @@ def em6_bybit_trailing_stop_price(
     margin: float,
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
+    current_roe: float | None = None,
 ) -> float:
-    """Стоп для UI: пик ROE − trail; пол не хуже −initial ROE."""
+    """Стоп для UI (по текущему ROE если передан, иначе по best)."""
     lev = config.em6_bybit_leverage()
     if side == "long":
         peak = long_roe_pct(entry, best_price, lev)
     else:
         peak = roe_pct(entry, best_price, lev)
-    trail_gap = em6_bybit_active_trail_roe_pct(peak)
+    roe_for_trail = current_roe if current_roe is not None else peak
+    trail_gap = em6_bybit_active_trail_roe_pct(roe_for_trail)
     floor_roe = -config.em6_bybit_trail_initial_roe()
-    target_roe = peak - trail_gap if peak > 0 else floor_roe
+    if roe_for_trail + 1e-6 >= config.em6_bybit_trail_profit_arm_roe():
+        floor_roe = config.em6_bybit_trail_lock_roe()
+    target_roe = roe_for_trail - trail_gap if roe_for_trail > 0 else floor_roe
     target_roe = max(target_roe, floor_roe)
     if side == "long":
         if margin > 0:
