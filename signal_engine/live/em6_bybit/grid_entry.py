@@ -200,12 +200,6 @@ class CandidateWatch:
             "since_ms": self.since_ms,
             "ema60": round(self.ema60, 8) if self.ema60 else 0.0,
             "levels": level_bands(grid_anchor_stretch(self.peak_stretch, self.last_stretch)),
-            "grid_levels": build_grid_levels(
-                self.ema60,
-                self.side,
-                self.peak_stretch,
-                self.last_stretch,
-            ),
         }
 
 

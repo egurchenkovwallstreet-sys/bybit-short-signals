@@ -134,6 +134,8 @@
   let chartInterval = "1";
   let lastChartCtx = null;
   let priceLines = [];
+  const candleCache = new Map();
+  const CHART_GRID_LINE_CAP = 55;
 
   function findOpenTrade(symbol) {
     return (lastData?.open_trades || []).find((r) => r.symbol === symbol);
@@ -177,13 +179,19 @@
     });
   }
 
-  async function fetchCandles(symbol, interval) {
+  async function fetchCandles(symbol, interval, forceRefresh) {
     const bars = interval === "1" ? "360" : "240";
-    const q = new URLSearchParams({ interval, bars, refresh: "1" });
+    const key = `${symbol}:${interval}`;
+    if (!forceRefresh && candleCache.has(key)) {
+      return candleCache.get(key);
+    }
+    const q = new URLSearchParams({ interval, bars, refresh: forceRefresh ? "1" : "0" });
     const resp = await fetch(`/api/klines/${encodeURIComponent(symbol)}?${q}`);
     if (!resp.ok) return [];
     const payload = await resp.json();
-    return parseCandleBars(payload.candles || payload.klines || [], interval);
+    const parsed = parseCandleBars(payload.candles || payload.klines || [], interval);
+    if (parsed.length) candleCache.set(key, parsed);
+    return parsed;
   }
 
   function bindChartTf() {
@@ -198,7 +206,7 @@
         wrap.querySelectorAll(".em6b-iv-btn").forEach((b) => {
           b.classList.toggle("active", b.getAttribute("data-iv") === iv);
         });
-        if (lastChartCtx) showEm6Chart(lastChartCtx);
+        if (lastChartCtx) showEm6Chart(lastChartCtx, true);
       });
     });
   }
@@ -294,7 +302,7 @@
     }
   }
 
-  async function showEm6Chart(ctx) {
+  async function showEm6Chart(ctx, forceRefresh) {
     const wrap = document.getElementById("em6b-chart-wrap");
     const title = document.getElementById("em6b-chart-title");
     const el = document.getElementById("em6b-chart");
@@ -304,12 +312,13 @@
     wrap.hidden = false;
     const kind = ctx.kind === "candidate" ? "претендент" : "позиция";
     const tfLabel = chartInterval === "1" ? "1m" : "5m";
-    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · ${tfLabel} · EMA60 (5m) + сетка`;
+    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · ${tfLabel} · загрузка…`;
 
     ensureChart(el);
     clearOverlays();
 
-    const bars = await fetchCandles(ctx.symbol, chartInterval);
+    const bars = await fetchCandles(ctx.symbol, chartInterval, !!forceRefresh);
+    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · ${tfLabel} · EMA60 (5m) + сетка`;
     if (!bars.length) {
       title.textContent += " — нет свечей (обновите позже)";
       chartSeries.setData([]);
@@ -324,7 +333,12 @@
 
     const side = ctx.side || "short";
     const bandRows = ctx.grid_levels?.length ? ctx.grid_levels : null;
-    gridStretchLevels(ctx, bandRows).forEach((stretchPct) => {
+    let stretches = gridStretchLevels(ctx, bandRows);
+    if (stretches.length > CHART_GRID_LINE_CAP) {
+      const step = Math.ceil(stretches.length / CHART_GRID_LINE_CAP);
+      stretches = stretches.filter((_, i) => i % step === 0 || i === stretches.length - 1);
+    }
+    stretches.forEach((stretchPct) => {
       const p = priceAtStretch(ema, side, stretchPct);
       if (p > 0) addPriceLine(p, "rgba(160, 120, 255, 0.85)", `${stretchPct}%`);
     });

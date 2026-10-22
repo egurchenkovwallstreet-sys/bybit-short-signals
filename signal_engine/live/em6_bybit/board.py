@@ -137,21 +137,67 @@ def snapshot_from_exchange(*, closed_limit: int = 200) -> dict[str, Any]:
     }
 
 
+def _merge_open_with_engine(
+    exchange_rows: list[dict[str, Any]], engine_rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    by_sym = {str(r["symbol"]): r for r in engine_rows if r.get("symbol")}
+    merged: list[dict[str, Any]] = []
+    for er in exchange_rows:
+        sym = str(er["symbol"])
+        eng = by_sym.get(sym)
+        if not eng:
+            merged.append(er)
+            continue
+        row = dict(er)
+        for key in ("grid_levels", "ema60", "peak_stretch", "trail_roe_pct", "trail_armed"):
+            if eng.get(key) not in (None, "", 0, 0.0, []):
+                row[key] = eng[key]
+        merged.append(row)
+    return merged
+
+
 def merge_public_snapshot(engine_cache: dict[str, Any] | None) -> dict[str, Any]:
-    """Биржа + кошелёк всегда свежие; претенденты — из движка если есть, иначе REST."""
-    fresh = snapshot_from_exchange()
+    """Снимок движка + лёгкое обновление кошелька/позиций (без REST-скана 80 монет)."""
     if not engine_cache:
-        return fresh
-    eng_c = engine_cache.get("candidates") or []
-    if eng_c:
-        fresh["candidates"] = eng_c
-        fresh["candidate_columns"] = engine_cache.get("candidate_columns") or []
-        fresh["summary"]["watch_count"] = len(eng_c)
-    eng_open = engine_cache.get("open_trades") or []
-    if eng_open and any(o.get("grid_levels") for o in eng_open):
-        fresh["open_trades"] = eng_open
-        fresh["summary"]["open_trades"] = len(eng_open)
-    return fresh
+        return snapshot_from_exchange()
+    out: dict[str, Any] = {
+        "summary": dict(engine_cache.get("summary") or {}),
+        "candidates": list(engine_cache.get("candidates") or []),
+        "candidate_columns": list(engine_cache.get("candidate_columns") or []),
+        "open_trades": list(engine_cache.get("open_trades") or []),
+        "closed_trades": list(engine_cache.get("closed_trades") or []),
+    }
+    broker = Em6BybitBroker()
+    if not broker.configured():
+        return out
+    try:
+        wallet = broker.wallet_usdt()
+        avail = round(float(wallet.get("available") or 0), 2)
+        out["summary"]["wallet_available"] = avail
+        out["summary"]["wallet_equity"] = avail
+        out["summary"]["data_source"] = "bybit"
+    except Exception:
+        pass
+    try:
+        positions = broker.linear_positions()
+        ex_open = _open_rows_from_positions(positions)
+        out["open_trades"] = _merge_open_with_engine(ex_open, out["open_trades"])
+        out["summary"]["open_trades"] = len(out["open_trades"])
+        out["summary"]["total_unrealised_pnl"] = round(
+            sum(float(r.get("unrealised_pnl") or 0) for r in out["open_trades"]), 2
+        )
+    except Exception:
+        pass
+    if not out["closed_trades"]:
+        try:
+            start = int(time.time() * 1000) - 90 * 86400 * 1000
+            syms = [str(r["symbol"]) for r in out["open_trades"]]
+            out["closed_trades"] = broker.list_recent_closed_pnl(
+                start_ms=start, limit=80, symbols=syms or None
+            )
+        except Exception:
+            pass
+    return out
 
 
 def snapshot_from_db_fallback() -> dict[str, Any]:
