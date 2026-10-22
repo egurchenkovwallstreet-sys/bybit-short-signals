@@ -1,6 +1,8 @@
-"""Выход EMA6 Bybit: trail −10% ROE; после ROE ≥ +2% → trail −5% ROE от цены."""
+"""Выход EMA6 Bybit: trail −50% ROE; лестница сужения каждые +10% пикового ROE."""
 
 from __future__ import annotations
+
+import math
 
 import config
 from signal_engine.paper.position import (
@@ -14,10 +16,18 @@ from signal_engine.paper.position import (
 
 
 def em6_bybit_active_trail_roe_pct(peak_roe: float) -> float:
-    """Активная дистанция trailingStop на бирже (п.п. ROE)."""
-    if peak_roe + 1e-6 >= config.em6_bybit_trail_arm_roe():
-        return config.em6_bybit_trail_tight_roe()
-    return config.em6_bybit_trail_initial_roe()
+    """Дистанция trailingStop на бирже (п.п. ROE от цены).
+
+    Старт 50%; при пике ROE ≥10% → 40%, ≥20% → 30%, ≥30% → 20%, ≥40% → 10% (пол).
+    """
+    initial = config.em6_bybit_trail_initial_roe()
+    step = config.em6_bybit_trail_ladder_step_roe()
+    tighten = config.em6_bybit_trail_ladder_tighten_roe()
+    floor = config.em6_bybit_trail_min_roe()
+    if peak_roe + 1e-6 < step:
+        return initial
+    tiers = int(math.floor(peak_roe / step + 1e-12))
+    return max(floor, initial - tighten * tiers)
 
 
 def em6_bybit_trailing_stop_price(

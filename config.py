@@ -117,10 +117,13 @@ EM6_BYBIT_CANDIDATE_TICK_MS = _env_int("EM6_BYBIT_CANDIDATE_TICK_MS", 2_500)
 EM6_BYBIT_OPEN_TICK_MS = _env_int("EM6_BYBIT_OPEN_TICK_MS", 1_000)
 EM6_BYBIT_PEAK_TICK_MS = _env_int("EM6_BYBIT_PEAK_TICK_MS", 3_000)
 EM6_BYBIT_TOP_CANDIDATES = _env_int("EM6_BYBIT_TOP_CANDIDATES", 7)
-# Trailing на Bybit: −10% ROE от цены; после пика ROE ≥ +2% → −5% ROE от цены.
-EM6_BYBIT_TRAIL_INITIAL_ROE = _env_float("EM6_BYBIT_TRAIL_INITIAL_ROE", 10.0)
+# Trailing на Bybit: старт −50% ROE от цены; каждые +10% пикового ROE −10 п.п. (50→40→30…).
+EM6_BYBIT_TRAIL_INITIAL_ROE = _env_float("EM6_BYBIT_TRAIL_INITIAL_ROE", 50.0)
+EM6_BYBIT_TRAIL_LADDER_STEP_ROE = _env_float("EM6_BYBIT_TRAIL_LADDER_STEP_ROE", 10.0)
+EM6_BYBIT_TRAIL_LADDER_TIGHTEN_ROE = _env_float("EM6_BYBIT_TRAIL_LADDER_TIGHTEN_ROE", 10.0)
+EM6_BYBIT_TRAIL_MIN_ROE = _env_float("EM6_BYBIT_TRAIL_MIN_ROE", 10.0)
 EM6_BYBIT_TRAIL_TIGHT_ROE = _env_float("EM6_BYBIT_TRAIL_TIGHT_ROE", 5.0)
-EM6_BYBIT_TRAIL_ARM_ROE = _env_float("EM6_BYBIT_TRAIL_ARM_ROE", 2.0)
+EM6_BYBIT_TRAIL_ARM_ROE = _env_float("EM6_BYBIT_TRAIL_ARM_ROE", 10.0)
 
 
 def em6_bybit_margin_usd() -> float:
@@ -142,6 +145,18 @@ def em6_bybit_trail_initial_roe() -> float:
 
 def em6_bybit_trail_tight_roe() -> float:
     return abs(float(EM6_BYBIT_TRAIL_TIGHT_ROE))
+
+
+def em6_bybit_trail_ladder_step_roe() -> float:
+    return abs(float(EM6_BYBIT_TRAIL_LADDER_STEP_ROE))
+
+
+def em6_bybit_trail_ladder_tighten_roe() -> float:
+    return abs(float(EM6_BYBIT_TRAIL_LADDER_TIGHTEN_ROE))
+
+
+def em6_bybit_trail_min_roe() -> float:
+    return abs(float(EM6_BYBIT_TRAIL_MIN_ROE))
 
 
 def em6_bybit_trail_arm_roe() -> float:

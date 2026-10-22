@@ -268,12 +268,10 @@ class Em6BybitStrategy:
         ref = self._ref_price(live, state)
         peak = self._max_roe(live)
         trail_roe = em6_bybit_active_trail_roe_pct(peak)
-        if (
-            live.last_trail_roe_pct > 0
-            and abs(trail_roe - live.last_trail_roe_pct) < 1e-6
-            and live.last_exchange_stop > 0
-        ):
-            return
+        # Переставляем на бирже при сужении лестницы (50→40→…) или первой установке.
+        if live.last_trail_roe_pct > 0 and trail_roe >= live.last_trail_roe_pct - 1e-6:
+            if abs(trail_roe - live.last_trail_roe_pct) < 1e-6 and live.last_exchange_stop > 0:
+                return
         try:
             resp = self.broker.set_trailing_stop_roe(
                 live.symbol,
