@@ -389,13 +389,6 @@ class Em6BybitStrategy:
         if self._wallet_avail + 1e-9 < config.em6_bybit_margin_usd():
             return
         lev = config.em6_bybit_leverage()
-        planned = self.broker.qty_for_margin(
-            symbol, price, config.em6_bybit_margin_usd(), lev
-        )
-        if planned is None:
-            return
-        qty, margin = planned
-        stop = self._compute_stop_for(side, price, price, margin, qty)
         w = self._watch.get(symbol)
         ema = float(w.ema60 if w and w.ema60 else 0)
         if ema <= 0:
@@ -421,10 +414,13 @@ class Em6BybitStrategy:
                 )
         link = f"e6b-{symbol}-{now_ms}"[:36]
         try:
-            resp = self.broker.open_market(symbol, side, qty, link)
+            resp, qty, margin, notional = self.broker.open_market_fixed_notional(
+                symbol, side, price, link
+            )
             if resp.get("retCode") not in (0, "0", None):
                 log.warning("em6 bybit open %s: %s", symbol, resp)
                 return
+            stop = self._compute_stop_for(side, price, price, margin, qty)
             tr = self.broker.set_trailing_stop_roe(
                 symbol, ref_price=price, side=side
             )
@@ -471,9 +467,10 @@ class Em6BybitStrategy:
         self.open_trades[symbol] = live
         self._watch.pop(symbol, None)
         log.info(
-            "em6 bybit OPEN %s %s margin=%.2f stretch=%.2f trail−14%% grid",
+            "em6 bybit OPEN %s %s notional=$%.2f margin=$%.2f stretch=%.2f trail−14%%",
             side,
             symbol,
+            notional,
             margin,
             stretch,
         )
@@ -578,6 +575,9 @@ class Em6BybitStrategy:
                     "ema60": live.ema60,
                     "grid_levels": live.grid_levels,
                     "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
+                    "notional_usd": round(
+                        live.qty * live.entry_price, 2
+                    ),
                 }
             )
         wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)

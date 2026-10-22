@@ -37,6 +37,7 @@
       <td>${num(r.stop_price)}</td>
       <td>${pct(r.trail_roe_pct ?? 14)} trail</td>
       <td>${pct(r.max_roe)}</td>
+      <td>$${num(r.notional_usd ?? r.margin * 10)}</td>
       <td>${num(r.margin)}</td>
       <td>${ts(r.opened_at)}</td>
     </tr>`;
@@ -211,7 +212,7 @@
       const rows = (data.open_trades || []).map(rowOpen).join("");
       open.innerHTML = `<thead><tr>
         <th>Symbol</th><th>Сторона</th><th>Вход</th><th>Стоп (расч.)</th><th>Трейл</th>
-        <th>Max ROE</th><th>Маржа</th><th>Открыта</th></tr></thead><tbody>${rows || "<tr><td colspan='8'>Нет открытых</td></tr>"}</tbody>`;
+        <th>Max ROE</th><th>Номинал</th><th>Маржа</th><th>Открыта</th></tr></thead><tbody>${rows || "<tr><td colspan='9'>Нет открытых</td></tr>"}</tbody>`;
       bindOpenClicks();
     }
     if (closed) {

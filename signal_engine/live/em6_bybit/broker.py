@@ -78,6 +78,55 @@ class Em6BybitBroker:
             return cap
         return qty
 
+    def _qty_string_on_step(self, symbol: str, qty: float) -> str | None:
+        step, _ = self._instrument(symbol)
+        steps = int(round(qty / step))
+        if steps <= 0:
+            return None
+        value = steps * step
+        decimals = max(0, min(8, int(round(-math.log10(step))) if step < 1 else 0))
+        return f"{value:.{decimals}f}".rstrip("0").rstrip(".") or str(value)
+
+    def prepare_fixed_notional_order(
+        self, symbol: str, price: float
+    ) -> tuple[str, float, float, float] | None:
+        """qty для market: номинал ≥ $500 (ceil по шагу). (qty_s, qty, margin, notional)."""
+        if price <= 0:
+            return None
+        target = config.em6_bybit_notional_usd()
+        lev = config.em6_bybit_leverage()
+        step, _ = self._instrument(symbol)
+        raw_qty = target / price
+        steps = max(1, int(math.ceil(raw_qty / step - 1e-12)))
+        qty = steps * step
+        cap = self._max_mkt_qty.get(symbol) or 0.0
+        if cap > 0 and qty > cap:
+            steps_cap = int(math.floor(cap / step + 1e-12))
+            if steps_cap <= 0:
+                log.warning("em6 bybit %s: cap не даёт $%.0f notional", symbol, target)
+                return None
+            qty = steps_cap * step
+        notional = qty * price
+        if notional + 1e-9 < target:
+            log.warning(
+                "em6 bybit %s: notional $%.2f < $%.0f (price=%.6f qty=%.4f)",
+                symbol,
+                notional,
+                target,
+                price,
+                qty,
+            )
+            return None
+        qty_s = self._qty_string_on_step(symbol, qty)
+        if not qty_s:
+            return None
+        qty_f = float(qty_s)
+        notional = qty_f * price
+        if notional + 1e-9 < target:
+            return None
+        margin = notional / lev
+        return qty_s, qty_f, margin, notional
+
     def qty_for_margin(
         self,
         symbol: str,
@@ -85,41 +134,12 @@ class Em6BybitBroker:
         margin_usd: float,
         leverage: int,
     ) -> tuple[float, float] | None:
-        """Подобрать qty под целевую маржу; (qty, фактическая маржа) или None."""
-        if price <= 0 or margin_usd <= 0 or leverage <= 0:
+        """Совместимость: жёстко $500 notional, margin из факта."""
+        prep = self.prepare_fixed_notional_order(symbol, price)
+        if prep is None:
             return None
-        target_notional = margin_usd * leverage
-        raw_qty = self.cap_order_qty(symbol, target_notional / price)
-        if raw_qty <= 0:
-            return None
-        step, _ = self._instrument(symbol)
-        steps = max(1, int(math.floor(raw_qty / step + 1e-12)))
-        qty = steps * step
-        cap = self._max_mkt_qty.get(symbol) or 0.0
-        if cap > 0 and qty > cap:
-            steps = max(1, int(math.floor(cap / step + 1e-12)))
-            qty = steps * step
-        if qty <= 0:
-            return None
-        notional = qty * price
-        if notional + 1e-9 < config.EM6_BYBIT_MIN_ORDER_VALUE_USDT:
-            return None
-        actual_margin = notional / leverage
-        min_margin = margin_usd * 0.95
-        if actual_margin + 1e-9 < min_margin:
-            extra_steps = int(math.ceil((margin_usd * leverage / price) / step - steps))
-            for _ in range(max(0, extra_steps) + 2):
-                steps += 1
-                qty = steps * step
-                if cap > 0 and qty > cap:
-                    return None
-                notional = qty * price
-                actual_margin = notional / leverage
-                if actual_margin + 1e-9 >= min_margin:
-                    break
-            if actual_margin + 1e-9 < min_margin:
-                return None
-        return qty, actual_margin
+        _, qty_f, margin, _ = prep
+        return qty_f, margin
 
     def format_qty(self, symbol: str, qty: float) -> str | None:
         if qty <= 0:
@@ -200,6 +220,30 @@ class Em6BybitBroker:
         if side == "long":
             return min(stop_price, ref_price - buffer)
         return max(stop_price, ref_price + buffer)
+
+    def open_market_fixed_notional(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        link: str,
+    ) -> tuple[dict[str, Any], float, float, float]:
+        """Market на ≥ $500 notional. Возвращает (resp, qty, margin, notional)."""
+        prep = self.prepare_fixed_notional_order(symbol, price)
+        if prep is None:
+            raise ValueError(f"cannot size {symbol} for ${config.em6_bybit_notional_usd():.0f} notional")
+        qty_s, qty_f, margin, notional = prep
+        order_side = "Buy" if side == "long" else "Sell"
+        self.set_leverage(symbol)
+        resp = self._client().place_order(
+            category="linear",
+            symbol=symbol,
+            side=order_side,
+            orderType="Market",
+            qty=qty_s,
+            orderLinkId=link[:36],
+        )
+        return resp, qty_f, margin, notional
 
     def open_market(
         self,

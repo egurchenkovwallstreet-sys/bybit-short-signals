@@ -127,6 +127,11 @@ def em6_bybit_leverage() -> int:
     return int(EM6_BYBIT_LEVERAGE)
 
 
+def em6_bybit_notional_usd() -> float:
+    """Жёсткий номинал ордера (USDT), по умолчанию margin × leverage = $500."""
+    return float(EM6_BYBIT_MARGIN_USD) * float(EM6_BYBIT_LEVERAGE)
+
+
 # 0 — не гонять бумажный «Тест стратегии» (разгрузка VPS); вкладка скрыта в UI.
 PAPER_TEST_ENABLED = _env("PAPER_TEST_ENABLED", "0")
 
