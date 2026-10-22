@@ -7,7 +7,7 @@ from typing import Any
 
 import config
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
-from signal_engine.live.em6_bybit.grid_entry import CandidateWatch, stretch_column_label
+from signal_engine.live.em6_bybit.grid_entry import CandidateWatch, band_lo, stretch_column_label
 from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
 from signal_engine.live.em6_bybit.stops import em6_bybit_active_trail_roe_pct
 from signal_engine.live.em6_bybit.store import Em6BybitStore
@@ -66,7 +66,7 @@ def _candidate_views_from_rest(broker: Em6BybitBroker) -> tuple[list[dict[str, A
         w.ema60 = ema
         w.last_stretch = stretch
         w.peak_stretch = stretch
-        w.last_band_lo = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+        w.last_band_lo = band_lo(stretch)
         v = w.to_view()
         col = stretch_column_label(stretch)
         v["stretch_column"] = col

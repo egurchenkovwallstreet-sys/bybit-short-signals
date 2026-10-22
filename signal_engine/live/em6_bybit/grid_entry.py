@@ -95,17 +95,26 @@ class CandidateWatch:
             self.stall_band_hi = band + config.EM6_BYBIT_BAND_STEP_PCT
             self.armed_entry_band_lo = None
         elif band == self.last_band_lo and stretch <= prev + 1e-6:
-            if self.phase == "away" and self.stall_band_lo is not None:
+            if self.phase in ("away", "watch") and self.stall_band_lo is not None:
                 self.phase = "stalled"
-        elif stretch + 1e-6 < prev and self.stall_band_lo is not None:
-            cross_lo = self.stall_band_lo
-            if stretch + 1e-9 < cross_lo and self.away_max_band_lo >= cross_lo - 1e-9:
-                self.armed_entry_band_lo = cross_lo - config.EM6_BYBIT_BAND_STEP_PCT
+        elif band + 1e-9 < self.last_band_lo:
+            prev_band = self.last_band_lo
+            if self.away_max_band_lo + 1e-9 >= prev_band or self.peak_stretch + 1e-9 >= prev_band:
+                self.armed_entry_band_lo = band
                 self.phase = "cross_toward_ema"
                 if self.armed_entry_band_lo + 1e-9 < config.EM6_BYBIT_STRETCH_FLOOR_PCT:
                     self.armed_entry_band_lo = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+        elif stretch + 1e-6 < prev and self.stall_band_lo is not None:
+            cross_lo = self.stall_band_lo
+            if stretch + 1e-9 < cross_lo and self.away_max_band_lo >= cross_lo - 1e-9:
+                target = cross_lo - config.EM6_BYBIT_BAND_STEP_PCT
+                if target + 1e-9 < config.EM6_BYBIT_STRETCH_FLOOR_PCT:
+                    target = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+                self.armed_entry_band_lo = target
+                self.phase = "cross_toward_ema"
 
         self.last_stretch = stretch
+        prev_band_lo = self.last_band_lo
         self.last_band_lo = band
 
         if self.armed_entry_band_lo is None or closed_1m is None:
@@ -113,12 +122,21 @@ class CandidateWatch:
         bar_ts, close_px = closed_1m
         if bar_ts <= self.last_1m_ts:
             return False
-        self.last_1m_ts = bar_ts
         close_stretch = stretch_at_price(close_px, ema)
         close_band = band_lo(close_stretch)
         target = self.armed_entry_band_lo
         step = config.EM6_BYBIT_BAND_STEP_PCT
+        floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+        self.last_1m_ts = bar_ts
         if target - 1e-9 <= close_band <= target + step + 1e-9:
+            return True
+        if (
+            self.phase == "cross_toward_ema"
+            and close_band + 1e-9 < target
+            and close_band + 1e-9 >= floor
+            and (self.peak_stretch + 1e-9 >= prev_band_lo or self.away_max_band_lo + 1e-9 >= prev_band_lo)
+        ):
+            self.armed_entry_band_lo = close_band
             return True
         return False
 

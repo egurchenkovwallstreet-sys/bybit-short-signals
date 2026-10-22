@@ -32,6 +32,10 @@ class TestCandidateFsm(unittest.TestCase):
         ema = 100.0
         t = 0
         w.update_peak(t, 7.0, 93.0, ema)
+        w.last_band_lo = band_lo(7.0)
+        w.away_max_band_lo = w.last_band_lo
+        w.stall_band_lo = w.last_band_lo
+        w.phase = "stalled"
         w.tick(t + 1000, 7.3, 92.7, ema, None)
         w.tick(t + 2000, 7.45, 92.55, ema, None)
         w.tick(t + 3000, 7.4, 92.6, ema, None)
@@ -39,6 +43,19 @@ class TestCandidateFsm(unittest.TestCase):
         close = (t + 120_000, 92.75)
         fired = w.tick(t + 130_000, 7.15, 92.85, ema, close)
         self.assertTrue(fired or w.armed_entry_band_lo is not None)
+
+    def test_band_step_down_arms_each_level(self) -> None:
+        w = CandidateWatch(symbol="Y", side="short", since_ms=0)
+        ema = 100.0
+        w.peak_stretch = 10.0
+        w.last_stretch = 10.0
+        w.last_band_lo = band_lo(10.0)
+        w.away_max_band_lo = w.last_band_lo
+        w.phase = "stalled"
+        w.tick(1000, 9.5, 109.5, ema, None)
+        self.assertIsNotNone(w.armed_entry_band_lo)
+        w.tick(2000, 9.0, 109.0, ema, None)
+        self.assertLessEqual(w.armed_entry_band_lo, band_lo(9.0))
 
 
 if __name__ == "__main__":

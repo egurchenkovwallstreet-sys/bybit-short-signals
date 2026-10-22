@@ -11,6 +11,7 @@ import config
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
 from signal_engine.live.em6_bybit.grid_entry import (
     CandidateWatch,
+    band_lo,
     pick_top_candidates,
     stretch_at_price,
     stretch_column_label,
@@ -28,7 +29,7 @@ from signal_engine.state import SymbolState
 
 log = logging.getLogger(__name__)
 BOARD_TYPE = "em6_bybit"
-VARIANT = config.PAPER_EM6R_VARIANT
+VARIANT = config.PAPER_EM6_VARIANT
 
 
 @dataclass
@@ -413,12 +414,31 @@ class Em6BybitStrategy:
         floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
         if ema <= 0 or stretch + 1e-9 < floor:
             return None
-        min_turn = config.ema60_stretch_min_turnover_usdt(VARIANT)
-        if min_turn is not None:
-            turn = state.turnover_24h_usdt
-            if turn is None or float(turn) < min_turn:
-                return None
         return symbol, ev.side, stretch, ema
+
+    def _stretch_row_live(
+        self,
+        w: CandidateWatch,
+        state: SymbolState,
+        now_ms: int,
+    ) -> tuple[str, str, float, float] | None:
+        row = self._stretch_row(w.symbol, state, now_ms)
+        if row is not None:
+            return row
+        price = float(state.last_price or 0)
+        ema = float(w.ema60 or 0)
+        if price <= 0 or ema <= 0:
+            return None
+        stretch = stretch_at_price(price, ema)
+        floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+        if stretch + 1e-9 < floor:
+            return None
+        side = w.side if w.side in ("long", "short") else "short"
+        if price < ema:
+            side = "long"
+        elif price > ema:
+            side = "short"
+        return w.symbol, side, stretch, ema
 
     @staticmethod
     def _last_closed_1m(state: SymbolState, now_ms: int) -> tuple[int, float] | None:
@@ -432,6 +452,18 @@ class Em6BybitStrategy:
         if len(state.bars_htf.get("5") or []) >= 62:
             return
         msg = self.broker.fetch_kline_envelope(symbol, "5")
+        if msg:
+            state.ingest(msg)
+
+    def _bootstrap_1m(self, states: dict[str, SymbolState], symbol: str) -> None:
+        state = states.setdefault(symbol, SymbolState(symbol))
+        closed = 0
+        for bar in state.bars_1m:
+            if bar.timestamp + 60_000 <= int(time.time() * 1000):
+                closed += 1
+        if closed >= 2:
+            return
+        msg = self.broker.fetch_kline_envelope(symbol, "1", limit=120)
         if msg:
             state.ingest(msg)
 
@@ -485,12 +517,25 @@ class Em6BybitStrategy:
                 w = CandidateWatch(symbol=symbol, side=side, since_ms=now_ms)
                 w.peak_stretch = stretch
                 w.last_stretch = stretch
+                bl = band_lo(stretch)
+                w.last_band_lo = bl
+                w.away_max_band_lo = bl
+                w.stall_band_lo = bl
+                w.stall_band_hi = bl + config.EM6_BYBIT_BAND_STEP_PCT
+                w.phase = "stalled"
                 st = states.get(symbol)
                 w.peak_price = float(st.last_price if st else 0)
                 w.ema60 = float(ema_by_sym.get(symbol) or (st and w.ema60) or 0)
                 self._watch[symbol] = w
             else:
                 w.side = side
+                ema_v = float(ema_by_sym.get(symbol) or 0)
+                if ema_v > 0:
+                    w.ema60 = ema_v
+                if stretch > w.peak_stretch + 1e-6:
+                    st = states.get(symbol)
+                    px = float(st.last_price or 0) if st else 0.0
+                    w.update_peak(now_ms, stretch, px, w.ema60 or ema_v)
 
     def _update_peaks(self, states: dict[str, SymbolState], now_ms: int) -> None:
         for symbol, w in self._watch.items():
@@ -499,7 +544,7 @@ class Em6BybitStrategy:
             state = states.get(symbol)
             if state is None or not state.last_price:
                 continue
-            row = self._stretch_row(symbol, state, now_ms)
+            row = self._stretch_row_live(w, state, now_ms)
             if row is None:
                 continue
             _, _, stretch, ema = row
@@ -620,13 +665,16 @@ class Em6BybitStrategy:
         for symbol, w in list(self._watch.items()):
             if symbol in self.open_trades or symbol in on_exchange:
                 continue
-            state = states.get(symbol)
-            if state is None or not state.last_price:
+            self._bootstrap_1m(states, symbol)
+            state = states.setdefault(symbol, SymbolState(symbol))
+            if not state.last_price and w.ema60 > 0:
                 continue
-            row = self._stretch_row(symbol, state, now_ms)
+            row = self._stretch_row_live(w, state, now_ms)
             if row is None:
                 continue
             _, side, stretch, ema = row
+            w.ema60 = ema
+            w.side = side
             price = float(state.last_price)
             closed_1m = self._last_closed_1m(state, now_ms)
             if w.tick(now_ms, stretch, price, ema, closed_1m):
