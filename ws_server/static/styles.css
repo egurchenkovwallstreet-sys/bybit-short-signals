@@ -1990,6 +1990,25 @@ th { cursor: pointer; color: var(--muted); }
 .em6b-open-selectable tbody tr.em6b-open-row:hover { background: rgba(120, 160, 255, 0.08); }
 .em6b-chart-wrap { margin-top: 12px; }
 .em6b-chart { width: 100%; min-height: 360px; border-radius: 10px; overflow: hidden; }
+.em6b-source-note { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+.paper-card .hint { display: block; font-size: 10px; color: var(--muted); margin-top: 4px; }
+.em6b-side {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.em6b-long { background: rgba(61, 214, 140, 0.15); color: #3dd68c; }
+.em6b-short { background: rgba(255, 93, 115, 0.15); color: #ff5d73; }
+#em6b-open tbody tr.em6b-row-long { border-left: 3px solid rgba(61, 214, 140, 0.45); }
+#em6b-open tbody tr.em6b-row-short { border-left: 3px solid rgba(255, 93, 115, 0.45); }
+#em6b-closed tbody tr.em6b-closed-row.pos { background: rgba(61, 214, 140, 0.06); }
+#em6b-closed tbody tr.em6b-closed-row.neg { background: rgba(255, 93, 115, 0.06); }
+#em6b-open td.pos, #em6b-closed td.pos, .paper-card .value.pos { color: #3dd68c; font-weight: 600; }
+#em6b-open td.neg, #em6b-closed td.neg, .paper-card .value.neg { color: #ff5d73; font-weight: 600; }
+.flat { color: var(--muted); }
 .paper-panel h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); }
 .balance-view {
   flex: 1;

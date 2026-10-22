@@ -164,10 +164,28 @@ class Em6BybitBroker:
         resp = self._client().get_wallet_balance(accountType="UNIFIED")
         total = avail = 0.0
         for acct in (resp.get("result") or {}).get("list") or []:
+            acct_eq = float(acct.get("totalEquity") or 0)
+            acct_av = float(
+                acct.get("totalAvailableBalance")
+                or acct.get("totalWalletBalance")
+                or 0
+            )
+            if acct_eq > 0:
+                total = acct_eq
+            if acct_av > 0:
+                avail = acct_av
+            if total > 0 and avail > 0:
+                break
             for coin in acct.get("coin") or []:
-                if str(coin.get("coin")) == "USDT":
-                    total += float(coin.get("equity") or coin.get("walletBalance") or 0)
-                    avail += float(coin.get("availableToWithdraw") or coin.get("availableBalance") or 0)
+                if str(coin.get("coin")) != "USDT":
+                    continue
+                total += float(coin.get("equity") or coin.get("walletBalance") or 0)
+                avail += float(
+                    coin.get("availableToWithdraw")
+                    or coin.get("availableBalance")
+                    or coin.get("walletBalance")
+                    or 0
+                )
         if avail <= 0 and total > 0:
             avail = total
         return {"equity": total, "available": avail}
@@ -180,6 +198,13 @@ class Em6BybitBroker:
             if size <= 0:
                 continue
             side_raw = str(p.get("side") or "")
+            trail_raw = p.get("trailingStop") or "0"
+            trail = float(trail_raw) if trail_raw not in ("", "0") else 0.0
+            sl_raw = p.get("stopLoss") or "0"
+            sl = float(sl_raw) if sl_raw not in ("", "0") else 0.0
+            im_raw = p.get("positionIM") or p.get("positionIMByMp") or "0"
+            position_im = float(im_raw) if im_raw not in ("", "0") else 0.0
+            pv = float(p.get("positionValue") or 0)
             out.append(
                 {
                     "symbol": str(p.get("symbol")),
@@ -187,14 +212,97 @@ class Em6BybitBroker:
                     "size": size,
                     "avg_price": float(p.get("avgPrice") or 0),
                     "mark_price": float(p.get("markPrice") or 0),
-                    "stop_loss": float(p.get("stopLoss") or 0),
+                    "stop_loss": sl,
+                    "trailing_stop": trail,
+                    "take_profit": float(p.get("takeProfit") or 0),
+                    "liq_price": float(p.get("liqPrice") or 0),
                     "unrealised_pnl": float(p.get("unrealisedPnl") or 0),
+                    "cur_realised_pnl": float(p.get("curRealisedPnl") or 0),
+                    "position_value": pv,
+                    "position_im": position_im,
                     "leverage": float(
                         p.get("leverage") or config.em6_bybit_leverage()
                     ),
+                    "open_time_ms": int(p.get("createdTime") or p.get("updatedTime") or 0),
                 }
             )
         return out
+
+    def _parse_closed_pnl_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        side_raw = str(row.get("side") or "")
+        side = "long" if side_raw == "Buy" else "short"
+        ct = int(row.get("createdTime") or row.get("updatedTime") or 0)
+        pnl = float(row.get("closedPnl") or 0)
+        qty = float(row.get("qty") or row.get("closedSize") or 0)
+        entry = float(row.get("avgEntryPrice") or 0)
+        exit_p = float(row.get("avgExitPrice") or 0)
+        lev = float(row.get("leverage") or config.em6_bybit_leverage())
+        margin = (qty * entry / lev) if lev and entry and qty else 0.0
+        roe = (pnl / margin * 100.0) if margin > 0 else 0.0
+        return {
+            "symbol": str(row.get("symbol") or ""),
+            "side": side,
+            "entry_price": entry,
+            "exit_price": exit_p,
+            "qty": qty,
+            "pnl_usd": pnl,
+            "roe_pct": round(roe, 2),
+            "closed_at": ct,
+            "exit_reason": "exchange",
+            "leverage": lev,
+            "source": "bybit",
+        }
+
+    def _fetch_closed_pnl_page(
+        self, *, start_ms: int, limit: int, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {
+            "category": "linear",
+            "startTime": max(0, start_ms),
+            "limit": min(max(1, limit), 100),
+        }
+        if symbol:
+            kwargs["symbol"] = symbol
+        resp = self._client().get_closed_pnl(**kwargs)
+        return (resp.get("result") or {}).get("list") or []
+
+    def list_recent_closed_pnl(
+        self,
+        *,
+        start_ms: int,
+        limit: int = 100,
+        symbols: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Закрытые позиции / PnL с биржи (linear)."""
+        lim = min(max(1, limit), 100)
+        rows: list[dict[str, Any]] = []
+        try:
+            rows = self._fetch_closed_pnl_page(start_ms=start_ms, limit=lim)
+        except Exception:
+            rows = []
+        if not rows and symbols:
+            merged: list[dict[str, Any]] = []
+            for sym in symbols[:40]:
+                try:
+                    merged.extend(
+                        self._fetch_closed_pnl_page(
+                            start_ms=start_ms, limit=50, symbol=sym
+                        )
+                    )
+                except Exception:
+                    continue
+            rows = merged
+        out = [self._parse_closed_pnl_row(dict(r)) for r in rows]
+        out.sort(key=lambda r: r.get("closed_at") or 0, reverse=True)
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for r in out:
+            key = f"{r['symbol']}|{r['closed_at']}|{r['pnl_usd']}"
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(r)
+        return deduped[:limit]
 
     def set_leverage(self, symbol: str) -> None:
         lev = str(config.em6_bybit_leverage())

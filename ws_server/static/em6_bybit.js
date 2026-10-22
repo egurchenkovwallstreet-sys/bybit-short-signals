@@ -6,6 +6,20 @@
     return new Date(ms).toLocaleString("ru-RU", { timeZone: "Europe/Moscow" });
   };
 
+  const pnlClass = (v) => {
+    const n = Number(v);
+    if (Number.isNaN(n) || v == null || v === "") return "";
+    if (n > 0) return "pos";
+    if (n < 0) return "neg";
+    return "flat";
+  };
+
+  const sideLabel = (side) => {
+    if (side === "long") return '<span class="em6b-side em6b-long">LONG</span>';
+    if (side === "short") return '<span class="em6b-side em6b-short">SHORT</span>';
+    return side || "—";
+  };
+
   let lastData = null;
   let chartApi = null;
   let chartSeries = null;
@@ -15,29 +29,45 @@
     const s = data.summary || {};
     const el = document.getElementById("em6b-summary");
     if (!el) return;
-    const pnl = Number(s.total_pnl_closed || 0);
-    const pnlCls = pnl >= 0 ? "pos" : "neg";
+    const pnlClosed = Number(s.total_pnl_closed || 0);
+    const pnlOpen = Number(s.total_unrealised_pnl || 0);
+    const src = s.data_source === "bybit" ? "Bybit Demo" : "локальный журнал";
     el.innerHTML = `
-      <div class="paper-card"><span class="label">Equity Demo</span><div class="value">$${num(s.wallet_equity)}</div></div>
+      <div class="paper-card"><span class="label">Equity</span><div class="value">$${num(s.wallet_equity)}</div><span class="hint">${src}</span></div>
       <div class="paper-card"><span class="label">Доступно</span><div class="value">$${num(s.wallet_available)}</div></div>
+      <div class="paper-card"><span class="label">uPnL открытых</span><div class="value ${pnlClass(pnlOpen)}">$${num(pnlOpen)}</div></div>
       <div class="paper-card"><span class="label">Открыто</span><div class="value">${s.open_trades ?? 0}</div></div>
       <div class="paper-card"><span class="label">Закрыто</span><div class="value">${s.closed_trades ?? 0}</div></div>
       <div class="paper-card"><span class="label">Win rate</span><div class="value">${pct(s.win_rate)}</div></div>
-      <div class="paper-card"><span class="label">PnL закрытых</span><div class="value ${pnlCls}">$${num(s.total_pnl_closed)}</div></div>
+      <div class="paper-card"><span class="label">PnL закрытых</span><div class="value ${pnlClass(pnlClosed)}">$${num(pnlClosed)}</div></div>
       <div class="paper-card"><span class="label">Претенденты</span><div class="value">${s.watch_count ?? 0}</div></div>
-      <div class="paper-card"><span class="label">Маржа / трейл</span><div class="value">$${num(s.margin_usd ?? 50)} × ${s.leverage ?? 10} · −14% ROE</div></div>
+      <div class="paper-card"><span class="label">Цель номинала</span><div class="value">$${num(s.notional_usd ?? 500)} · ${s.leverage ?? 10}×</div></div>
     `;
   }
 
+  function fmtStop(r) {
+    const trail = Number(r.trailing_stop || 0);
+    const sl = Number(r.stop_loss || 0);
+    if (trail > 0) return `trail ${num(trail)}`;
+    if (sl > 0) return num(sl);
+    if (r.stop_price != null) return `${num(r.stop_price)} (расч.)`;
+    return "—";
+  }
+
   function rowOpen(r) {
-    return `<tr class="em6b-open-row" data-symbol="${r.symbol}">
-      <td>${r.symbol}</td>
-      <td>${r.side}</td>
+    const upnl = r.unrealised_pnl;
+    const roe = r.roe_pct;
+    const rowCls = r.side === "long" ? "em6b-row-long" : "em6b-row-short";
+    return `<tr class="em6b-open-row ${rowCls}" data-symbol="${r.symbol}">
+      <td><strong>${r.symbol}</strong></td>
+      <td>${sideLabel(r.side)}</td>
       <td>${num(r.entry_price)}</td>
-      <td>${num(r.stop_price)}</td>
-      <td>${pct(r.trail_roe_pct ?? 14)} trail</td>
+      <td>${num(r.mark_price)}</td>
+      <td class="${pnlClass(upnl)}">$${num(upnl)}</td>
+      <td class="${pnlClass(roe)}">${pct(roe)}</td>
+      <td>${fmtStop(r)}</td>
       <td>${pct(r.max_roe)}</td>
-      <td>$${num(r.notional_usd ?? r.margin * 10)}</td>
+      <td>$${num(r.notional_usd)}</td>
       <td>${num(r.margin)}</td>
       <td>${ts(r.opened_at)}</td>
     </tr>`;
@@ -45,16 +75,17 @@
 
   function rowClosed(r) {
     const pnl = Number(r.pnl_usd || 0);
-    const cls = pnl >= 0 ? "pos" : "neg";
-    return `<tr>
-      <td>${r.symbol}</td>
-      <td>${r.side}</td>
+    const roe = r.roe_pct;
+    const cls = pnlClass(pnl);
+    const rowCls = r.side === "long" ? "em6b-row-long" : "em6b-row-short";
+    return `<tr class="${rowCls} em6b-closed-row ${cls}">
+      <td><strong>${r.symbol}</strong></td>
+      <td>${sideLabel(r.side)}</td>
       <td>${num(r.entry_price)}</td>
       <td>${num(r.exit_price)}</td>
-      <td class="${cls}">$${num(r.pnl_usd)}</td>
-      <td>${pct(r.roe_pct)}</td>
-      <td>${pct(r.max_roe)}</td>
-      <td>${r.exit_reason || "—"}</td>
+      <td class="${cls}"><strong>$${num(r.pnl_usd)}</strong></td>
+      <td class="${pnlClass(roe)}">${pct(roe)}</td>
+      <td>${r.source === "bybit" ? "биржа" : r.exit_reason || "—"}</td>
       <td>${ts(r.closed_at)}</td>
     </tr>`;
   }
@@ -62,7 +93,7 @@
   function rowCand(c) {
     return `<tr>
       <td>${c.symbol}</td>
-      <td>${c.side}</td>
+      <td>${sideLabel(c.side)}</td>
       <td>${pct(c.stretch_pct)}</td>
       <td>${c.stretch_column || "—"}</td>
       <td>${c.phase || "—"}</td>
@@ -208,18 +239,23 @@
   function renderTables(data) {
     const open = document.getElementById("em6b-open");
     const closed = document.getElementById("em6b-closed");
+    const srcNote = document.getElementById("em6b-source-note");
+    if (srcNote) {
+      const src = data.summary?.data_source === "bybit" ? "Данные позиций и PnL — с Bybit Demo." : "Биржа недоступна — локальный журнал.";
+      srcNote.textContent = src;
+    }
     if (open) {
       const rows = (data.open_trades || []).map(rowOpen).join("");
       open.innerHTML = `<thead><tr>
-        <th>Symbol</th><th>Сторона</th><th>Вход</th><th>Стоп (расч.)</th><th>Трейл</th>
-        <th>Max ROE</th><th>Номинал</th><th>Маржа</th><th>Открыта</th></tr></thead><tbody>${rows || "<tr><td colspan='9'>Нет открытых</td></tr>"}</tbody>`;
+        <th>Symbol</th><th>Сторона</th><th>Вход</th><th>Mark</th><th>uPnL</th><th>ROE</th>
+        <th>SL / trail</th><th>Max ROE</th><th>Номинал</th><th>Маржа</th><th>Открыта</th></tr></thead><tbody>${rows || "<tr><td colspan='11'>Нет открытых на бирже</td></tr>"}</tbody>`;
       bindOpenClicks();
     }
     if (closed) {
       const rows = (data.closed_trades || []).map(rowClosed).join("");
       closed.innerHTML = `<thead><tr>
         <th>Symbol</th><th>Сторона</th><th>Вход</th><th>Выход</th><th>PnL</th><th>ROE</th>
-        <th>Max ROE</th><th>Причина</th><th>Закрыта</th></tr></thead><tbody>${rows || "<tr><td colspan='9'>Пока нет</td></tr>"}</tbody>`;
+        <th>Источник</th><th>Закрыта</th></tr></thead><tbody>${rows || "<tr><td colspan='8'>Пока нет</td></tr>"}</tbody>`;
     }
   }
 

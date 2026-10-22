@@ -191,6 +191,68 @@ class Em6BybitStrategy:
             return float(state.last_price)
         return live.entry_price
 
+    def _roe_from_upnl(self, upnl: float, margin: float) -> float:
+        if margin <= 0:
+            return 0.0
+        return upnl / margin * 100.0
+
+    def _open_rows_from_exchange(self, positions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for pos in positions:
+            sym = str(pos["symbol"])
+            live = self.open_trades.get(sym)
+            entry = float(pos["avg_price"])
+            mark = float(pos["mark_price"])
+            qty = float(pos["size"])
+            lev = float(pos.get("leverage") or config.em6_bybit_leverage())
+            im = float(pos.get("position_im") or 0)
+            margin = im if im > 0 else (qty * entry / lev if lev else 0.0)
+            pv = float(pos.get("position_value") or 0)
+            notional = pv if pv > 0 else qty * mark
+            upnl = float(pos.get("unrealised_pnl") or 0)
+            roe = self._roe_from_upnl(upnl, margin)
+            max_roe = self._max_roe(live) if live else roe
+            row: dict[str, Any] = {
+                "id": live.id if live else None,
+                "symbol": sym,
+                "side": pos["side"],
+                "variant": "em6_bybit",
+                "entry_price": entry,
+                "mark_price": mark,
+                "qty": qty,
+                "margin": round(margin, 4),
+                "leverage": int(lev),
+                "notional_usd": round(notional, 2),
+                "unrealised_pnl": round(upnl, 4),
+                "roe_pct": round(roe, 2),
+                "stop_loss": float(pos.get("stop_loss") or 0),
+                "trailing_stop": float(pos.get("trailing_stop") or 0),
+                "take_profit": float(pos.get("take_profit") or 0),
+                "liq_price": float(pos.get("liq_price") or 0),
+                "max_roe": round(max_roe, 2),
+                "min_roe": round(self._min_roe(live), 2) if live else round(min(0.0, roe), 2),
+                "opened_at": int(live.opened_at if live else pos.get("open_time_ms") or 0),
+                "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
+                "source": "bybit",
+                "ema60": live.ema60 if live else 0.0,
+                "grid_levels": live.grid_levels if live else [],
+            }
+            rows.append(row)
+        rows.sort(key=lambda r: abs(float(r.get("unrealised_pnl") or 0)), reverse=True)
+        return rows
+
+    def _closed_rows_from_exchange(self, *, limit: int = 200) -> list[dict[str, Any]]:
+        start = int(time.time() * 1000) - 90 * 86400 * 1000
+        syms = list(self.open_trades.keys())
+        if self._conn is not None:
+            for r in self.store.list_trades(self._conn, "closed", 80):
+                s = str(r.get("symbol") or "")
+                if s and s not in syms:
+                    syms.append(s)
+        return self.broker.list_recent_closed_pnl(
+            start_ms=start, limit=min(limit, 100), symbols=syms
+        )
+
     def _ensure_trailing(self, live: LiveOpen, state: SymbolState | None = None) -> None:
         ref = self._ref_price(live, state)
         try:
@@ -545,41 +607,51 @@ class Em6BybitStrategy:
 
     def view(self, now_ms: int) -> dict[str, Any]:
         wallet = {"equity": 0.0, "available": 0.0}
+        positions: list[dict[str, Any]] = []
         if self.broker.configured():
             try:
                 wallet = self.broker.wallet_usdt()
             except Exception:
                 pass
+            try:
+                positions = self.broker.linear_positions()
+            except Exception:
+                log.exception("em6 bybit view positions")
         closed: list[dict] = []
-        if self._conn is not None:
+        if self.broker.configured():
+            closed = self._closed_rows_from_exchange(limit=200)
+        if not closed and self._conn is not None:
             closed = self.store.list_trades(self._conn, "closed", 200)
-        open_rows = []
-        for live in self.open_trades.values():
-            open_rows.append(
-                {
-                    "id": live.id,
-                    "symbol": live.symbol,
-                    "side": live.side,
-                    "variant": "em6_bybit",
-                    "entry_price": live.entry_price,
-                    "margin": live.margin,
-                    "leverage": live.leverage,
-                    "qty": live.qty,
-                    "stop_price": live.stop_price,
-                    "best_price": live.best_price,
-                    "worst_price": live.worst_price,
-                    "max_roe": self._max_roe(live),
-                    "min_roe": self._min_roe(live),
-                    "opened_at": live.opened_at,
-                    "exchange_stop": live.last_exchange_stop,
-                    "ema60": live.ema60,
-                    "grid_levels": live.grid_levels,
-                    "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
-                    "notional_usd": round(
-                        live.qty * live.entry_price, 2
-                    ),
-                }
-            )
+        open_rows: list[dict[str, Any]] = []
+        if positions:
+            open_rows = self._open_rows_from_exchange(positions)
+        elif self.open_trades:
+            for live in self.open_trades.values():
+                open_rows.append(
+                    {
+                        "id": live.id,
+                        "symbol": live.symbol,
+                        "side": live.side,
+                        "variant": "em6_bybit",
+                        "entry_price": live.entry_price,
+                        "margin": live.margin,
+                        "leverage": live.leverage,
+                        "qty": live.qty,
+                        "stop_price": live.stop_price,
+                        "best_price": live.best_price,
+                        "worst_price": live.worst_price,
+                        "max_roe": self._max_roe(live),
+                        "min_roe": self._min_roe(live),
+                        "opened_at": live.opened_at,
+                        "exchange_stop": live.last_exchange_stop,
+                        "ema60": live.ema60,
+                        "grid_levels": live.grid_levels,
+                        "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
+                        "notional_usd": round(live.qty * live.entry_price, 2),
+                        "source": "local",
+                    }
+                )
+        unrealized_total = sum(float(r.get("unrealised_pnl") or 0) for r in open_rows)
         wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)
         n_closed = len(closed)
         sum_pnl = sum(float(r.get("pnl_usd") or 0) for r in closed)
@@ -609,8 +681,10 @@ class Em6BybitStrategy:
                 "closed_trades": n_closed,
                 "win_rate": round(100.0 * wins / n_closed, 1) if n_closed else 0.0,
                 "total_pnl_closed": round(sum_pnl, 2),
+                "total_unrealised_pnl": round(unrealized_total, 2),
                 "watch_count": len(cand_rows),
                 "stretch_floor_pct": config.EM6_BYBIT_STRETCH_FLOOR_PCT,
+                "data_source": "bybit" if self.broker.configured() else "local",
             },
             "candidates": cand_rows,
             "candidate_columns": columns,
