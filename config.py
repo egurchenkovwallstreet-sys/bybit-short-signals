@@ -286,6 +286,7 @@ REDIS_CHANNEL_SIGNALS = _env("REDIS_CHANNEL_SIGNALS", "signals:updates")
 
 # Веб-сокет к браузеру не чаще 10 Гц. Тикеры пакуются раз в 500 мс.
 WS_MAX_HZ = _env_int("WS_MAX_HZ", 10)
+WS_EM6_PUSH_HZ = _env_int("WS_EM6_PUSH_HZ", 1)
 TICKER_BATCH_INTERVAL_MS = _env_int("TICKER_BATCH_INTERVAL_MS", 500)
 
 # Стопы теста и пылесос. Поиск пампов и старые доски — отдельно, втрое реже.

@@ -594,4 +594,9 @@
       fetchFallback();
     },
   };
+
+  setInterval(() => {
+    const view = document.getElementById("view-em6-bybit");
+    if (view && !view.hidden) fetchFallback();
+  }, 1000);
 })();

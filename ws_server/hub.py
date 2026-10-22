@@ -63,6 +63,7 @@ class Hub:
         self._stopped = False
         self._stats_cache: dict[str, Any] | None = None
         self._stats_at = 0.0
+        self._last_em6_push = 0.0
 
     def load_demo(self) -> None:
         columns = demo_board()
@@ -270,13 +271,15 @@ class Hub:
 
     async def _flush_loop(self) -> None:
         tick = 1 / max(config.WS_MAX_HZ, 1)
+        em6_gap = 1.0 / max(config.WS_EM6_PUSH_HZ, 1)
         ticker_gap = config.TICKER_BATCH_INTERVAL_MS / 1000
         last_ticker = 0.0
         while not self._stopped:
             await asyncio.sleep(tick)
             now = time.monotonic()
             paper = self.paper.view() if self.paper_dirty else None
-            em6b = self.em6_bybit.view() if self.em6_bybit_dirty else None
+            em6_dirty = self.em6_bybit_dirty
+            em6_tick = bool(self.clients) and now - self._last_em6_push >= em6_gap
             self.board_dirty = False
             self.pump_scan_dirty = False
             self.x2_retrace_dirty = False
@@ -286,13 +289,20 @@ class Hub:
             self.market_dirty = False
             self.paper_dirty = False
             self.em6_bybit_dirty = False
+            em6_payload: dict[str, Any] | None = None
+            if em6_dirty or em6_tick:
+                em6_payload = await asyncio.to_thread(
+                    snapshot_for_ui, self.em6_bybit.view()
+                )
+                self._last_em6_push = now
             for client in list(self.clients):
                 try:
                     if paper is not None:
                         await client.websocket.send_json({"type": "paper_test", "data": paper})
-                    if em6b is not None:
-                        payload = snapshot_for_ui(em6b)
-                        await client.websocket.send_json({"type": "em6_bybit", "data": payload})
+                    if em6_payload is not None:
+                        await client.websocket.send_json(
+                            {"type": "em6_bybit", "data": em6_payload}
+                        )
                 except Exception:
                     self.clients.discard(client)
 
