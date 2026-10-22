@@ -24,6 +24,7 @@ from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
 from signal_engine.live.em6_bybit.stops import (
     em6_bybit_active_trail_roe_pct,
     em6_bybit_trailing_stop_price,
+    trail_roe_pct_from_trailing_distance,
 )
 from signal_engine.paper.position import long_roe_pct, roe_pct
 from signal_engine.state import SymbolState
@@ -98,6 +99,9 @@ class Em6BybitStrategy:
                 self._finalize_closed(sym, row, reason="exchange_flat")
                 continue
             self._load_live(row)
+            live = self.open_trades.get(sym)
+            if live is not None:
+                self._update_live(live, None, exchange_pos=positions.get(sym))
 
         for sym, pos in positions.items():
             if sym in self.open_trades:
@@ -138,7 +142,7 @@ class Em6BybitStrategy:
                 opened_at=int(time.time() * 1000),
             )
             self.open_trades[sym] = live
-            self._ensure_trailing(live)
+            self._update_live(live, None, exchange_pos=pos)
             log.info("em6 bybit: recovered open %s %s", sym, side)
 
         for sym, live in list(self.open_trades.items()):
@@ -162,7 +166,6 @@ class Em6BybitStrategy:
             opened_at=int(row["opened_at"]),
             last_exchange_stop=float(row["last_exchange_stop"] or 0),
         )
-        self._ensure_trailing(self.open_trades[sym])
 
     def _entry_fee(self, entry: float, qty: float) -> float:
         return qty * entry * config.PAPER_FEE_RATE_TAKER
@@ -210,6 +213,37 @@ class Em6BybitStrategy:
             return 0.0
         return upnl / margin * 100.0
 
+    @staticmethod
+    def _margin_from_position(pos: dict[str, Any]) -> float:
+        entry = float(pos.get("avg_price") or 0)
+        qty = float(pos.get("size") or 0)
+        lev = float(pos.get("leverage") or config.em6_bybit_leverage())
+        im = float(pos.get("position_im") or 0)
+        if im > 0:
+            return im
+        return qty * entry / lev if lev else 0.0
+
+    def _roe_from_position(self, pos: dict[str, Any]) -> float:
+        margin = self._margin_from_position(pos)
+        upnl = float(pos.get("unrealised_pnl") or 0)
+        return self._roe_from_upnl(upnl, margin)
+
+    @staticmethod
+    def _trail_fields_for_position(pos: dict[str, Any], roe: float) -> dict[str, float]:
+        mark = float(pos.get("mark_price") or 0)
+        trail_dist = float(pos.get("trailing_stop") or 0)
+        target = em6_bybit_active_trail_roe_pct(roe)
+        exchange = (
+            trail_roe_pct_from_trailing_distance(mark, trail_dist)
+            if mark > 0 and trail_dist > 0
+            else 0.0
+        )
+        return {
+            "trail_roe_target": round(target, 4),
+            "trail_roe_exchange": round(exchange, 4),
+            "trail_roe_pct": round(exchange if exchange > 0 else target, 4),
+        }
+
     def _open_rows_from_exchange(self, positions: list[dict[str, Any]]) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         for pos in positions:
@@ -219,12 +253,12 @@ class Em6BybitStrategy:
             mark = float(pos["mark_price"])
             qty = float(pos["size"])
             lev = float(pos.get("leverage") or config.em6_bybit_leverage())
-            im = float(pos.get("position_im") or 0)
-            margin = im if im > 0 else (qty * entry / lev if lev else 0.0)
+            margin = self._margin_from_position(pos)
             pv = float(pos.get("position_value") or 0)
             notional = pv if pv > 0 else qty * mark
             upnl = float(pos.get("unrealised_pnl") or 0)
             roe = self._roe_from_upnl(upnl, margin)
+            trail_fields = self._trail_fields_for_position(pos, roe)
             max_roe = self._max_roe(live) if live else roe
             if live is not None and live.ema60 > 0:
                 self._refresh_live_grid(live, live.ema60, mark)
@@ -249,12 +283,14 @@ class Em6BybitStrategy:
                 "max_roe": round(max_roe, 2),
                 "min_roe": round(self._min_roe(live), 2) if live else round(min(0.0, roe), 2),
                 "opened_at": int(live.opened_at if live else pos.get("open_time_ms") or 0),
-                "trail_roe_pct": em6_bybit_active_trail_roe_pct(roe),
                 "trail_armed": roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
                 "source": "bybit",
                 "ema60": live.ema60 if live else 0.0,
                 "grid_levels": grid,
+                **trail_fields,
             }
+            if live is not None and live.last_trail_roe_pct > 0:
+                row["trail_roe_target"] = round(live.last_trail_roe_pct, 4)
             rows.append(row)
         rows.sort(key=lambda r: abs(float(r.get("unrealised_pnl") or 0)), reverse=True)
         return rows
@@ -271,12 +307,19 @@ class Em6BybitStrategy:
             start_ms=start, limit=min(limit, 100), symbols=syms
         )
 
-    def _ensure_trailing(self, live: LiveOpen, state: SymbolState | None = None) -> None:
-        ref = self._ref_price(live, state)
+    def _ensure_trailing(
+        self,
+        live: LiveOpen,
+        state: SymbolState | None = None,
+        *,
+        ref_price: float | None = None,
+        cur_roe: float | None = None,
+    ) -> None:
+        ref = ref_price if ref_price is not None and ref_price > 0 else self._ref_price(live, state)
         if ref <= 0:
             return
-        cur_roe = self._current_roe(live, state)
-        trail_roe = em6_bybit_active_trail_roe_pct(cur_roe)
+        roe = cur_roe if cur_roe is not None else self._current_roe(live, state)
+        trail_roe = em6_bybit_active_trail_roe_pct(roe)
         try:
             resp = self.broker.set_trailing_stop_roe(
                 live.symbol,
@@ -302,7 +345,7 @@ class Em6BybitStrategy:
                     live.symbol,
                     trail_roe,
                     ref,
-                    cur_roe,
+                    roe,
                     prev if prev > 0 else trail_roe,
                 )
         except Exception:
@@ -326,20 +369,34 @@ class Em6BybitStrategy:
             ema, live.side, live.peak_stretch, cur
         )
 
-    def _update_live(self, live: LiveOpen, state: SymbolState) -> None:
-        last = float(state.last_price or live.entry_price)
+    def _update_live(
+        self,
+        live: LiveOpen,
+        state: SymbolState | None,
+        exchange_pos: dict[str, Any] | None = None,
+    ) -> None:
+        mark = float(exchange_pos["mark_price"]) if exchange_pos else 0.0
+        if state is not None and state.last_price:
+            last = float(state.last_price)
+        else:
+            last = live.entry_price
+        if mark > 0:
+            last = mark
         if live.side == "long":
             live.best_price = max(live.best_price, last)
             live.worst_price = min(live.worst_price, last)
         else:
             live.best_price = min(live.best_price, last)
             live.worst_price = max(live.worst_price, last)
-        row = self._stretch_row(live.symbol, state, int(time.time() * 1000))
-        if row is not None:
-            ema = row[3]
-            if ema > 0:
-                live.ema60 = ema
-                self._refresh_live_grid(live, ema, last)
+        if state is not None:
+            row = self._stretch_row(live.symbol, state, int(time.time() * 1000))
+            if row is not None:
+                ema = row[3]
+                if ema > 0:
+                    live.ema60 = ema
+                    self._refresh_live_grid(live, ema, last)
+        elif live.ema60 > 0 and mark > 0:
+            self._refresh_live_grid(live, live.ema60, mark)
         new_stop = self._compute_stop_for(
             live.side, live.entry_price, live.best_price, live.margin, live.qty
         )
@@ -352,7 +409,13 @@ class Em6BybitStrategy:
             "min_roe": self._min_roe(live),
         }
         self.store.update_open(self._conn, live.id, fields)
-        self._ensure_trailing(live, state)
+        ex_roe = self._roe_from_position(exchange_pos) if exchange_pos else None
+        self._ensure_trailing(
+            live,
+            state,
+            ref_price=mark if mark > 0 else None,
+            cur_roe=ex_roe,
+        )
 
     def _is_initial_stop_close(self, live: LiveOpen | None, row: dict[str, Any]) -> bool:
         arm = config.em6_bybit_trail_arm_roe()
@@ -722,10 +785,14 @@ class Em6BybitStrategy:
             return
         self._last_open_ms = now_ms
         self._sync_closures()
+        try:
+            by_sym = {p["symbol"]: p for p in self.broker.linear_positions()}
+        except Exception:
+            log.exception("em6 bybit tick_open positions")
+            by_sym = {}
         for sym, live in list(self.open_trades.items()):
             st = states.get(sym)
-            if st is not None:
-                self._update_live(live, st)
+            self._update_live(live, st, exchange_pos=by_sym.get(sym))
 
     def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict[str, Any]:
         if not self.broker.configured():

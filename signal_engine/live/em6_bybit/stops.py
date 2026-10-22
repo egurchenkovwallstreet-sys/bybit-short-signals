@@ -76,3 +76,11 @@ def trailing_stop_distance_price(ref_price: float, trail_roe_pct: float | None =
         else config.em6_bybit_trail_initial_roe()
     )
     return ref_price * (roe / 100.0) / lev
+
+
+def trail_roe_pct_from_trailing_distance(ref_price: float, trail_distance: float) -> float:
+    """Фактический trail ROE% по trailingStop и mark (обратно к trailing_stop_distance_price)."""
+    lev = config.em6_bybit_leverage()
+    if ref_price <= 0 or trail_distance <= 0:
+        return 0.0
+    return trail_distance / ref_price * lev * 100.0

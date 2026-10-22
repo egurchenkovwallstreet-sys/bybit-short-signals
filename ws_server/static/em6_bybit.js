@@ -50,7 +50,18 @@
   function fmtStop(r) {
     const trail = Number(r.trailing_stop || 0);
     const sl = Number(r.stop_loss || 0);
-    if (trail > 0) return `trail ${num(trail)}`;
+    const target = Number(r.trail_roe_target ?? r.trail_roe_pct ?? 0);
+    const onEx = Number(r.trail_roe_exchange ?? 0);
+    if (trail > 0 || target > 0 || onEx > 0) {
+      if (onEx > 0) {
+        if (target > 0 && Math.abs(onEx - target) > 1.5) {
+          return `trail ${onEx.toFixed(1)}% (цель ${target.toFixed(1)}%)`;
+        }
+        return `trail ${onEx.toFixed(1)}% ROE`;
+      }
+      if (target > 0) return `trail цель ${target.toFixed(1)}% ROE`;
+      return `trail ${num(trail)}`;
+    }
     if (sl > 0) return num(sl);
     if (r.stop_price != null) return `${num(r.stop_price)} (расч.)`;
     return "—";
@@ -67,7 +78,7 @@
       <td>${num(r.mark_price)}</td>
       <td class="${pnlClass(upnl)}">$${num(upnl)}</td>
       <td class="${pnlClass(roe)}">${pct(roe)}</td>
-      <td>${fmtStop(r)} · ${pct(r.trail_roe_pct)}${r.trail_armed ? " ✓" : ""}</td>
+      <td>${fmtStop(r)}${r.trail_armed ? " ✓" : ""}</td>
       <td>${pct(r.max_roe)}</td>
       <td>$${num(r.notional_usd)}</td>
       <td>${num(r.margin)}</td>

@@ -9,7 +9,10 @@ import config
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
 from signal_engine.live.em6_bybit.grid_entry import CandidateWatch, band_lo, stretch_column_label
 from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
-from signal_engine.live.em6_bybit.stops import em6_bybit_active_trail_roe_pct
+from signal_engine.live.em6_bybit.stops import (
+    em6_bybit_active_trail_roe_pct,
+    trail_roe_pct_from_trailing_distance,
+)
 from signal_engine.live.em6_bybit.store import Em6BybitStore
 
 
@@ -27,6 +30,13 @@ def _open_rows_from_positions(positions: list[dict[str, Any]]) -> list[dict[str,
         upnl = float(pos.get("unrealised_pnl") or 0)
         roe = (upnl / margin * 100.0) if margin > 0 else 0.0
         max_roe = roe
+        trail_dist = float(pos.get("trailing_stop") or 0)
+        target = em6_bybit_active_trail_roe_pct(roe)
+        exchange_trail = (
+            trail_roe_pct_from_trailing_distance(mark, trail_dist)
+            if mark > 0 and trail_dist > 0
+            else 0.0
+        )
         rows.append(
             {
                 "symbol": pos["symbol"],
@@ -43,7 +53,9 @@ def _open_rows_from_positions(positions: list[dict[str, Any]]) -> list[dict[str,
                 "trailing_stop": float(pos.get("trailing_stop") or 0),
                 "max_roe": round(max_roe, 2),
                 "opened_at": int(pos.get("open_time_ms") or 0),
-                "trail_roe_pct": em6_bybit_active_trail_roe_pct(roe),
+                "trail_roe_target": round(target, 4),
+                "trail_roe_exchange": round(exchange_trail, 4),
+                "trail_roe_pct": round(exchange_trail if exchange_trail > 0 else target, 4),
                 "trail_armed": roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
                 "source": "bybit",
                 "grid_levels": [],
@@ -171,7 +183,15 @@ def _merge_open_with_engine(
             merged.append(er)
             continue
         row = dict(er)
-        for key in ("grid_levels", "ema60", "peak_stretch", "trail_roe_pct", "trail_armed"):
+        for key in (
+            "grid_levels",
+            "ema60",
+            "peak_stretch",
+            "trail_roe_pct",
+            "trail_roe_target",
+            "trail_roe_exchange",
+            "trail_armed",
+        ):
             if eng.get(key) not in (None, "", 0, 0.0, []):
                 row[key] = eng[key]
         merged.append(row)
