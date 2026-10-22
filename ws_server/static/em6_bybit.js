@@ -148,6 +148,8 @@
   let selectedChartSymbol = null;
   let chartLoadSeq = 0;
   let chartRefreshTimer = null;
+  let chartViewKey = "";
+  let lastCandleBars = [];
   let priceLines = [];
   const candleCache = new Map();
   const ema60Cache = new Map();
@@ -393,6 +395,42 @@
     requestAnimationFrame(resize);
   }
 
+  function applyCandleBarUpdates(bars) {
+    if (!chartSeries || !bars.length) return;
+    const prev = lastCandleBars;
+    if (!prev.length) {
+      chartSeries.setData(bars);
+      lastCandleBars = bars;
+      return;
+    }
+    const sameStart =
+      timeSortKey(prev[0].time) === timeSortKey(bars[0].time);
+    if (!sameStart || bars.length < prev.length) {
+      chartSeries.setData(bars);
+      lastCandleBars = bars;
+      return;
+    }
+    if (bars.length === prev.length) {
+      chartSeries.update(bars[bars.length - 1]);
+    } else {
+      for (let i = prev.length; i < bars.length; i += 1) {
+        chartSeries.update(bars[i]);
+      }
+    }
+    lastCandleBars = bars;
+  }
+
+  function clearPriceLinesOnly() {
+    priceLines.forEach((pl) => {
+      try {
+        chartSeries.removePriceLine(pl);
+      } catch (_) {
+        /* ignore */
+      }
+    });
+    priceLines = [];
+  }
+
   function clearOverlays() {
     lineSeries.forEach((s) => {
       try {
@@ -444,11 +482,24 @@
     wrap.hidden = false;
     const kind = base.kind === "candidate" ? "претендент" : "позиция";
     const tfLabel = chartInterval === "1" ? "1m" : "5m";
-    title.textContent = `${base.symbol} · ${base.side} · ${kind} · ${tfLabel} · загрузка…`;
+    const viewKey = `${base.symbol}:${chartInterval}`;
+    const resetView = !!forceRefresh || viewKey !== chartViewKey;
+    if (resetView) chartViewKey = viewKey;
 
     ensureChart(el);
-    clearOverlays();
-    if (chartSeries) chartSeries.setData([]);
+    const prevVisibleRange =
+      !resetView && chartApi
+        ? chartApi.timeScale().getVisibleLogicalRange()
+        : null;
+
+    if (resetView) {
+      title.textContent = `${base.symbol} · ${base.side} · ${kind} · ${tfLabel} · загрузка…`;
+      clearOverlays();
+      if (chartSeries) chartSeries.setData([]);
+      lastCandleBars = [];
+    } else {
+      clearPriceLinesOnly();
+    }
 
     const refresh = !!forceRefresh;
     const bars = await fetchCandles(base.symbol, chartInterval, refresh);
@@ -459,10 +510,15 @@
     title.textContent = `${base.symbol} · ${base.side} · ${kind} · ${tfLabel} · EMA60 (5m) + сетка`;
     if (!bars.length) {
       title.textContent += " — нет свечей (обновите позже)";
-      chartSeries.setData([]);
+      if (resetView) chartSeries.setData([]);
       return;
     }
-    chartSeries.setData(bars);
+    if (resetView) {
+      chartSeries.setData(bars);
+      lastCandleBars = bars;
+    } else {
+      applyCandleBarUpdates(bars);
+    }
 
     const emaLine = ema60LineOnChart(bars, bars5, chartInterval);
     if (ema60Series && emaLine.length) {
@@ -497,10 +553,25 @@
     if (entry > 0) addPriceLine(entry, "#ffffff", "Entry");
     if (mark > 0) addPriceLine(mark, "#58a6ff", "Mark");
 
-    chartApi.timeScale().fitContent();
+    if (resetView) {
+      chartApi.timeScale().fitContent();
+    } else if (prevVisibleRange) {
+      try {
+        chartApi.timeScale().setVisibleLogicalRange(prevVisibleRange);
+      } catch (_) {
+        /* ignore */
+      }
+    }
     requestAnimationFrame(() => {
       if (loadSeq !== chartLoadSeq) return;
       if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, 360);
+      if (!resetView && prevVisibleRange) {
+        try {
+          chartApi.timeScale().setVisibleLogicalRange(prevVisibleRange);
+        } catch (_) {
+          /* ignore */
+        }
+      }
     });
   }
 
