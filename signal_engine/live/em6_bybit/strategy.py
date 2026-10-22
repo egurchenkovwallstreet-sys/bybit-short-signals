@@ -18,6 +18,7 @@ from signal_engine.live.em6_bybit.grid_entry import (
 from signal_engine.live.em6_bybit.store import Em6BybitStore
 from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
 from signal_engine.live.em6_bybit.grid_entry import price_at_stretch
+from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
 from signal_engine.live.em6_bybit.stops import (
     em6_bybit_active_trail_roe_pct,
     em6_bybit_trailing_stop_price,
@@ -426,15 +427,52 @@ class Em6BybitStrategy:
                 return bar.timestamp, float(bar.close)
         return None
 
+    def _bootstrap_5m(self, states: dict[str, SymbolState], symbol: str) -> None:
+        state = states.setdefault(symbol, SymbolState(symbol))
+        if len(state.bars_htf.get("5") or []) >= 62:
+            return
+        msg = self.broker.fetch_kline_envelope(symbol, "5")
+        if msg:
+            state.ingest(msg)
+
     def _refresh_universe(self, states: dict[str, SymbolState], now_ms: int) -> None:
         rows: list[tuple[str, str, float, float]] = []
         for symbol, state in states.items():
             if not state.last_price:
                 continue
+            self._bootstrap_5m(states, symbol)
             row = self._stretch_row(symbol, state, now_ms)
             if row is not None:
                 rows.append(row)
-        top = pick_top_candidates(rows, limit=config.EM6_BYBIT_TOP_CANDIDATES)
+        if self.broker.configured():
+            try:
+                rest = scan_top_stretches(
+                    self.broker._client(),
+                    symbol_limit=80,
+                )
+                for sym, side, stretch, ema_v, price in rest:
+                    self._bootstrap_5m(states, sym)
+                    st = states[sym]
+                    if st.last_price is None or st.last_price <= 0:
+                        st.last_price = price
+                    row = self._stretch_row(sym, st, now_ms)
+                    if row is not None:
+                        rows.append(row)
+                    elif stretch + 1e-9 >= config.EM6_BYBIT_STRETCH_FLOOR_PCT:
+                        rows.append((sym, side, stretch, ema_v))
+            except Exception:
+                log.exception("em6 bybit REST stretch scan")
+        merged: dict[str, tuple[str, str, float, float]] = {}
+        for sym, side, stretch, ema_v in rows:
+            prev = merged.get(sym)
+            if prev is None or stretch > prev[2]:
+                merged[sym] = (sym, side, stretch, ema_v)
+        rows = list(merged.values())
+        ema_by_sym = {s: e for s, _, _, e in rows}
+        top = pick_top_candidates(
+            [(s, side, st, e) for s, side, st, e in rows],
+            limit=config.EM6_BYBIT_TOP_CANDIDATES,
+        )
         keep = {s for s, _, _ in top} | set(self.open_trades.keys())
         for sym in list(self._watch.keys()):
             if sym not in keep:
@@ -447,7 +485,9 @@ class Em6BybitStrategy:
                 w = CandidateWatch(symbol=symbol, side=side, since_ms=now_ms)
                 w.peak_stretch = stretch
                 w.last_stretch = stretch
-                w.peak_price = float(states[symbol].last_price or 0)
+                st = states.get(symbol)
+                w.peak_price = float(st.last_price if st else 0)
+                w.ema60 = float(ema_by_sym.get(symbol) or (st and w.ema60) or 0)
                 self._watch[symbol] = w
             else:
                 w.side = side

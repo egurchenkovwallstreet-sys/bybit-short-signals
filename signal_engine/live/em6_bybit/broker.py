@@ -300,6 +300,24 @@ class Em6BybitBroker:
             deduped.append(r)
         return deduped[:limit]
 
+    def fetch_kline_envelope(
+        self, symbol: str, interval: str, *, limit: int = 200
+    ) -> dict[str, Any] | None:
+        try:
+            from collector.normalize import kline_message
+
+            resp = self._client().get_kline(
+                category="linear",
+                symbol=symbol,
+                interval=interval,
+                limit=min(limit, 200),
+            )
+            rows = (resp.get("result") or {}).get("list") or []
+            return kline_message(symbol, interval, rows)
+        except Exception:
+            log.exception("fetch_kline_envelope %s", symbol)
+            return None
+
     def set_leverage(self, symbol: str) -> None:
         lev = str(config.em6_bybit_leverage())
         try:
