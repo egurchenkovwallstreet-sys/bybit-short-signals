@@ -26,6 +26,23 @@ def normalize_journal_closed(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def journal_symbol_hints(*, limit: int = 500) -> list[str]:
+    """Символы из журнала em6 (открытые и закрытые) — не вся история Demo."""
+    try:
+        store = Em6BybitStore()
+        conn = store.open()
+        try:
+            rows = store.list_trades(conn, None, limit)
+            return sorted(
+                {str(r.get("symbol") or "") for r in rows if r.get("symbol")}
+            )
+        finally:
+            conn.close()
+    except Exception:
+        log.exception("em6 bybit: journal symbols")
+        return []
+
+
 def journal_closed_rows(*, limit: int = 200) -> list[dict[str, Any]]:
     try:
         store = Em6BybitStore()
@@ -80,19 +97,22 @@ def load_closed_for_dashboard(
 ) -> list[dict[str, Any]]:
     journal = journal_closed_rows(limit=limit)
     hints: set[str] = {s for s in (symbol_hints or []) if s}
+    hints.update(journal_symbol_hints())
     for row in journal:
         sym = str(row.get("symbol") or "")
         if sym:
             hints.add(sym)
     exchange: list[dict[str, Any]] = []
-    if broker.configured():
+    if broker.configured() and hints:
         start_ms = int(time.time() * 1000) - start_days * 86400 * 1000
         try:
             exchange = broker.list_recent_closed_pnl(
                 start_ms=start_ms,
                 limit=min(limit, 100),
-                symbols=sorted(hints) if hints else None,
+                symbols=sorted(hints),
             )
         except Exception:
             log.exception("em6 bybit: exchange closed pnl")
-    return merge_closed_rows(exchange, journal)
+    if journal:
+        return merge_closed_rows(exchange, journal)[:limit]
+    return exchange[:limit]

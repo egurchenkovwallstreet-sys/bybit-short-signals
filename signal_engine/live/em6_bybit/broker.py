@@ -281,18 +281,7 @@ class Em6BybitBroker:
         """Закрытые позиции / PnL с биржи (linear)."""
         lim = min(max(1, limit), 100)
         rows: list[dict[str, Any]] = []
-        try:
-            rows = self._fetch_closed_pnl_page(start_ms=start_ms, limit=lim)
-        except Exception:
-            log.exception("get_closed_pnl all")
-            rows = []
-        if not rows:
-            try:
-                rows = self._fetch_closed_pnl_page(start_ms=None, limit=lim)
-            except Exception:
-                log.exception("get_closed_pnl all (no start)")
-                rows = []
-        if not rows and symbols:
+        if symbols:
             merged: list[dict[str, Any]] = []
             for sym in symbols[:40]:
                 try:
@@ -304,6 +293,18 @@ class Em6BybitBroker:
                 except Exception:
                     continue
             rows = merged
+        else:
+            try:
+                rows = self._fetch_closed_pnl_page(start_ms=start_ms, limit=lim)
+            except Exception:
+                log.exception("get_closed_pnl all")
+                rows = []
+            if not rows:
+                try:
+                    rows = self._fetch_closed_pnl_page(start_ms=None, limit=lim)
+                except Exception:
+                    log.exception("get_closed_pnl all (no start)")
+                    rows = []
         out = [self._parse_closed_pnl_row(dict(r)) for r in rows]
         out.sort(key=lambda r: r.get("closed_at") or 0, reverse=True)
         seen: set[str] = set()
