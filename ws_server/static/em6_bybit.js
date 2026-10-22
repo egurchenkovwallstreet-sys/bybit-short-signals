@@ -133,9 +133,16 @@
 
   let chartInterval = "1";
   let lastChartCtx = null;
+  let selectedChartSymbol = null;
+  let chartLoadSeq = 0;
+  let chartRefreshTimer = null;
   let priceLines = [];
   const candleCache = new Map();
+  const ema60Cache = new Map();
   const CHART_GRID_LINE_CAP = 55;
+  const GRID_FLOOR_PCT = 6;
+  const GRID_STEP_PCT = 0.25;
+  const GRID_AWAY_PCT = 3;
 
   function findOpenTrade(symbol) {
     return (lastData?.open_trades || []).find((r) => r.symbol === symbol);
@@ -159,6 +166,7 @@
   }
 
   function parseCandleBars(rawCandles, interval) {
+    const BC = window.boardChart;
     const byTime = new Map();
     for (const candle of rawCandles || []) {
       const raw = candle.timestamp ?? candle.time ?? candle.t;
@@ -170,7 +178,8 @@
       const close = Number(candle.close ?? candle.c);
       if ([open, high, low, close].some((x) => Number.isNaN(x))) continue;
       const key = typeof time === "object" ? JSON.stringify(time) : String(time);
-      byTime.set(key, { time, open, high, low, close });
+      const sec = BC?.utcSecFromRaw ? BC.utcSecFromRaw(raw) : 0;
+      byTime.set(key, { time, open, high, low, close, _utcSec: sec || undefined });
     }
     return [...byTime.values()].sort((a, b) => {
       const ta = typeof a.time === "object" ? Date.UTC(a.time.year, a.time.month - 1, a.time.day) : a.time;
@@ -192,6 +201,80 @@
     const parsed = parseCandleBars(payload.candles || payload.klines || [], interval);
     if (parsed.length) candleCache.set(key, parsed);
     return parsed;
+  }
+
+  function stretchAtPrice(price, ema) {
+    const p = Number(price);
+    const e = Number(ema);
+    if (!e || e <= 0 || !p || p <= 0) return 0;
+    return (Math.abs(p - e) / e) * 100;
+  }
+
+  function gridAnchorStretch(peakStretch, currentStretch) {
+    const floor = Number(lastData?.summary?.stretch_floor_pct) || GRID_FLOOR_PCT;
+    return Math.max(floor, Number(peakStretch) || 0, Number(currentStretch) || 0);
+  }
+
+  function levelBandStretches(anchorStretch) {
+    const floor = Number(lastData?.summary?.stretch_floor_pct) || GRID_FLOOR_PCT;
+    const step = GRID_STEP_PCT;
+    const away = GRID_AWAY_PCT;
+    const hi = anchorStretch + away;
+    const seen = new Set();
+    for (let x = floor; x <= hi + 1e-9; x += step) {
+      seen.add(Math.round(x * 10000) / 10000);
+      seen.add(Math.round((x + step) * 10000) / 10000);
+    }
+    return [...seen].sort((a, b) => a - b);
+  }
+
+  async function resolveEma60(symbol, ctx, forceRefresh) {
+    const fromCtx = Number(ctx?.ema60 || 0);
+    if (fromCtx > 0 && !forceRefresh) return fromCtx;
+    const key = symbol;
+    if (!forceRefresh && ema60Cache.has(key)) return ema60Cache.get(key);
+    const bars5 = await fetchCandles(symbol, "5", forceRefresh);
+    const BC = window.boardChart;
+    if (!bars5.length || !BC?.ema333EngineLineData) {
+      return fromCtx;
+    }
+    const { center } = BC.ema333EngineLineData(bars5, { interval: "5" });
+    const ema = center.length ? Number(center[center.length - 1].value) : 0;
+    if (ema > 0) ema60Cache.set(key, ema);
+    return ema > 0 ? ema : fromCtx;
+  }
+
+  function enrichChartCtx(ctx) {
+    const sym = ctx?.symbol;
+    if (!sym) return ctx;
+    const cand = findCandidate(sym);
+    const out = { ...ctx };
+    if ((!out.ema60 || out.ema60 <= 0) && cand?.ema60) out.ema60 = cand.ema60;
+    if (!out.peak_stretch && cand?.peak_stretch) out.peak_stretch = cand.peak_stretch;
+    if (!out.levels?.length && cand?.levels?.length) out.levels = cand.levels;
+    return out;
+  }
+
+  function markChartSelectedRow(symbol) {
+    document.querySelectorAll(".em6b-chart-selected").forEach((el) => el.classList.remove("em6b-chart-selected"));
+    if (!symbol) return;
+    document.querySelectorAll(`tr.em6b-open-row[data-symbol="${symbol}"], tr.em6b-cand-row[data-symbol="${symbol}"]`).forEach((el) => {
+      el.classList.add("em6b-chart-selected");
+    });
+  }
+
+  function scheduleChartRefreshFromSnapshot() {
+    if (!selectedChartSymbol) return;
+    clearTimeout(chartRefreshTimer);
+    chartRefreshTimer = setTimeout(() => {
+      const trade = findOpenTrade(selectedChartSymbol);
+      if (trade) {
+        showEm6Chart({ ...trade, kind: "open" }, false);
+        return;
+      }
+      const cand = findCandidate(selectedChartSymbol);
+      if (cand) showEm6Chart({ ...cand, kind: "candidate" }, false);
+    }, 400);
   }
 
   function bindChartTf() {
@@ -307,18 +390,29 @@
     const title = document.getElementById("em6b-chart-title");
     const el = document.getElementById("em6b-chart");
     if (!wrap || !el || !ctx || !window.LightweightCharts) return;
-    lastChartCtx = ctx;
+    const loadSeq = ++chartLoadSeq;
+    const base = enrichChartCtx(ctx);
+    lastChartCtx = base;
+    selectedChartSymbol = base.symbol;
+    markChartSelectedRow(base.symbol);
     bindChartTf();
     wrap.hidden = false;
-    const kind = ctx.kind === "candidate" ? "претендент" : "позиция";
+    const kind = base.kind === "candidate" ? "претендент" : "позиция";
     const tfLabel = chartInterval === "1" ? "1m" : "5m";
-    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · ${tfLabel} · загрузка…`;
+    title.textContent = `${base.symbol} · ${base.side} · ${kind} · ${tfLabel} · загрузка…`;
 
     ensureChart(el);
     clearOverlays();
+    if (chartSeries) chartSeries.setData([]);
 
-    const bars = await fetchCandles(ctx.symbol, chartInterval, !!forceRefresh);
-    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · ${tfLabel} · EMA60 (5m) + сетка`;
+    const refresh = !!forceRefresh;
+    const [bars, ema] = await Promise.all([
+      fetchCandles(base.symbol, chartInterval, refresh),
+      resolveEma60(base.symbol, base, refresh),
+    ]);
+    if (loadSeq !== chartLoadSeq) return;
+
+    title.textContent = `${base.symbol} · ${base.side} · ${kind} · ${tfLabel} · EMA60 (5m) + сетка`;
     if (!bars.length) {
       title.textContent += " — нет свечей (обновите позже)";
       chartSeries.setData([]);
@@ -326,14 +420,20 @@
     }
     chartSeries.setData(bars);
 
-    const ema = Number(ctx.ema60 || 0);
+    const mark =
+      Number(base.mark_price || 0) > 0 ? Number(base.mark_price) : Number(bars[bars.length - 1].close);
     if (ema > 0) {
       addPriceLine(ema, "#f0b429", "EMA60 5m");
     }
 
-    const side = ctx.side || "short";
-    const bandRows = ctx.grid_levels?.length ? ctx.grid_levels : null;
-    let stretches = gridStretchLevels(ctx, bandRows);
+    const side = base.side || "short";
+    const bandRows = base.grid_levels?.length ? base.grid_levels : null;
+    let stretches = gridStretchLevels(base, bandRows);
+    if (!stretches.length && ema > 0) {
+      const cur = stretchAtPrice(mark, ema);
+      const peak = Number(base.peak_stretch) || cur;
+      stretches = levelBandStretches(gridAnchorStretch(peak, cur));
+    }
     if (stretches.length > CHART_GRID_LINE_CAP) {
       const step = Math.ceil(stretches.length / CHART_GRID_LINE_CAP);
       stretches = stretches.filter((_, i) => i % step === 0 || i === stretches.length - 1);
@@ -343,26 +443,26 @@
       if (p > 0) addPriceLine(p, "rgba(160, 120, 255, 0.85)", `${stretchPct}%`);
     });
 
-    const entry = Number(ctx.entry_price || 0);
+    const entry = Number(base.entry_price || 0);
     if (entry > 0) addPriceLine(entry, "#ffffff", "Entry");
-    const mark = Number(ctx.mark_price || 0);
     if (mark > 0) addPriceLine(mark, "#58a6ff", "Mark");
-    else if (bars.length) addPriceLine(bars[bars.length - 1].close, "#58a6ff", "Price");
 
     chartApi.timeScale().fitContent();
     requestAnimationFrame(() => {
+      if (loadSeq !== chartLoadSeq) return;
       if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, 360);
     });
   }
 
   function openChartForSymbol(symbol) {
+    selectedChartSymbol = symbol;
     const trade = findOpenTrade(symbol);
     if (trade) {
-      showEm6Chart({ ...trade, kind: "open" });
+      showEm6Chart({ ...trade, kind: "open" }, true);
       return;
     }
     const cand = findCandidate(symbol);
-    if (cand) showEm6Chart({ ...cand, kind: "candidate" });
+    if (cand) showEm6Chart({ ...cand, kind: "candidate" }, true);
   }
 
   function bindChartClicks() {
@@ -409,6 +509,7 @@
         <th>Symbol</th><th>Сторона</th><th>Вход</th><th>Mark</th><th>uPnL</th><th>ROE</th>
         <th>SL / trail</th><th>Max ROE</th><th>Номинал</th><th>Маржа</th><th>Открыта</th></tr></thead><tbody>${rows || "<tr><td colspan='11'>Нет открытых на бирже</td></tr>"}</tbody>`;
       bindChartClicks();
+      markChartSelectedRow(selectedChartSymbol);
     }
     if (closed) {
       const rows = (data.closed_trades || []).map(rowClosed).join("");
@@ -425,6 +526,7 @@
     renderSummary(data);
     renderCandidates(data);
     renderTables(data);
+    scheduleChartRefreshFromSnapshot();
   }
 
   async function fetchFallback() {

@@ -137,6 +137,28 @@ def snapshot_from_exchange(*, closed_limit: int = 200) -> dict[str, Any]:
     }
 
 
+def _merge_open_with_candidates(
+    rows: list[dict[str, Any]], candidates: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    by_sym = {str(c["symbol"]): c for c in candidates if c.get("symbol")}
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        sym = str(row.get("symbol") or "")
+        cand = by_sym.get(sym)
+        if not cand:
+            out.append(row)
+            continue
+        merged = dict(row)
+        if not merged.get("ema60") and cand.get("ema60"):
+            merged["ema60"] = cand["ema60"]
+        if not merged.get("peak_stretch") and cand.get("peak_stretch"):
+            merged["peak_stretch"] = cand["peak_stretch"]
+        if not merged.get("grid_levels") and cand.get("levels"):
+            merged["levels"] = cand["levels"]
+        out.append(merged)
+    return out
+
+
 def _merge_open_with_engine(
     exchange_rows: list[dict[str, Any]], engine_rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -181,7 +203,8 @@ def merge_public_snapshot(engine_cache: dict[str, Any] | None) -> dict[str, Any]
     try:
         positions = broker.linear_positions()
         ex_open = _open_rows_from_positions(positions)
-        out["open_trades"] = _merge_open_with_engine(ex_open, out["open_trades"])
+        merged = _merge_open_with_engine(ex_open, out["open_trades"])
+        out["open_trades"] = _merge_open_with_candidates(merged, out.get("candidates") or [])
         out["summary"]["open_trades"] = len(out["open_trades"])
         out["summary"]["total_unrealised_pnl"] = round(
             sum(float(r.get("unrealised_pnl") or 0) for r in out["open_trades"]), 2
