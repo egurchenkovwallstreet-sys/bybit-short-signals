@@ -52,6 +52,7 @@ class Hub:
         self.paper_dirty = False
         self.em6_bybit_dirty = False
         self.demo = False
+        self._had_live_board = False
         self.board_dirty = False
         self.pump_scan_dirty = False
         self.x2_retrace_dirty = False
@@ -181,7 +182,7 @@ class Hub:
                         exc,
                         exc_info=True,
                     )
-                    if not self.cache.signals:
+                    if not self._had_live_board and not self.cache.signals:
                         self.load_demo()
                     await asyncio.sleep(5)
         finally:
@@ -201,6 +202,8 @@ class Hub:
             config.REDIS_URL,
             decode_responses=True,
             socket_connect_timeout=2,
+            socket_keepalive=True,
+            health_check_interval=30,
         )
         try:
             await asyncio.wait_for(client.ping(), timeout=2)
@@ -212,6 +215,9 @@ class Hub:
             config.REDIS_CHANNEL_SIGNALS,
             config.REDIS_CHANNEL_MARKET,
         )
+        if self._had_live_board:
+            self.demo = False
+            self.board_dirty = True
         log.info("Веб-сервер слушает сигналы и рынок")
         try:
             while not self._stopped:
@@ -232,6 +238,7 @@ class Hub:
                 kind = self.cache.apply(payload)
                 if kind == "board":
                     self.demo = False
+                    self._had_live_board = True
                     self.board_dirty = True
                     self._stats_cache = None
                 elif kind == "pump_scan":
