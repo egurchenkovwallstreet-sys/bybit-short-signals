@@ -48,6 +48,12 @@ class Em6BybitStore:
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(em6_bybit_trades)")}
+        if "profit_lock_armed" not in cols:
+            conn.execute(
+                "ALTER TABLE em6_bybit_trades ADD COLUMN profit_lock_armed INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.commit()
         return conn
 
     def insert_open(self, conn: sqlite3.Connection, row: dict[str, Any]) -> int:
@@ -91,6 +97,7 @@ class Em6BybitStore:
             "margin",
             "entry_price",
             "qty",
+            "profit_lock_armed",
         }
         parts = []
         vals: list[Any] = []

@@ -24,6 +24,7 @@ from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
 from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
 from signal_engine.live.em6_bybit.stops import (
     em6_bybit_active_trail_roe_pct,
+    em6_bybit_profit_lock_trail_roe_pct,
     em6_bybit_trailing_stop_price,
     trail_roe_pct_from_trailing_distance,
 )
@@ -50,6 +51,7 @@ class LiveOpen:
     opened_at: int
     last_exchange_stop: float = 0.0
     last_trail_roe_pct: float = 0.0
+    profit_lock_armed: bool = False
     ema60: float = 0.0
     peak_stretch: float = 0.0
     grid_levels: list[dict[str, float]] = field(default_factory=list)
@@ -166,6 +168,7 @@ class Em6BybitStrategy:
             worst_price=float(row["worst_price"]),
             opened_at=int(row["opened_at"]),
             last_exchange_stop=float(row["last_exchange_stop"] or 0),
+            profit_lock_armed=bool(int(row.get("profit_lock_armed") or 0)),
         )
 
     def _entry_fee(self, entry: float, qty: float) -> float:
@@ -284,7 +287,8 @@ class Em6BybitStrategy:
                 "max_roe": round(max_roe, 2),
                 "min_roe": round(self._min_roe(live), 2) if live else round(min(0.0, roe), 2),
                 "opened_at": int(live.opened_at if live else pos.get("open_time_ms") or 0),
-                "trail_armed": roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
+                "trail_armed": bool(live and live.profit_lock_armed)
+                or roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
                 "source": "bybit",
                 "ema60": live.ema60 if live else 0.0,
                 "grid_levels": grid,
@@ -304,11 +308,22 @@ class Em6BybitStrategy:
         ref_price: float | None = None,
         cur_roe: float | None = None,
     ) -> None:
+        if live.profit_lock_armed:
+            return
         ref = ref_price if ref_price is not None and ref_price > 0 else self._ref_price(live, state)
         if ref <= 0:
             return
         roe = cur_roe if cur_roe is not None else self._current_roe(live, state)
-        trail_roe = em6_bybit_active_trail_roe_pct(roe)
+        arm = config.em6_bybit_trail_profit_arm_roe()
+        lock = config.em6_bybit_trail_lock_roe()
+        if roe + 1e-6 >= arm:
+            trail_roe = em6_bybit_profit_lock_trail_roe_pct(roe)
+            one_shot = True
+        else:
+            trail_roe = em6_bybit_active_trail_roe_pct(roe)
+            one_shot = False
+            if live.last_trail_roe_pct > 0 and abs(live.last_trail_roe_pct - trail_roe) < 1e-6:
+                return
         try:
             resp = self.broker.set_trailing_stop_roe(
                 live.symbol,
@@ -323,19 +338,31 @@ class Em6BybitStrategy:
             prev = live.last_trail_roe_pct
             live.last_trail_roe_pct = trail_roe
             live.last_exchange_stop = live.stop_price
-            self.store.update_open(
-                self._conn,
-                live.id,
-                {"stop_price": live.stop_price, "last_exchange_stop": live.last_exchange_stop},
-            )
-            if prev <= 0 or abs(prev - trail_roe) > 1e-6:
+            fields: dict[str, Any] = {
+                "stop_price": live.stop_price,
+                "last_exchange_stop": live.last_exchange_stop,
+            }
+            if one_shot:
+                live.profit_lock_armed = True
+                fields["profit_lock_armed"] = 1
+            self.store.update_open(self._conn, live.id, fields)
+            if one_shot:
                 log.info(
-                    "em6 bybit %s: trail %.0f%% ROE @ price %.8g (now ROE %.2f%%, was trail %.0f%%)",
+                    "em6 bybit %s: profit lock +%.0f%% ROE — trail %.0f%% @ %.8g (ROE %.2f%%), "
+                    "больше не трогаем",
+                    live.symbol,
+                    lock,
+                    trail_roe,
+                    ref,
+                    roe,
+                )
+            elif prev <= 0 or abs(prev - trail_roe) > 1e-6:
+                log.info(
+                    "em6 bybit %s: trail %.0f%% ROE @ price %.8g (now ROE %.2f%%)",
                     live.symbol,
                     trail_roe,
                     ref,
                     roe,
-                    prev if prev > 0 else trail_roe,
                 )
         except Exception:
             log.exception("em6 bybit: trailing %s", live.symbol)

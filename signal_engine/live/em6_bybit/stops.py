@@ -1,4 +1,4 @@
-"""EMA6 Bybit: trailing от текущей цены; −50% ROE → с +20% lock +5% → с +50% dist 10%."""
+"""EMA6 Bybit: −50% ROE до +20%; один раз trailing с lock +5% ROE — дальше только биржа."""
 
 from __future__ import annotations
 
@@ -14,23 +14,18 @@ from signal_engine.paper.position import (
 
 
 def em6_bybit_active_trail_roe_pct(current_roe: float) -> float:
-    """Дистанция trailingStop (п.п. ROE) от **текущей** цены.
+    """Дистанция trailing до arm (+20% ROE): только широкий 50%."""
+    if current_roe + 1e-6 >= config.em6_bybit_trail_profit_arm_roe():
+        return em6_bybit_profit_lock_trail_roe_pct(current_roe)
+    return config.em6_bybit_trail_initial_roe()
 
-    • Текущий ROE < +20%: 50% ROE (широкий хвост).
-    • +20% … +50%: хвост 15 п.п. → стоп на +5% ROE при +20%, дальше ползёт вверх с ценой.
-    • ≥ +50%: 10% ROE от текущей цены.
-    """
-    initial = config.em6_bybit_trail_initial_roe()
+
+def em6_bybit_profit_lock_trail_roe_pct(current_roe: float) -> float:
+    """Один раз при ROE ≥ arm: хвост = ROE − lock (+5%), стоп на lock; дальше не меняем."""
     arm = config.em6_bybit_trail_profit_arm_roe()
     lock = config.em6_bybit_trail_lock_roe()
-    tight_arm = config.em6_bybit_trail_tight_arm_roe()
-    tight_dist = config.em6_bybit_trail_tight_dist_roe()
-    if current_roe + 1e-6 >= tight_arm:
-        return tight_dist
-    if current_roe + 1e-6 >= arm:
-        gap = max(0.1, arm - lock)
-        return max(gap, current_roe - lock)
-    return initial
+    gap = max(0.1, arm - lock)
+    return max(gap, current_roe - lock)
 
 
 def em6_bybit_trailing_stop_price(
