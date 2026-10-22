@@ -1993,6 +1993,19 @@ th { cursor: pointer; color: var(--muted); }
 .em6b-cand-grid .em6b-cand-pick { cursor: pointer; }
 .em6b-cand-grid .em6b-cand-pick:hover { color: #58a6ff; }
 .em6b-chart-wrap { margin-top: 12px; }
+.em6b-chart-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.em6b-chart-head h4 { margin: 0; flex: 1 1 200px; }
+.em6b-chart-tf { display: flex; gap: 4px; }
+.em6b-iv-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #2a3544);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted, #9aa4b2);
+  cursor: pointer;
+}
+.em6b-iv-btn.active { background: rgba(88, 166, 255, 0.2); color: #58a6ff; border-color: rgba(88, 166, 255, 0.45); }
 .em6b-chart { width: 100%; min-height: 360px; border-radius: 10px; overflow: hidden; }
 .em6b-source-note { margin: 0 0 6px; font-size: 12px; color: var(--muted); }
 .paper-card .hint { display: block; font-size: 10px; color: var(--muted); margin-top: 4px; }

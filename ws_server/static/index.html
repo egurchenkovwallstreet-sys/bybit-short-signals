@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261022chart">
+  <link rel="stylesheet" href="/static/styles.css?v=20261022chart1m">
 </head>
 <body>
   <header class="topbar">
@@ -104,10 +104,16 @@
     <section class="paper-panel">
       <h3>Открытые позиции (Bybit Demo)</h3>
       <p id="em6b-source-note" class="quiet em6b-source-note">—</p>
-      <p class="quiet">Клик по строке — график 5m, EMA60 и сетка (как у претендентов).</p>
+      <p class="quiet">Клик по открытой сделке или претенденту — график (по умолчанию 1m), линия EMA60 с 5m и сетка отрыва.</p>
       <div class="table-wrap paper-scroll"><table id="em6b-open" class="paper-table em6b-open-selectable"></table></div>
       <div id="em6b-chart-wrap" class="em6b-chart-wrap" hidden>
-        <h4 id="em6b-chart-title"></h4>
+        <div class="em6b-chart-head">
+          <h4 id="em6b-chart-title"></h4>
+          <div class="em6b-chart-tf" role="group" aria-label="Таймфрейм">
+            <button type="button" class="em6b-iv-btn active" data-iv="1">1m</button>
+            <button type="button" class="em6b-iv-btn" data-iv="5">5m</button>
+          </div>
+        </div>
         <div id="em6b-chart" class="em6b-chart"></div>
       </div>
     </section>
@@ -136,7 +142,7 @@
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/paper_test.js?v=20261019pnlglyph"></script>
-  <script src="/static/em6_bybit.js?v=20261022chart"></script>
+  <script src="/static/em6_bybit.js?v=20261022chart1m"></script>
   <script src="/static/board_chart.js?v=20261019ema333engine"></script>
   <script src="/static/app.js?v=20261022em6tab"></script>
 </body>

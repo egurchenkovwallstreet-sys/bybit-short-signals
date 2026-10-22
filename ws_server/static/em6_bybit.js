@@ -131,7 +131,8 @@
     bindChartClicks();
   }
 
-  const CHART_IV = "5";
+  let chartInterval = "1";
+  let lastChartCtx = null;
   let priceLines = [];
 
   function findOpenTrade(symbol) {
@@ -176,12 +177,30 @@
     });
   }
 
-  async function fetchCandles(symbol) {
-    const q = new URLSearchParams({ interval: CHART_IV, bars: "240", refresh: "1" });
+  async function fetchCandles(symbol, interval) {
+    const bars = interval === "1" ? "360" : "240";
+    const q = new URLSearchParams({ interval, bars, refresh: "1" });
     const resp = await fetch(`/api/klines/${encodeURIComponent(symbol)}?${q}`);
     if (!resp.ok) return [];
     const payload = await resp.json();
-    return parseCandleBars(payload.candles || payload.klines || [], CHART_IV);
+    return parseCandleBars(payload.candles || payload.klines || [], interval);
+  }
+
+  function bindChartTf() {
+    const wrap = document.getElementById("em6b-chart-wrap");
+    if (!wrap || wrap.dataset.tfBound) return;
+    wrap.dataset.tfBound = "1";
+    wrap.querySelectorAll(".em6b-iv-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const iv = btn.getAttribute("data-iv") || "1";
+        if (iv === chartInterval) return;
+        chartInterval = iv;
+        wrap.querySelectorAll(".em6b-iv-btn").forEach((b) => {
+          b.classList.toggle("active", b.getAttribute("data-iv") === iv);
+        });
+        if (lastChartCtx) showEm6Chart(lastChartCtx);
+      });
+    });
   }
 
   function priceAtStretch(ema, side, stretchPct) {
@@ -277,14 +296,17 @@
     const title = document.getElementById("em6b-chart-title");
     const el = document.getElementById("em6b-chart");
     if (!wrap || !el || !ctx || !window.LightweightCharts) return;
+    lastChartCtx = ctx;
+    bindChartTf();
     wrap.hidden = false;
     const kind = ctx.kind === "candidate" ? "претендент" : "позиция";
-    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · EMA60 + сетка`;
+    const tfLabel = chartInterval === "1" ? "1m" : "5m";
+    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · ${tfLabel} · EMA60 (5m) + сетка`;
 
     ensureChart(el);
     clearOverlays();
 
-    const bars = await fetchCandles(ctx.symbol);
+    const bars = await fetchCandles(ctx.symbol, chartInterval);
     if (!bars.length) {
       title.textContent += " — нет свечей (обновите позже)";
       chartSeries.setData([]);
@@ -294,32 +316,18 @@
 
     const ema = Number(ctx.ema60 || 0);
     if (ema > 0) {
-      const emaLine = chartApi.addLineSeries({ color: "#f0b429", lineWidth: 2, title: "EMA60" });
-      lineSeries.push(emaLine);
-      emaLine.setData(bars.map((c) => ({ time: c.time, value: ema })));
+      addPriceLine(ema, "#f0b429", "EMA60 5m");
     }
 
     const grids = ctx.grid_levels?.length ? ctx.grid_levels : gridLevelsFromCandidate(ctx);
-    grids.forEach((lv, i) => {
+    grids.forEach((lv) => {
       const p = Number(lv.price_lo);
-      if (!p) return;
-      const s = chartApi.addLineSeries({
-        color: i % 2 ? "rgba(120,160,255,0.55)" : "rgba(160,120,255,0.45)",
-        lineWidth: 1,
-        lineStyle: 2,
-        title: `${lv.stretch_lo}–${lv.stretch_hi}%`,
-      });
-      lineSeries.push(s);
-      s.setData(bars.map((c) => ({ time: c.time, value: p })));
       const ph = Number(lv.price_hi);
-      if (ph && Math.abs(ph - p) > 1e-12) {
-        const s2 = chartApi.addLineSeries({
-          color: "rgba(120,160,255,0.25)",
-          lineWidth: 1,
-          lineStyle: 2,
-        });
-        lineSeries.push(s2);
-        s2.setData(bars.map((c) => ({ time: c.time, value: ph })));
+      if (p > 0) {
+        addPriceLine(p, "rgba(160, 120, 255, 0.85)", `${lv.stretch_lo}–${lv.stretch_hi}%`);
+      }
+      if (ph > 0 && Math.abs(ph - p) > 1e-12) {
+        addPriceLine(ph, "rgba(120, 160, 255, 0.45)", "");
       }
     });
 
