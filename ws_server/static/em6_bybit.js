@@ -23,6 +23,7 @@
   let lastData = null;
   let chartApi = null;
   let chartSeries = null;
+  let ema60Series = null;
   let lineSeries = [];
 
   function renderSummary(data) {
@@ -228,6 +229,31 @@
     return [...seen].sort((a, b) => a - b);
   }
 
+  function timeSortKey(time) {
+    if (typeof time === "object") return Date.UTC(time.year, time.month - 1, time.day);
+    return Number(time);
+  }
+
+  /** Линия EMA60 (5m) на таймлайне графика (1m или 5m). */
+  function ema60LineOnChart(chartBars, bars5, chartInterval) {
+    const BC = window.boardChart;
+    if (!chartBars?.length || !bars5?.length || !BC?.ema333EngineLineData) return [];
+    const src5 = chartInterval === "5" ? chartBars : bars5;
+    const { center } = BC.ema333EngineLineData(src5, { interval: "5" });
+    if (!center.length) return [];
+    if (chartInterval === "5") return center;
+    let j = 0;
+    const out = [];
+    for (const bar of chartBars) {
+      const tk = timeSortKey(bar.time);
+      while (j + 1 < center.length && timeSortKey(center[j + 1].time) <= tk) j += 1;
+      if (timeSortKey(center[j].time) <= tk) {
+        out.push({ time: bar.time, value: center[j].value });
+      }
+    }
+    return out;
+  }
+
   async function resolveEma60(symbol, ctx, forceRefresh) {
     const fromCtx = Number(ctx?.ema60 || 0);
     if (fromCtx > 0 && !forceRefresh) return fromCtx;
@@ -342,6 +368,13 @@
       wickUpColor: "#26a69a",
       wickDownColor: "#ef5350",
     });
+    ema60Series = chartApi.addLineSeries({
+      color: "#f0b429",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: "EMA60 5m",
+    });
     const resize = () => {
       if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, 360);
     };
@@ -366,6 +399,7 @@
       }
     });
     priceLines = [];
+    if (ema60Series) ema60Series.setData([]);
   }
 
   function addPriceLine(price, color, title) {
@@ -406,10 +440,9 @@
     if (chartSeries) chartSeries.setData([]);
 
     const refresh = !!forceRefresh;
-    const [bars, ema] = await Promise.all([
-      fetchCandles(base.symbol, chartInterval, refresh),
-      resolveEma60(base.symbol, base, refresh),
-    ]);
+    const bars = await fetchCandles(base.symbol, chartInterval, refresh);
+    const bars5 =
+      chartInterval === "5" ? bars : await fetchCandles(base.symbol, "5", refresh);
     if (loadSeq !== chartLoadSeq) return;
 
     title.textContent = `${base.symbol} · ${base.side} · ${kind} · ${tfLabel} · EMA60 (5m) + сетка`;
@@ -420,11 +453,17 @@
     }
     chartSeries.setData(bars);
 
+    const emaLine = ema60LineOnChart(bars, bars5, chartInterval);
+    if (ema60Series && emaLine.length) {
+      ema60Series.setData(emaLine);
+    }
+    const ema =
+      emaLine.length > 0
+        ? Number(emaLine[emaLine.length - 1].value)
+        : await resolveEma60(base.symbol, base, refresh);
+
     const mark =
       Number(base.mark_price || 0) > 0 ? Number(base.mark_price) : Number(bars[bars.length - 1].close);
-    if (ema > 0) {
-      addPriceLine(ema, "#f0b429", "EMA60 5m");
-    }
 
     const side = base.side || "short";
     const bandRows = base.grid_levels?.length ? base.grid_levels : null;

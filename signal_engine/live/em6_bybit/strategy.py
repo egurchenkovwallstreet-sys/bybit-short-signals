@@ -10,6 +10,7 @@ from typing import Any
 import config
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
 from signal_engine.live.em6_bybit.grid_entry import (
+    entry_price_ok,
     CandidateWatch,
     band_lo,
     build_grid_levels,
@@ -587,11 +588,26 @@ class Em6BybitStrategy:
         price = float(state.last_price or 0)
         if price <= 0:
             return
+        w = self._watch.get(symbol)
+        ema_pre = float(w.ema60 if w and w.ema60 else 0)
+        if ema_pre <= 0:
+            row = self._stretch_row(symbol, state, now_ms)
+            if row:
+                ema_pre = row[3]
+        if ema_pre > 0 and not entry_price_ok(side, price, ema_pre):
+            log.info(
+                "em6 bybit skip entry %s %s: price %.8g vs EMA60 %.8g (min stretch %.1f%%)",
+                side,
+                symbol,
+                price,
+                ema_pre,
+                config.em6_bybit_min_entry_stretch_pct(),
+            )
+            return
         if self._wallet_avail + 1e-9 < config.em6_bybit_margin_usd():
             return
         lev = config.em6_bybit_leverage()
-        w = self._watch.get(symbol)
-        ema = float(w.ema60 if w and w.ema60 else 0)
+        ema = ema_pre if ema_pre > 0 else 0.0
         if ema <= 0:
             row = self._stretch_row(symbol, state, now_ms)
             if row:

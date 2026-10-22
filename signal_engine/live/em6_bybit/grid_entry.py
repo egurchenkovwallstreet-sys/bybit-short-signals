@@ -25,6 +25,21 @@ def stretch_at_price(price: float, ema: float) -> float:
     return abs(price - ema) / ema * 100.0
 
 
+def entry_price_ok(side: str, price: float, ema: float) -> bool:
+    """Вход: сторона относительно EMA и отрыв не ближе MIN_ENTRY_STRETCH."""
+    if side not in ("long", "short") or ema <= 0 or price <= 0:
+        return False
+    min_st = config.em6_bybit_min_entry_stretch_pct()
+    st = stretch_at_price(price, ema)
+    if st + 1e-9 < min_st:
+        return False
+    if side == "long" and price >= ema - 1e-12:
+        return False
+    if side == "short" and price <= ema + 1e-12:
+        return False
+    return True
+
+
 def grid_anchor_stretch(peak_stretch: float, current_stretch: float) -> float:
     """Верх сетки: max(пик, текущий отрыв), не ниже пола мониторинга."""
     floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
@@ -169,7 +184,7 @@ class CandidateWatch:
         floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
         self.last_1m_ts = bar_ts
         if target - 1e-9 <= close_band <= target + step + 1e-9:
-            return True
+            return entry_price_ok(self.side, close_px, ema)
         if (
             self.phase == "cross_toward_ema"
             and close_band + 1e-9 < target
@@ -177,7 +192,7 @@ class CandidateWatch:
             and (self.peak_stretch + 1e-9 >= prev_band_lo or self.away_max_band_lo + 1e-9 >= prev_band_lo)
         ):
             self.armed_entry_band_lo = close_band
-            return True
+            return entry_price_ok(self.side, close_px, ema)
         return False
 
     def start_cooldown(self, now_ms: int) -> None:

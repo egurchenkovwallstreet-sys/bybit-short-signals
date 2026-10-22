@@ -8,6 +8,7 @@ from signal_engine.live.em6_bybit.grid_entry import (
     CandidateWatch,
     band_lo,
     build_grid_levels,
+    entry_price_ok,
     grid_anchor_stretch,
     level_bands,
     pick_top_candidates,
@@ -41,6 +42,17 @@ class TestGridBands(unittest.TestCase):
         ]
         top = pick_top_candidates(rows, limit=2)
         self.assertEqual([t[0] for t in top], ["B", "A"])
+
+
+class TestEntryStretchGate(unittest.TestCase):
+    def test_min_five_pct_and_side(self) -> None:
+        ema = 100.0
+        self.assertTrue(entry_price_ok("long", 94.0, ema))
+        self.assertFalse(entry_price_ok("long", 96.5, ema))
+        self.assertFalse(entry_price_ok("long", 101.0, ema))
+        self.assertTrue(entry_price_ok("short", 106.0, ema))
+        self.assertFalse(entry_price_ok("short", 103.0, ema))
+        self.assertFalse(entry_price_ok("short", 99.0, ema))
 
 
 class TestCandidateFsm(unittest.TestCase):
