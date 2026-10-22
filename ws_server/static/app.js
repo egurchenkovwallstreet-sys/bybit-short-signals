@@ -180,7 +180,7 @@ function connectSocket() {
 }
 
 connectSocket();
-showTab("paper");
+showTab("em6-bybit");
 
 function setDemo(demo) {
   state.demo = !!demo;

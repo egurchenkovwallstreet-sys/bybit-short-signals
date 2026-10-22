@@ -76,10 +76,8 @@ async def paper_snapshot() -> dict[str, Any]:
 
 @app.get("/api/em6-bybit/snapshot")
 async def em6_bybit_snapshot() -> dict[str, Any]:
-    data = app.state.hub.em6_bybit.view()
-    if data:
-        return data
-    return await asyncio.to_thread(em6_bybit_db.snapshot_from_db)
+    cache = app.state.hub.em6_bybit.view()
+    return await asyncio.to_thread(em6_bybit_db.snapshot_for_ui, cache)
 
 
 @app.get("/api/paper/trades")

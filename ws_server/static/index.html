@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261022em6ex">
+  <link rel="stylesheet" href="/static/styles.css?v=20261022chart">
 </head>
 <body>
   <header class="topbar">
@@ -97,13 +97,14 @@
     <div id="em6b-summary" class="paper-cards"></div>
     <section class="paper-panel">
       <h3>Претенденты (по колонкам отрыва)</h3>
+      <p class="quiet">Клик по строке или монете в колонке — тот же график 5m ниже.</p>
       <div id="em6b-candidates-grid" class="em6b-cand-grid"></div>
       <div class="table-wrap paper-scroll"><table id="em6b-candidates" class="paper-table"></table></div>
     </section>
     <section class="paper-panel">
       <h3>Открытые позиции (Bybit Demo)</h3>
       <p id="em6b-source-note" class="quiet em6b-source-note">—</p>
-      <p class="quiet">Клик по строке — график 5m с уровнями сетки и EMA60.</p>
+      <p class="quiet">Клик по строке — график 5m, EMA60 и сетка (как у претендентов).</p>
       <div class="table-wrap paper-scroll"><table id="em6b-open" class="paper-table em6b-open-selectable"></table></div>
       <div id="em6b-chart-wrap" class="em6b-chart-wrap" hidden>
         <h4 id="em6b-chart-title"></h4>
@@ -135,8 +136,8 @@
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/paper_test.js?v=20261019pnlglyph"></script>
-  <script src="/static/em6_bybit.js?v=20261022margin"></script>
+  <script src="/static/em6_bybit.js?v=20261022chart"></script>
   <script src="/static/board_chart.js?v=20261019ema333engine"></script>
-  <script src="/static/app.js?v=20261022em6stats"></script>
+  <script src="/static/app.js?v=20261022em6tab"></script>
 </body>
 </html>

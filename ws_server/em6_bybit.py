@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from signal_engine.live.em6_bybit.board import snapshot_from_db_fallback
+from signal_engine.live.em6_bybit.board import merge_public_snapshot, snapshot_from_db_fallback
 
 
 class Em6BybitCache:
@@ -25,3 +25,7 @@ class Em6BybitCache:
 
 def snapshot_from_db() -> dict[str, Any]:
     return snapshot_from_db_fallback()
+
+
+def snapshot_for_ui(engine_cache: dict[str, Any] | None) -> dict[str, Any]:
+    return merge_public_snapshot(engine_cache)

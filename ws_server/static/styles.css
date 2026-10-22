@@ -1988,6 +1988,10 @@ th { cursor: pointer; color: var(--muted); }
 .em6b-cand-grid ul { margin: 0; padding-left: 16px; font-size: 12px; }
 .em6b-open-selectable tbody tr.em6b-open-row { cursor: pointer; }
 .em6b-open-selectable tbody tr.em6b-open-row:hover { background: rgba(120, 160, 255, 0.08); }
+#em6b-candidates tbody tr.em6b-cand-row { cursor: pointer; }
+#em6b-candidates tbody tr.em6b-cand-row:hover { background: rgba(120, 160, 255, 0.08); }
+.em6b-cand-grid .em6b-cand-pick { cursor: pointer; }
+.em6b-cand-grid .em6b-cand-pick:hover { color: #58a6ff; }
 .em6b-chart-wrap { margin-top: 12px; }
 .em6b-chart { width: 100%; min-height: 360px; border-radius: 10px; overflow: hidden; }
 .em6b-source-note { margin: 0 0 6px; font-size: 12px; color: var(--muted); }

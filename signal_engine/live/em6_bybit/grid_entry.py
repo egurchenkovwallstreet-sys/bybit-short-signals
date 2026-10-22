@@ -140,6 +140,7 @@ class CandidateWatch:
             "stall": [self.stall_band_lo, self.stall_band_hi],
             "armed_band_lo": self.armed_entry_band_lo,
             "since_ms": self.since_ms,
+            "ema60": round(self.ema60, 8) if self.ema60 else 0.0,
             "levels": level_bands(max(self.peak_stretch, self.last_stretch)),
         }
 

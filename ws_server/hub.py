@@ -13,7 +13,7 @@ from typing import Any
 
 import config
 from ws_server.cache import MarketCache
-from ws_server.em6_bybit import Em6BybitCache, snapshot_from_db
+from ws_server.em6_bybit import Em6BybitCache, snapshot_for_ui
 from ws_server.paper import PaperCache
 from ws_server.demo import demo_board, demo_market, demo_stats
 from ws_server.stats import compute_stats
@@ -103,7 +103,7 @@ class Hub:
             "demo": self.demo,
             "stats": self.stats(),
             "paper_test": self.paper.view(),
-            "em6_bybit": self.em6_bybit.view() or snapshot_from_db(),
+            "em6_bybit": snapshot_for_ui(self.em6_bybit.view()),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
@@ -291,7 +291,8 @@ class Hub:
                     if paper is not None:
                         await client.websocket.send_json({"type": "paper_test", "data": paper})
                     if em6b is not None:
-                        await client.websocket.send_json({"type": "em6_bybit", "data": em6b})
+                        payload = snapshot_for_ui(em6b)
+                        await client.websocket.send_json({"type": "em6_bybit", "data": payload})
                 except Exception:
                     self.clients.discard(client)
 

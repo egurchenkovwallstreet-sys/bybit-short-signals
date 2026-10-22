@@ -33,8 +33,9 @@
     const pnlOpen = Number(s.total_unrealised_pnl || 0);
     const src = s.data_source === "bybit" ? "Bybit Demo" : "локальный журнал";
     const marginAvail = Number(s.wallet_available ?? s.wallet_equity ?? 0);
+    const balText = marginAvail > 0 ? `$${num(marginAvail)}` : "—";
     el.innerHTML = `
-      <div class="paper-card em6b-balance-main"><span class="label">Доступная маржа USDT</span><div class="value">$${num(marginAvail)}</div><span class="hint">${src}</span></div>
+      <div class="paper-card em6b-balance-main"><span class="label">Доступная маржа USDT</span><div class="value">${balText}</div><span class="hint">${src}</span></div>
       <div class="paper-card"><span class="label">uPnL открытых</span><div class="value ${pnlClass(pnlOpen)}">$${num(pnlOpen)}</div></div>
       <div class="paper-card"><span class="label">Открыто</span><div class="value">${s.open_trades ?? 0}</div></div>
       <div class="paper-card"><span class="label">Закрыто</span><div class="value">${s.closed_trades ?? 0}</div></div>
@@ -91,8 +92,8 @@
   }
 
   function rowCand(c) {
-    return `<tr>
-      <td>${c.symbol}</td>
+    return `<tr class="em6b-cand-row" data-symbol="${c.symbol}">
+      <td><strong>${c.symbol}</strong></td>
       <td>${sideLabel(c.side)}</td>
       <td>${pct(c.stretch_pct)}</td>
       <td>${c.stretch_column || "—"}</td>
@@ -114,7 +115,7 @@
           <ul>${(col.candidates || [])
             .map(
               (c) =>
-                `<li><strong>${c.symbol}</strong> ${c.side} · ${Number(c.stretch_pct).toFixed(2)}% · ${c.phase}</li>`
+                `<li class="em6b-cand-pick" data-symbol="${c.symbol}"><strong>${c.symbol}</strong> ${c.side} · ${Number(c.stretch_pct).toFixed(2)}% · ${c.phase}</li>`
             )
             .join("") || "<li class='quiet'>—</li>"}</ul>
         </div>`
@@ -127,13 +128,115 @@
         <th>Symbol</th><th>Сторона</th><th>Отрыв</th><th>Колонка</th><th>Фаза</th>
         <th>Пик</th><th>Arm band</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>Нет претендентов (≥4%)</td></tr>"}</tbody>`;
     }
+    bindChartClicks();
   }
+
+  const CHART_IV = "5";
+  let priceLines = [];
 
   function findOpenTrade(symbol) {
     return (lastData?.open_trades || []).find((r) => r.symbol === symbol);
   }
 
-  function clearLevelLines() {
+  function findCandidate(symbol) {
+    return (lastData?.candidates || []).find((r) => r.symbol === symbol);
+  }
+
+  function candleTime(raw, interval) {
+    const BC = window.boardChart;
+    if (BC?.candleTime) return BC.candleTime(raw, interval);
+    const n = Number(raw);
+    const sec = n > 1e12 ? Math.floor(n / 1000) : Math.floor(n);
+    if (!sec) return 0;
+    if (interval === "D") {
+      const d = new Date(sec * 1000);
+      return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+    }
+    return sec + 3 * 3600;
+  }
+
+  function parseCandleBars(rawCandles, interval) {
+    const byTime = new Map();
+    for (const candle of rawCandles || []) {
+      const raw = candle.timestamp ?? candle.time ?? candle.t;
+      const time = candleTime(raw, interval);
+      if (!time) continue;
+      const open = Number(candle.open ?? candle.o);
+      const high = Number(candle.high ?? candle.h);
+      const low = Number(candle.low ?? candle.l);
+      const close = Number(candle.close ?? candle.c);
+      if ([open, high, low, close].some((x) => Number.isNaN(x))) continue;
+      const key = typeof time === "object" ? JSON.stringify(time) : String(time);
+      byTime.set(key, { time, open, high, low, close });
+    }
+    return [...byTime.values()].sort((a, b) => {
+      const ta = typeof a.time === "object" ? Date.UTC(a.time.year, a.time.month - 1, a.time.day) : a.time;
+      const tb = typeof b.time === "object" ? Date.UTC(b.time.year, b.time.month - 1, b.time.day) : b.time;
+      return ta - tb;
+    });
+  }
+
+  async function fetchCandles(symbol) {
+    const q = new URLSearchParams({ interval: CHART_IV, bars: "240", refresh: "1" });
+    const resp = await fetch(`/api/klines/${encodeURIComponent(symbol)}?${q}`);
+    if (!resp.ok) return [];
+    const payload = await resp.json();
+    return parseCandleBars(payload.candles || payload.klines || [], CHART_IV);
+  }
+
+  function priceAtStretch(ema, side, stretchPct) {
+    const e = Number(ema);
+    const s = Number(stretchPct);
+    if (!e || e <= 0) return 0;
+    if (side === "long") return e * (1 - s / 100);
+    return e * (1 + s / 100);
+  }
+
+  function gridLevelsFromCandidate(c) {
+    const ema = Number(c.ema60 || 0);
+    if (!ema) return [];
+    const side = c.side;
+    const out = [];
+    for (const band of c.levels || []) {
+      const lo = Array.isArray(band) ? band[0] : band.stretch_lo;
+      const hi = Array.isArray(band) ? band[1] : band.stretch_hi;
+      if (lo == null) continue;
+      const hiV = hi != null ? hi : lo;
+      out.push({
+        stretch_lo: lo,
+        stretch_hi: hiV,
+        price_lo: priceAtStretch(ema, side, lo),
+        price_hi: priceAtStretch(ema, side, hiV),
+      });
+    }
+    return out;
+  }
+
+  function ensureChart(el) {
+    if (chartApi) return;
+    el.innerHTML = "";
+    const w = el.clientWidth || el.parentElement?.clientWidth || 640;
+    chartApi = window.LightweightCharts.createChart(el, {
+      width: w,
+      height: 360,
+      layout: { background: { color: "#0f1419" }, textColor: "#9aa4b2" },
+      grid: { vertLines: { color: "#1e2834" }, horzLines: { color: "#1e2834" } },
+    });
+    chartSeries = chartApi.addCandlestickSeries({
+      upColor: "#26a69a",
+      downColor: "#ef5350",
+      borderVisible: false,
+      wickUpColor: "#26a69a",
+      wickDownColor: "#ef5350",
+    });
+    const resize = () => {
+      if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, 360);
+    };
+    if (typeof ResizeObserver !== "undefined") new ResizeObserver(resize).observe(el);
+    requestAnimationFrame(resize);
+  }
+
+  function clearOverlays() {
     lineSeries.forEach((s) => {
       try {
         chartApi.removeSeries(s);
@@ -142,56 +245,62 @@
       }
     });
     lineSeries = [];
+    priceLines.forEach((pl) => {
+      try {
+        chartSeries.removePriceLine(pl);
+      } catch (_) {
+        /* ignore */
+      }
+    });
+    priceLines = [];
   }
 
-  async function showTradeChart(trade) {
+  function addPriceLine(price, color, title) {
+    const p = Number(price);
+    if (!chartSeries || !p || p <= 0) return;
+    try {
+      priceLines.push(
+        chartSeries.createPriceLine({
+          price: p,
+          color,
+          lineWidth: 1,
+          title,
+        })
+      );
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  async function showEm6Chart(ctx) {
     const wrap = document.getElementById("em6b-chart-wrap");
     const title = document.getElementById("em6b-chart-title");
     const el = document.getElementById("em6b-chart");
-    if (!wrap || !el || !trade || !window.LightweightCharts) return;
+    if (!wrap || !el || !ctx || !window.LightweightCharts) return;
     wrap.hidden = false;
-    title.textContent = `${trade.symbol} · ${trade.side} · EMA60 + уровни отрыва`;
+    const kind = ctx.kind === "candidate" ? "претендент" : "позиция";
+    title.textContent = `${ctx.symbol} · ${ctx.side} · ${kind} · EMA60 + сетка`;
 
-    if (!chartApi) {
-      el.innerHTML = "";
-      chartApi = window.LightweightCharts.createChart(el, {
-        width: el.clientWidth || 640,
-        height: 360,
-        layout: { background: { color: "#0f1419" }, textColor: "#9aa4b2" },
-        grid: { vertLines: { color: "#1e2834" }, horzLines: { color: "#1e2834" } },
-      });
-      chartSeries = chartApi.addCandlestickSeries({
-        upColor: "#26a69a",
-        downColor: "#ef5350",
-        borderVisible: false,
-        wickUpColor: "#26a69a",
-        wickDownColor: "#ef5350",
-      });
+    ensureChart(el);
+    clearOverlays();
+
+    const bars = await fetchCandles(ctx.symbol);
+    if (!bars.length) {
+      title.textContent += " — нет свечей (обновите позже)";
+      chartSeries.setData([]);
+      return;
     }
-    clearLevelLines();
+    chartSeries.setData(bars);
 
-    const resp = await fetch(
-      `/api/klines/${encodeURIComponent(trade.symbol)}?interval=5&limit=240`
-    );
-    if (!resp.ok) return;
-    const payload = await resp.json();
-    const candles = (payload.candles || payload.klines || []).map((c) => ({
-      time: Math.floor((c.t || c.time) / 1000),
-      open: +c.o,
-      high: +c.h,
-      low: +c.l,
-      close: +c.c,
-    }));
-    chartSeries.setData(candles);
-
-    const ema = Number(trade.ema60 || 0);
+    const ema = Number(ctx.ema60 || 0);
     if (ema > 0) {
       const emaLine = chartApi.addLineSeries({ color: "#f0b429", lineWidth: 2, title: "EMA60" });
       lineSeries.push(emaLine);
-      emaLine.setData(candles.map((c) => ({ time: c.time, value: ema })));
+      emaLine.setData(bars.map((c) => ({ time: c.time, value: ema })));
     }
 
-    (trade.grid_levels || []).forEach((lv, i) => {
+    const grids = ctx.grid_levels?.length ? ctx.grid_levels : gridLevelsFromCandidate(ctx);
+    grids.forEach((lv, i) => {
       const p = Number(lv.price_lo);
       if (!p) return;
       const s = chartApi.addLineSeries({
@@ -201,39 +310,69 @@
         title: `${lv.stretch_lo}–${lv.stretch_hi}%`,
       });
       lineSeries.push(s);
-      s.setData(candles.map((c) => ({ time: c.time, value: p })));
+      s.setData(bars.map((c) => ({ time: c.time, value: p })));
       const ph = Number(lv.price_hi);
-      if (ph && ph !== p) {
+      if (ph && Math.abs(ph - p) > 1e-12) {
         const s2 = chartApi.addLineSeries({
           color: "rgba(120,160,255,0.25)",
           lineWidth: 1,
           lineStyle: 2,
         });
         lineSeries.push(s2);
-        s2.setData(candles.map((c) => ({ time: c.time, value: ph })));
+        s2.setData(bars.map((c) => ({ time: c.time, value: ph })));
       }
     });
 
-    const entry = Number(trade.entry_price);
-    if (entry > 0) {
-      const ent = chartApi.addLineSeries({ color: "#fff", lineWidth: 1, title: "Entry" });
-      lineSeries.push(ent);
-      ent.setData(candles.map((c) => ({ time: c.time, value: entry })));
-    }
+    const entry = Number(ctx.entry_price || 0);
+    if (entry > 0) addPriceLine(entry, "#ffffff", "Entry");
+    const mark = Number(ctx.mark_price || 0);
+    if (mark > 0) addPriceLine(mark, "#58a6ff", "Mark");
+    else if (bars.length) addPriceLine(bars[bars.length - 1].close, "#58a6ff", "Price");
+
     chartApi.timeScale().fitContent();
+    requestAnimationFrame(() => {
+      if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, 360);
+    });
   }
 
-  function bindOpenClicks() {
+  function openChartForSymbol(symbol) {
+    const trade = findOpenTrade(symbol);
+    if (trade) {
+      showEm6Chart({ ...trade, kind: "open" });
+      return;
+    }
+    const cand = findCandidate(symbol);
+    if (cand) showEm6Chart({ ...cand, kind: "candidate" });
+  }
+
+  function bindChartClicks() {
     const open = document.getElementById("em6b-open");
-    if (!open || open.dataset.bound) return;
-    open.dataset.bound = "1";
-    open.addEventListener("click", (ev) => {
-      const tr = ev.target.closest("tr.em6b-open-row");
-      if (!tr) return;
-      const sym = tr.getAttribute("data-symbol");
-      const trade = findOpenTrade(sym);
-      if (trade) showTradeChart(trade);
-    });
+    if (open && !open.dataset.chartBound) {
+      open.dataset.chartBound = "1";
+      open.addEventListener("click", (ev) => {
+        const tr = ev.target.closest("tr.em6b-open-row");
+        if (!tr) return;
+        openChartForSymbol(tr.getAttribute("data-symbol"));
+      });
+    }
+    const candTable = document.getElementById("em6b-candidates");
+    if (candTable && !candTable.dataset.chartBound) {
+      candTable.dataset.chartBound = "1";
+      candTable.addEventListener("click", (ev) => {
+        const tr = ev.target.closest("tr.em6b-cand-row");
+        if (!tr) return;
+        openChartForSymbol(tr.getAttribute("data-symbol"));
+      });
+    }
+    const candGrid = document.getElementById("em6b-candidates-grid");
+    if (candGrid && !candGrid.dataset.chartBound) {
+      candGrid.dataset.chartBound = "1";
+      candGrid.addEventListener("click", (ev) => {
+        const li = ev.target.closest(".em6b-cand-pick");
+        if (!li) return;
+        openChartForSymbol(li.getAttribute("data-symbol"));
+      });
+    }
   }
 
   function renderTables(data) {
@@ -249,7 +388,7 @@
       open.innerHTML = `<thead><tr>
         <th>Symbol</th><th>Сторона</th><th>Вход</th><th>Mark</th><th>uPnL</th><th>ROE</th>
         <th>SL / trail</th><th>Max ROE</th><th>Номинал</th><th>Маржа</th><th>Открыта</th></tr></thead><tbody>${rows || "<tr><td colspan='11'>Нет открытых на бирже</td></tr>"}</tbody>`;
-      bindOpenClicks();
+      bindChartClicks();
     }
     if (closed) {
       const rows = (data.closed_trades || []).map(rowClosed).join("");
