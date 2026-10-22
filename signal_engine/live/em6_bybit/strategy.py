@@ -1,4 +1,4 @@
-"""EMA6 Bybit Demo: вход по em6r, стопы и трейл на бирже."""
+"""EMA6 Bybit Demo: сетка уровней от EMA60, вход по 1m к EMA."""
 
 from __future__ import annotations
 
@@ -8,8 +8,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import config
-from signal_engine.live.em6_bybit.adaptive_entry import AdaptiveStretchRegime, PreEntryWatch
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
+from signal_engine.live.em6_bybit.grid_entry import (
+    CandidateWatch,
+    pick_top_candidates,
+    stretch_at_price,
+    stretch_column_label,
+)
 from signal_engine.live.em6_bybit.store import Em6BybitStore
 from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
 from signal_engine.paper.position import (
@@ -48,8 +53,12 @@ class Em6BybitStrategy:
     _conn: Any = None
     _recovered: bool = False
     _last_status_log_ms: int = 0
-    _regime: AdaptiveStretchRegime = field(default_factory=AdaptiveStretchRegime)
-    _pre_entry: dict[str, PreEntryWatch] = field(default_factory=dict)
+    _watch: dict[str, CandidateWatch] = field(default_factory=dict)
+    _last_universe_ms: int = -1
+    _last_candidate_ms: int = -1
+    _last_open_ms: int = -1
+    _last_peak_ms: int = -1
+    _wallet_avail: float = 0.0
 
     def open(self) -> None:
         if not self.broker.configured():
@@ -88,7 +97,7 @@ class Em6BybitStrategy:
             side = pos["side"]
             entry = float(pos["avg_price"])
             qty = float(pos["size"])
-            lev = int(pos.get("leverage") or config.PAPER_LEVERAGE)
+            lev = int(pos.get("leverage") or config.em6_bybit_leverage())
             margin = qty * entry / lev if lev else 0.0
             stop = self._compute_stop_for(side, entry, entry, margin, qty)
             tid = self.store.insert_open(
@@ -237,7 +246,6 @@ class Em6BybitStrategy:
             self._push_stop(live, state)
 
     def _is_initial_stop_close(self, live: LiveOpen | None, row: dict[str, Any]) -> bool:
-        """Initial −14% ROE: пик не дошёл до lock0."""
         arm = float(config.PAPER_EM6R_LOCK0_ARM_ROE)
         if live is not None:
             return self._max_roe(live) + 1e-6 < arm
@@ -250,9 +258,12 @@ class Em6BybitStrategy:
         live = self.open_trades.pop(symbol, None)
         now = int(time.time() * 1000)
         if reason == "trailing_stop" and self._is_initial_stop_close(live, row):
-            watch = self._pre_entry.setdefault(symbol, PreEntryWatch())
-            watch.start_cooldown(now)
-            log.info("em6 bybit: %s initial stop — pre-entry pause 15s", symbol)
+            w = self._watch.setdefault(
+                symbol,
+                CandidateWatch(symbol=symbol, side=live.side if live else "short", since_ms=now),
+            )
+            w.start_cooldown(now)
+            log.info("em6 bybit: %s initial stop — pause 15s", symbol)
         opened_at = int(live.opened_at if live else row.get("opened_at") or 0)
         entry_p = float(live.entry_price if live else row.get("entry_price") or 0)
         exit_p = entry_p
@@ -301,10 +312,15 @@ class Em6BybitStrategy:
             return
         for sym in list(self.open_trades.keys()):
             if sym not in on_ex:
-                row = self.store.open_by_symbol(self._conn, sym) or {"id": self.open_trades[sym].id, "symbol": sym}
+                row = self.store.open_by_symbol(self._conn, sym) or {
+                    "id": self.open_trades[sym].id,
+                    "symbol": sym,
+                }
                 self._finalize_closed(sym, row, reason="trailing_stop")
 
-    def _base_stretch_ok(self, state: SymbolState, now_ms: int) -> tuple[Any, float] | None:
+    def _stretch_row(
+        self, symbol: str, state: SymbolState, now_ms: int
+    ) -> tuple[str, str, float, float] | None:
         ev = evaluate_ema60_stretch(state, now_ms)
         if not ev.passed or ev.side not in ("long", "short"):
             return None
@@ -313,51 +329,79 @@ class Em6BybitStrategy:
             turn = state.turnover_24h_usdt
             if turn is None or float(turn) < min_turn:
                 return None
+        ema = float(ev.metrics.get("ema60") or 0)
         stretch = float(ev.metrics.get("stretch_pct") or 0)
-        return ev, stretch
+        if ema <= 0:
+            return None
+        return symbol, ev.side, stretch, ema
 
-    def _try_open(
+    @staticmethod
+    def _last_closed_1m(state: SymbolState, now_ms: int) -> tuple[int, float] | None:
+        for bar in reversed(state.bars_1m):
+            if bar.timestamp + 60_000 <= now_ms:
+                return bar.timestamp, float(bar.close)
+        return None
+
+    def _refresh_universe(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        rows: list[tuple[str, str, float, float]] = []
+        for symbol, state in states.items():
+            if not state.last_price:
+                continue
+            row = self._stretch_row(symbol, state, now_ms)
+            if row is not None:
+                rows.append(row)
+        top = pick_top_candidates(rows, limit=config.EM6_BYBIT_TOP_CANDIDATES)
+        keep = {s for s, _, _ in top} | set(self.open_trades.keys())
+        for sym in list(self._watch.keys()):
+            if sym not in keep:
+                del self._watch[sym]
+        for symbol, side, stretch in top:
+            if symbol in self.open_trades:
+                continue
+            w = self._watch.get(symbol)
+            if w is None:
+                w = CandidateWatch(symbol=symbol, side=side, since_ms=now_ms)
+                w.peak_stretch = stretch
+                w.last_stretch = stretch
+                w.peak_price = float(states[symbol].last_price or 0)
+                self._watch[symbol] = w
+            else:
+                w.side = side
+
+    def _update_peaks(self, states: dict[str, SymbolState], now_ms: int) -> None:
+        for symbol, w in self._watch.items():
+            if symbol in self.open_trades:
+                continue
+            state = states.get(symbol)
+            if state is None or not state.last_price:
+                continue
+            row = self._stretch_row(symbol, state, now_ms)
+            if row is None:
+                continue
+            _, _, stretch, ema = row
+            price = float(state.last_price)
+            w.update_peak(now_ms, stretch, price, ema)
+
+    def _execute_open(
         self,
         symbol: str,
         state: SymbolState,
+        side: str,
         now_ms: int,
-        wallet_available: float,
-        *,
-        on_exchange: set[str],
-        threshold_pct: float,
+        stretch: float,
     ) -> None:
-        if symbol in self.open_trades or symbol in on_exchange:
-            self._pre_entry.pop(symbol, None)
-            return
-        base = self._base_stretch_ok(state, now_ms)
-        if base is None:
-            self._pre_entry.pop(symbol, None)
-            return
-        ev, stretch = base
-        if stretch + 1e-9 < threshold_pct:
-            self._pre_entry.pop(symbol, None)
-            return
-        self._regime.note_candidate(now_ms)
-        watch = self._pre_entry.setdefault(symbol, PreEntryWatch())
-        if not watch.tick(now_ms, stretch):
-            return
         price = float(state.last_price or 0)
         if price <= 0:
             return
+        if self._wallet_avail + 1e-9 < config.em6_bybit_margin_usd():
+            return
         lev = config.em6_bybit_leverage()
-        target_margin = config.em6_bybit_margin_usd()
-        if wallet_available + 1e-9 < target_margin:
-            return
-        planned = self.broker.qty_for_margin(symbol, price, target_margin, lev)
+        planned = self.broker.qty_for_margin(
+            symbol, price, config.em6_bybit_margin_usd(), lev
+        )
         if planned is None:
-            log.warning(
-                "em6 bybit %s: не удалось набрать маржу $%.0f (шаг/cap/min order)",
-                symbol,
-                target_margin,
-            )
             return
-        qty, margin = planned  # margin ≈ $50 после шага qty
-        side = ev.side or "short"
+        qty, margin = planned
         stop = self._compute_stop_for(side, price, price, margin, qty)
         link = f"e6b-{symbol}-{now_ms}"[:36]
         try:
@@ -403,86 +447,80 @@ class Em6BybitStrategy:
             opened_at=now_ms,
             last_exchange_stop=stop,
         )
-        self._pre_entry.pop(symbol, None)
+        self._watch.pop(symbol, None)
         log.info(
-            "em6 bybit OPEN %s %s margin=%.2f stop=%.6f stretch=%.2f thr=%.2f",
+            "em6 bybit OPEN %s %s margin=%.2f stretch=%.2f grid",
             side,
             symbol,
             margin,
-            stop,
             stretch,
-            threshold_pct,
         )
+
+    def _tick_candidates(
+        self,
+        states: dict[str, SymbolState],
+        now_ms: int,
+        on_exchange: set[str],
+    ) -> None:
+        for symbol, w in list(self._watch.items()):
+            if symbol in self.open_trades or symbol in on_exchange:
+                continue
+            state = states.get(symbol)
+            if state is None or not state.last_price:
+                continue
+            row = self._stretch_row(symbol, state, now_ms)
+            if row is None:
+                continue
+            _, side, stretch, ema = row
+            price = float(state.last_price)
+            closed_1m = self._last_closed_1m(state, now_ms)
+            if w.tick(now_ms, stretch, price, ema, closed_1m):
+                self._execute_open(symbol, state, side, now_ms, stretch)
 
     def scan(self, states: dict[str, SymbolState], now_ms: int) -> dict[str, Any]:
         if not self.broker.configured():
             return {"type": BOARD_TYPE, "timestamp": now_ms, "data": self.view(now_ms)}
         if self._conn is None:
             self.open()
-        self._sync_closures()
-        for sym, live in list(self.open_trades.items()):
-            st = states.get(sym)
-            if st is not None:
-                self._update_live(live, st)
         try:
             wallet = self.broker.wallet_usdt()
-            equity = float(wallet.get("equity") or wallet.get("available") or 0)
-            avail = float(wallet.get("available") or equity)
+            self._wallet_avail = float(wallet.get("available") or wallet.get("equity") or 0)
         except Exception:
             log.exception("em6 bybit wallet")
-            equity = avail = 0.0
-        margin_per_trade = config.em6_bybit_margin_usd()
+
+        if self._last_open_ms < 0 or now_ms - self._last_open_ms >= config.EM6_BYBIT_OPEN_TICK_MS:
+            self._last_open_ms = now_ms
+            self._sync_closures()
+            for sym, live in list(self.open_trades.items()):
+                st = states.get(sym)
+                if st is not None:
+                    self._update_live(live, st)
+
         try:
             on_exchange = {p["symbol"] for p in self.broker.linear_positions()}
         except Exception:
             log.exception("em6 bybit positions")
             on_exchange = set()
-        market_stretches: list[float] = []
-        ema_ready = 0
-        candidates = 0
-        threshold = self._regime.threshold_pct
-        for symbol, state in states.items():
-            if not state.last_price:
-                continue
-            ev = evaluate_ema60_stretch(state, now_ms)
-            if ev.checks.get("ema_ready", {}).get("ok"):
-                ema_ready += 1
-            base = self._base_stretch_ok(state, now_ms)
-            if base is not None:
-                _, stretch = base
-                market_stretches.append(stretch)
-                if stretch + 1e-9 >= threshold:
-                    candidates += 1
-        self._regime.update(now_ms, market_stretches)
-        threshold = self._regime.threshold_pct
-        for symbol, state in states.items():
-            if not state.last_price:
-                continue
-            self._try_open(
-                symbol,
-                state,
-                now_ms,
-                avail,
-                on_exchange=on_exchange,
-                threshold_pct=threshold,
-            )
+
+        if self._last_universe_ms < 0 or now_ms - self._last_universe_ms >= config.EM6_BYBIT_UNIVERSE_SCAN_MS:
+            self._last_universe_ms = now_ms
+            self._refresh_universe(states, now_ms)
+
+        if self._last_peak_ms < 0 or now_ms - self._last_peak_ms >= config.EM6_BYBIT_PEAK_TICK_MS:
+            self._last_peak_ms = now_ms
+            self._update_peaks(states, now_ms)
+
+        if self._last_candidate_ms < 0 or now_ms - self._last_candidate_ms >= config.EM6_BYBIT_CANDIDATE_TICK_MS:
+            self._last_candidate_ms = now_ms
+            self._tick_candidates(states, now_ms, on_exchange)
+
         if now_ms - self._last_status_log_ms >= 120_000:
             self._last_status_log_ms = now_ms
-            watching = sum(
-                1 for w in self._pre_entry.values() if w.phase(now_ms) != "ready"
-            )
             log.info(
-                "EMA6 Bybit: монет %s, EMA60 %s, канд≥%.2f%% %s, watch %s, открыто %s, "
-                "equity $%.0f, margin/trade $%.0f × %sx",
-                len(states),
-                ema_ready,
-                threshold,
-                candidates,
-                watching,
+                "EMA6 Bybit: претендентов %s, открыто %s, avail $%.0f",
+                len(self._watch),
                 len(self.open_trades),
-                equity,
-                margin_per_trade,
-                config.em6_bybit_leverage(),
+                self._wallet_avail,
             )
         return {"type": BOARD_TYPE, "timestamp": now_ms, "data": self.view(now_ms)}
 
@@ -520,14 +558,17 @@ class Em6BybitStrategy:
         wins = sum(1 for r in closed if float(r.get("pnl_usd") or 0) > 0)
         n_closed = len(closed)
         sum_pnl = sum(float(r.get("pnl_usd") or 0) for r in closed)
-        watch_rows = [
-            {
-                "symbol": sym,
-                "phase": w.phase(now_ms),
-                "peak_stretch": round(w.peak_stretch, 3),
-                "cooldown_until_ms": w.cooldown_until_ms,
-            }
-            for sym, w in sorted(self._pre_entry.items())
+        cand_rows = []
+        by_column: dict[str, list[dict]] = {}
+        for w in sorted(self._watch.values(), key=lambda x: x.last_stretch, reverse=True):
+            v = w.to_view()
+            col = stretch_column_label(w.last_stretch)
+            v["stretch_column"] = col
+            cand_rows.append(v)
+            by_column.setdefault(col, []).append(v)
+        columns = [
+            {"label": label, "candidates": by_column[label]}
+            for label in sorted(by_column.keys(), key=lambda s: float(s.split("–")[0]), reverse=True)
         ]
         return {
             "summary": {
@@ -535,7 +576,6 @@ class Em6BybitStrategy:
                 "wallet_equity": round(wallet.get("equity", 0), 2),
                 "wallet_available": round(wallet.get("available", 0), 2),
                 "margin_usd": config.em6_bybit_margin_usd(),
-                "margin_pct": None,
                 "leverage": config.em6_bybit_leverage(),
                 "notional_usd": round(
                     config.em6_bybit_margin_usd() * config.em6_bybit_leverage(), 2
@@ -544,9 +584,11 @@ class Em6BybitStrategy:
                 "closed_trades": n_closed,
                 "win_rate": round(100.0 * wins / n_closed, 1) if n_closed else 0.0,
                 "total_pnl_closed": round(sum_pnl, 2),
-                "adaptive": self._regime.to_view(),
+                "watch_count": len(cand_rows),
+                "stretch_floor_pct": config.EM6_BYBIT_STRETCH_FLOOR_PCT,
             },
-            "pre_entry_watch": watch_rows,
+            "candidates": cand_rows,
+            "candidate_columns": columns,
             "open_trades": open_rows,
             "closed_trades": closed,
         }

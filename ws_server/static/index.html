@@ -91,10 +91,15 @@
 
   <section id="view-em6-bybit" class="paper-view" hidden>
     <p class="quiet paper-intro">
-      Live EMA60-6 на <strong>Bybit Demo</strong>: баланс с биржи, стопы и трейл выставляются на API.
-      Вход: отрыв EMA60 ≥6%, оборот 24h ≥1M. Маржа 5% от equity Demo, плечо 10. Без фильтра стакана.
+      <strong>Bybit Demo</strong>: топ‑7 отрывов EMA60 (5m) ≥4%, сетка 0,25% к EMA и +3% от пика.
+      Вход после разворота к EMA и close 1m. Маржа <strong>$50 × 10</strong>. Претенденты — по колонкам отрыва.
     </p>
     <div id="em6b-summary" class="paper-cards"></div>
+    <section class="paper-panel">
+      <h3>Претенденты (по колонкам отрыва)</h3>
+      <div id="em6b-candidates-grid" class="em6b-cand-grid"></div>
+      <div class="table-wrap paper-scroll"><table id="em6b-candidates" class="paper-table"></table></div>
+    </section>
     <section class="paper-panel">
       <h3>Открытые позиции (Demo)</h3>
       <div class="table-wrap paper-scroll"><table id="em6b-open" class="paper-table"></table></div>
@@ -124,7 +129,7 @@
   <script src="/static/vendor/lightweight-charts.js"></script>
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/paper_test.js?v=20261019pnlglyph"></script>
-  <script src="/static/em6_bybit.js?v=20261022em6b2"></script>
+  <script src="/static/em6_bybit.js?v=20261022grid"></script>
   <script src="/static/board_chart.js?v=20261019ema333engine"></script>
   <script src="/static/app.js?v=20261022em6stats"></script>
 </body>

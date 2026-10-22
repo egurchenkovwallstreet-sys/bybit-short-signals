@@ -1972,6 +1972,20 @@ th { cursor: pointer; color: var(--muted); }
   padding: 12px 14px;
 }
 .paper-panel h3 { margin: 0 0 6px; font-size: 15px; }
+.em6b-cand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.em6b-cand-grid .em6b-col {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.em6b-cand-grid h4 { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.em6b-cand-grid ul { margin: 0; padding-left: 16px; font-size: 12px; }
 .paper-panel h4 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); }
 .balance-view {
   flex: 1;

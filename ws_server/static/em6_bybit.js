@@ -52,6 +52,45 @@
     </tr>`;
   }
 
+  function rowCand(c) {
+    return `<tr>
+      <td>${c.symbol}</td>
+      <td>${c.side}</td>
+      <td>${pct(c.stretch_pct)}</td>
+      <td>${c.stretch_column || "—"}</td>
+      <td>${c.phase || "—"}</td>
+      <td>${pct(c.peak_stretch)}</td>
+      <td>${c.armed_band_lo != null ? pct(c.armed_band_lo) : "—"}</td>
+    </tr>`;
+  }
+
+  function renderCandidates(data) {
+    const grid = document.getElementById("em6b-candidates-grid");
+    const table = document.getElementById("em6b-candidates");
+    const cols = data.candidate_columns || [];
+    if (grid) {
+      grid.innerHTML = cols
+        .map(
+          (col) => `<div class="paper-panel em6b-col">
+          <h4>${col.label}</h4>
+          <ul>${(col.candidates || [])
+            .map(
+              (c) =>
+                `<li><strong>${c.symbol}</strong> ${c.side} · ${Number(c.stretch_pct).toFixed(2)}% · ${c.phase}</li>`
+            )
+            .join("") || "<li class='quiet'>—</li>"}</ul>
+        </div>`
+        )
+        .join("");
+    }
+    if (table) {
+      const rows = (data.candidates || []).map(rowCand).join("");
+      table.innerHTML = `<thead><tr>
+        <th>Symbol</th><th>Сторона</th><th>Отрыв</th><th>Колонка</th><th>Фаза</th>
+        <th>Пик</th><th>Arm band</th></tr></thead><tbody>${rows || "<tr><td colspan='7'>Нет претендентов (≥4%)</td></tr>"}</tbody>`;
+    }
+  }
+
   function renderTables(data) {
     const open = document.getElementById("em6b-open");
     const closed = document.getElementById("em6b-closed");
@@ -73,6 +112,7 @@
     const data = payload && payload.data ? payload.data : payload;
     if (!data) return;
     renderSummary(data);
+    renderCandidates(data);
     renderTables(data);
   }
 
