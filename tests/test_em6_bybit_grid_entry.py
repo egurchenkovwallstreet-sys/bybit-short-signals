@@ -7,6 +7,9 @@ import unittest
 from signal_engine.live.em6_bybit.grid_entry import (
     CandidateWatch,
     band_lo,
+    build_grid_levels,
+    grid_anchor_stretch,
+    level_bands,
     pick_top_candidates,
 )
 
@@ -15,6 +18,20 @@ class TestGridBands(unittest.TestCase):
     def test_band_lo_fractional(self) -> None:
         self.assertEqual(band_lo(6.7), 6.5)
         self.assertEqual(band_lo(4.0), 6.0)
+
+    def test_level_bands_high_stretch(self) -> None:
+        anchor = grid_anchor_stretch(20.0, 18.5)
+        bands = level_bands(anchor)
+        self.assertGreaterEqual(len(bands), 50)
+        self.assertEqual(bands[0][0], 6.0)
+        self.assertAlmostEqual(bands[-1][1], 23.0, places=2)
+
+    def test_build_grid_levels_20pct(self) -> None:
+        rows = build_grid_levels(100.0, "short", 20.0, 20.0)
+        self.assertTrue(rows)
+        self.assertAlmostEqual(rows[0]["price_lo"], 106.0, places=4)
+        top = rows[-1]["price_hi"]
+        self.assertAlmostEqual(top, 123.0, places=4)
 
     def test_pick_top(self) -> None:
         rows = [

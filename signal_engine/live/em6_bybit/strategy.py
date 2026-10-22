@@ -12,13 +12,13 @@ from signal_engine.live.em6_bybit.broker import Em6BybitBroker
 from signal_engine.live.em6_bybit.grid_entry import (
     CandidateWatch,
     band_lo,
+    build_grid_levels,
     pick_top_candidates,
     stretch_at_price,
     stretch_column_label,
 )
 from signal_engine.live.em6_bybit.store import Em6BybitStore
 from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
-from signal_engine.live.em6_bybit.grid_entry import price_at_stretch
 from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
 from signal_engine.live.em6_bybit.stops import (
     em6_bybit_active_trail_roe_pct,
@@ -48,6 +48,7 @@ class LiveOpen:
     last_exchange_stop: float = 0.0
     last_trail_roe_pct: float = 0.0
     ema60: float = 0.0
+    peak_stretch: float = 0.0
     grid_levels: list[dict[str, float]] = field(default_factory=list)
 
 
@@ -218,6 +219,9 @@ class Em6BybitStrategy:
             upnl = float(pos.get("unrealised_pnl") or 0)
             roe = self._roe_from_upnl(upnl, margin)
             max_roe = self._max_roe(live) if live else roe
+            if live is not None and live.ema60 > 0:
+                self._refresh_live_grid(live, live.ema60, mark)
+            grid = live.grid_levels if live else []
             row: dict[str, Any] = {
                 "id": live.id if live else None,
                 "symbol": sym,
@@ -242,7 +246,7 @@ class Em6BybitStrategy:
                 "trail_armed": max_roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
                 "source": "bybit",
                 "ema60": live.ema60 if live else 0.0,
-                "grid_levels": live.grid_levels if live else [],
+                "grid_levels": grid,
             }
             rows.append(row)
         rows.sort(key=lambda r: abs(float(r.get("unrealised_pnl") or 0)), reverse=True)
@@ -306,6 +310,18 @@ class Em6BybitStrategy:
         ref = max(abs(live.entry_price), 1e-12)
         return abs(new_stop - live.last_exchange_stop) / ref > 0.00005
 
+    def _refresh_live_grid(self, live: LiveOpen, ema: float, ref_price: float) -> None:
+        if ema <= 0 or ref_price <= 0:
+            return
+        for px in (ref_price, live.best_price, live.worst_price, live.entry_price):
+            s = stretch_at_price(float(px), ema)
+            if s > live.peak_stretch + 1e-6:
+                live.peak_stretch = s
+        cur = stretch_at_price(ref_price, ema)
+        live.grid_levels = build_grid_levels(
+            ema, live.side, live.peak_stretch, cur
+        )
+
     def _update_live(self, live: LiveOpen, state: SymbolState) -> None:
         last = float(state.last_price or live.entry_price)
         if live.side == "long":
@@ -314,6 +330,12 @@ class Em6BybitStrategy:
         else:
             live.best_price = min(live.best_price, last)
             live.worst_price = max(live.worst_price, last)
+        row = self._stretch_row(live.symbol, state, int(time.time() * 1000))
+        if row is not None:
+            ema = row[3]
+            if ema > 0:
+                live.ema60 = ema
+                self._refresh_live_grid(live, ema, last)
         new_stop = self._compute_stop_for(
             live.side, live.entry_price, live.best_price, live.margin, live.qty
         )
@@ -571,23 +593,8 @@ class Em6BybitStrategy:
             row = self._stretch_row(symbol, state, now_ms)
             if row:
                 ema = row[3]
-        grid_levels: list[dict[str, float]] = []
-        if w is not None:
-            for lo, hi in w.to_view().get("levels") or []:
-                if side == "long":
-                    p_lo = price_at_stretch(ema, side, hi)
-                    p_hi = price_at_stretch(ema, side, lo)
-                else:
-                    p_lo = price_at_stretch(ema, side, lo)
-                    p_hi = price_at_stretch(ema, side, hi)
-                grid_levels.append(
-                    {
-                        "stretch_lo": lo,
-                        "stretch_hi": hi,
-                        "price_lo": p_lo,
-                        "price_hi": p_hi,
-                    }
-                )
+        peak_st = float(w.peak_stretch if w else stretch)
+        grid_levels = build_grid_levels(ema, side, peak_st, stretch) if ema > 0 else []
         link = f"e6b-{symbol}-{now_ms}"[:36]
         try:
             resp, qty, margin, notional = self.broker.open_market_fixed_notional(
@@ -642,6 +649,7 @@ class Em6BybitStrategy:
             last_exchange_stop=stop,
             last_trail_roe_pct=config.em6_bybit_trail_initial_roe(),
             ema60=ema,
+            peak_stretch=max(peak_st, stretch),
             grid_levels=grid_levels,
         )
         self.open_trades[symbol] = live

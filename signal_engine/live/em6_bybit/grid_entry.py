@@ -25,12 +25,19 @@ def stretch_at_price(price: float, ema: float) -> float:
     return abs(price - ema) / ema * 100.0
 
 
+def grid_anchor_stretch(peak_stretch: float, current_stretch: float) -> float:
+    """Верх сетки: max(пик, текущий отрыв), не ниже пола мониторинга."""
+    floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
+    return max(floor, peak_stretch, current_stretch)
+
+
 def level_bands(anchor_stretch: float) -> list[tuple[float, float]]:
-    """Полосы от пола отрыва до anchor+away вверх и вниз к EMA."""
+    """Полосы от пола отрыва до anchor+away (в т.ч. при отрыве 20%+)."""
     floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
     step = config.EM6_BYBIT_BAND_STEP_PCT
     away = config.EM6_BYBIT_AWAY_BANDS_PCT
-    hi = anchor_stretch + away
+    anchor = max(floor, anchor_stretch)
+    hi = anchor + away
     lo = floor
     bands: list[tuple[float, float]] = []
     x = lo
@@ -38,6 +45,35 @@ def level_bands(anchor_stretch: float) -> list[tuple[float, float]]:
         bands.append((round(x, 4), round(x + step, 4)))
         x += step
     return bands
+
+
+def build_grid_levels(
+    ema: float,
+    side: str,
+    peak_stretch: float,
+    current_stretch: float,
+) -> list[dict[str, float]]:
+    """Ценовые уровни сетки для UI и открытой позиции."""
+    if ema <= 0:
+        return []
+    anchor = grid_anchor_stretch(peak_stretch, current_stretch)
+    out: list[dict[str, float]] = []
+    for lo, hi in level_bands(anchor):
+        if side == "long":
+            p_lo = price_at_stretch(ema, side, hi)
+            p_hi = price_at_stretch(ema, side, lo)
+        else:
+            p_lo = price_at_stretch(ema, side, lo)
+            p_hi = price_at_stretch(ema, side, hi)
+        out.append(
+            {
+                "stretch_lo": lo,
+                "stretch_hi": hi,
+                "price_lo": p_lo,
+                "price_hi": p_hi,
+            }
+        )
+    return out
 
 
 @dataclass
@@ -66,10 +102,11 @@ class CandidateWatch:
         if stretch > self.peak_stretch + 1e-6:
             self.peak_stretch = stretch
             self.peak_price = price
-            self.stall_band_lo = None
-            self.stall_band_hi = None
-            self.armed_entry_band_lo = None
-            self.phase = "watch"
+            if self.phase in ("cross_toward_ema", "stalled"):
+                self.stall_band_lo = None
+                self.stall_band_hi = None
+                self.armed_entry_band_lo = None
+                self.phase = "watch"
 
     def tick(
         self,
@@ -87,6 +124,9 @@ class CandidateWatch:
         prev = self.last_stretch
         self.last_tick_ms = now_ms
 
+        if stretch > self.peak_stretch + 1e-6:
+            self.peak_stretch = stretch
+            self.peak_price = price
         if stretch > prev + 1e-6:
             self.phase = "away"
             if band > self.away_max_band_lo:
@@ -159,7 +199,13 @@ class CandidateWatch:
             "armed_band_lo": self.armed_entry_band_lo,
             "since_ms": self.since_ms,
             "ema60": round(self.ema60, 8) if self.ema60 else 0.0,
-            "levels": level_bands(max(self.peak_stretch, self.last_stretch)),
+            "levels": level_bands(grid_anchor_stretch(self.peak_stretch, self.last_stretch)),
+            "grid_levels": build_grid_levels(
+                self.ema60,
+                self.side,
+                self.peak_stretch,
+                self.last_stretch,
+            ),
         }
 
 
