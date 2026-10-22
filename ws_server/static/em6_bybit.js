@@ -153,7 +153,7 @@
   const ema60Cache = new Map();
   const CHART_GRID_LINE_CAP = 55;
   const GRID_FLOOR_PCT = 6;
-  const GRID_STEP_PCT = 0.25;
+  const GRID_STEP_PCT = 0.5;
   const GRID_AWAY_PCT = 3;
 
   function findOpenTrade(symbol) {

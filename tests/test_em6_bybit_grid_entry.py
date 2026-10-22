@@ -23,7 +23,7 @@ class TestGridBands(unittest.TestCase):
     def test_level_bands_high_stretch(self) -> None:
         anchor = grid_anchor_stretch(20.0, 18.5)
         bands = level_bands(anchor)
-        self.assertGreaterEqual(len(bands), 50)
+        self.assertGreaterEqual(len(bands), 25)
         self.assertEqual(bands[0][0], 6.0)
         self.assertAlmostEqual(bands[-1][1], 23.0, places=2)
 
@@ -60,18 +60,17 @@ class TestCandidateFsm(unittest.TestCase):
         w = CandidateWatch(symbol="X", side="long", since_ms=0)
         ema = 100.0
         t = 0
-        w.update_peak(t, 7.0, 93.0, ema)
-        w.last_band_lo = band_lo(7.0)
+        w.last_stretch = 8.0
+        w.peak_stretch = 8.0
+        w.last_band_lo = band_lo(8.0)
         w.away_max_band_lo = w.last_band_lo
         w.stall_band_lo = w.last_band_lo
+        w.stall_band_hi = w.last_band_lo + 0.5
         w.phase = "stalled"
-        w.tick(t + 1000, 7.3, 92.7, ema, None)
-        w.tick(t + 2000, 7.45, 92.55, ema, None)
-        w.tick(t + 3000, 7.4, 92.6, ema, None)
-        self.assertFalse(w.tick(t + 4000, 7.2, 92.8, ema, None))
-        close = (t + 120_000, 92.75)
-        fired = w.tick(t + 130_000, 7.15, 92.85, ema, close)
-        self.assertTrue(fired or w.armed_entry_band_lo is not None)
+        w.tick(t + 1000, 7.4, 92.6, ema, None)
+        self.assertIsNotNone(w.armed_entry_band_lo)
+        close = (t + 120_000, 92.65)
+        self.assertTrue(w.tick(t + 130_000, 7.35, 92.65, ema, close))
 
     def test_band_step_down_arms_each_level(self) -> None:
         w = CandidateWatch(symbol="Y", side="short", since_ms=0)

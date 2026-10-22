@@ -1,4 +1,4 @@
-"""Вход EMA6 Bybit: претенденты, сетка 0.25% от EMA, подтверждение 1m."""
+"""Вход EMA6 Bybit: претенденты, сетка 0.5% от EMA (2 полосы на 1% отрыва), подтверждение 1m."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import config
 
 
 def band_lo(stretch_pct: float) -> float:
-    """Нижняя граница полосы отрыва (пол 6%, шаг 0.25%)."""
+    """Нижняя граница полосы отрыва (пол 6%, шаг 0.5%)."""
     floor = config.EM6_BYBIT_STRETCH_FLOOR_PCT
     step = config.EM6_BYBIT_BAND_STEP_PCT
     if stretch_pct + 1e-9 < floor:
