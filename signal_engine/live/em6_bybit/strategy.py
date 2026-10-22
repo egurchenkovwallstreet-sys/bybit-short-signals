@@ -24,8 +24,11 @@ from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
 from signal_engine.live.em6_bybit.rest_stretch import scan_top_stretches
 from signal_engine.live.em6_bybit.stops import (
     em6_bybit_active_trail_roe_pct,
-    em6_bybit_profit_lock_trail_roe_pct,
+    em6_bybit_initial_trail_roe_pct,
+    em6_bybit_ladder_target_stop_roe,
     em6_bybit_trailing_stop_price,
+    em6_bybit_use_tight_trail,
+    stop_price_for_roe,
     trail_roe_pct_from_trailing_distance,
 )
 from signal_engine.paper.position import long_roe_pct, roe_pct
@@ -52,6 +55,7 @@ class LiveOpen:
     last_exchange_stop: float = 0.0
     last_trail_roe_pct: float = 0.0
     profit_lock_armed: bool = False
+    locked_stop_roe: float = -1000.0
     ema60: float = 0.0
     peak_stretch: float = 0.0
     grid_levels: list[dict[str, float]] = field(default_factory=list)
@@ -169,6 +173,7 @@ class Em6BybitStrategy:
             opened_at=int(row["opened_at"]),
             last_exchange_stop=float(row["last_exchange_stop"] or 0),
             profit_lock_armed=bool(int(row.get("profit_lock_armed") or 0)),
+            locked_stop_roe=float(row.get("locked_stop_roe") or -1000),
         )
 
     def _entry_fee(self, entry: float, qty: float) -> float:
@@ -308,64 +313,91 @@ class Em6BybitStrategy:
         ref_price: float | None = None,
         cur_roe: float | None = None,
     ) -> None:
-        if live.profit_lock_armed:
-            return
         ref = ref_price if ref_price is not None and ref_price > 0 else self._ref_price(live, state)
         if ref <= 0:
             return
         roe = cur_roe if cur_roe is not None else self._current_roe(live, state)
-        arm = config.em6_bybit_trail_profit_arm_roe()
-        lock = config.em6_bybit_trail_lock_roe()
-        if roe + 1e-6 >= arm:
-            trail_roe = em6_bybit_profit_lock_trail_roe_pct(roe)
-            one_shot = True
-        else:
-            trail_roe = em6_bybit_active_trail_roe_pct(roe)
-            one_shot = False
+        max_roe = max(self._max_roe(live), roe)
+        target = em6_bybit_ladder_target_stop_roe(roe, max_roe)
+
+        if target is None:
+            trail_roe = em6_bybit_initial_trail_roe_pct()
             if live.last_trail_roe_pct > 0 and abs(live.last_trail_roe_pct - trail_roe) < 1e-6:
                 return
+            try:
+                resp = self.broker.set_trailing_stop_roe(
+                    live.symbol,
+                    ref_price=ref,
+                    side=live.side,
+                    trail_roe_pct=trail_roe,
+                )
+                if resp.get("retCode") not in (0, "0", None):
+                    log.warning("em6 bybit trailing %s: %s", live.symbol, resp)
+                    return
+                live.last_trail_roe_pct = trail_roe
+                log.info(
+                    "em6 bybit %s: wide trail %.0f%% @ %.8g (ROE %.2f%%)",
+                    live.symbol,
+                    trail_roe,
+                    ref,
+                    roe,
+                )
+            except Exception:
+                log.exception("em6 bybit: trailing %s", live.symbol)
+            return
+
+        new_lock = max(live.locked_stop_roe, target)
+        if new_lock <= live.locked_stop_roe + 1e-6:
+            return
+
         try:
-            resp = self.broker.set_trailing_stop_roe(
-                live.symbol,
-                ref_price=ref,
-                side=live.side,
-                trail_roe_pct=trail_roe,
-            )
-            code = resp.get("retCode") if isinstance(resp, dict) else None
-            if code not in (0, "0", None):
-                log.warning("em6 bybit trailing %s: %s", live.symbol, resp)
+            if em6_bybit_use_tight_trail(roe):
+                resp = self.broker.set_trailing_stop_roe(
+                    live.symbol,
+                    ref_price=ref,
+                    side=live.side,
+                    trail_roe_pct=config.EM6_BYBIT_LADDER_TRAIL_3,
+                )
+                mode = f"trail {config.EM6_BYBIT_LADDER_TRAIL_3:g}%"
+            else:
+                stop_px = stop_price_for_roe(
+                    live.side, live.entry_price, live.margin, live.qty, new_lock
+                )
+                resp = self.broker.set_stop_loss(
+                    live.symbol, stop_px, side=live.side, ref_price=ref
+                )
+                mode = f"SL lock ROE {new_lock:.1f}%"
+            if resp.get("retCode") not in (0, "0", None):
+                log.warning("em6 bybit ladder %s: %s", live.symbol, resp)
                 return
-            prev = live.last_trail_roe_pct
-            live.last_trail_roe_pct = trail_roe
-            live.last_exchange_stop = live.stop_price
-            fields: dict[str, Any] = {
-                "stop_price": live.stop_price,
-                "last_exchange_stop": live.last_exchange_stop,
-            }
-            if one_shot:
-                live.profit_lock_armed = True
-                fields["profit_lock_armed"] = 1
-            self.store.update_open(self._conn, live.id, fields)
-            if one_shot:
-                log.info(
-                    "em6 bybit %s: profit lock +%.0f%% ROE — trail %.0f%% @ %.8g (ROE %.2f%%), "
-                    "больше не трогаем",
-                    live.symbol,
-                    lock,
-                    trail_roe,
-                    ref,
-                    roe,
-                )
-            elif prev <= 0 or abs(prev - trail_roe) > 1e-6:
-                log.info(
-                    "em6 bybit %s: trail %.0f%% ROE @ price %.8g (now ROE %.2f%%)",
-                    live.symbol,
-                    trail_roe,
-                    ref,
-                    roe,
-                )
+            prev = live.locked_stop_roe
+            live.locked_stop_roe = new_lock
+            live.profit_lock_armed = True
+            live.last_trail_roe_pct = new_lock
+            live.stop_price = stop_price_for_roe(
+                live.side, live.entry_price, live.margin, live.qty, new_lock
+            )
+            self.store.update_open(
+                self._conn,
+                live.id,
+                {
+                    "stop_price": live.stop_price,
+                    "last_exchange_stop": live.stop_price,
+                    "profit_lock_armed": 1,
+                    "locked_stop_roe": new_lock,
+                    "max_roe": max_roe,
+                },
+            )
+            log.info(
+                "em6 bybit %s: ladder %s (ROE now %.2f%%, max %.2f%%, was lock %.1f%%)",
+                live.symbol,
+                mode,
+                roe,
+                max_roe,
+                prev if prev > -900 else 0.0,
+            )
         except Exception:
-            log.exception("em6 bybit: trailing %s", live.symbol)
+            log.exception("em6 bybit: ladder %s", live.symbol)
 
     def _stop_changed(self, live: LiveOpen, new_stop: float) -> bool:
         if live.last_exchange_stop <= 0:
