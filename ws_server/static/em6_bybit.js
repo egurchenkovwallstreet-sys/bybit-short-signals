@@ -211,24 +211,27 @@
     return e * (1 + s / 100);
   }
 
-  function gridLevelsFromCandidate(c) {
-    const ema = Number(c.ema60 || 0);
-    if (!ema) return [];
-    const side = c.side;
-    const out = [];
-    for (const band of c.levels || []) {
-      const lo = Array.isArray(band) ? band[0] : band.stretch_lo;
-      const hi = Array.isArray(band) ? band[1] : band.stretch_hi;
-      if (lo == null) continue;
-      const hiV = hi != null ? hi : lo;
-      out.push({
-        stretch_lo: lo,
-        stretch_hi: hiV,
-        price_lo: priceAtStretch(ema, side, lo),
-        price_hi: priceAtStretch(ema, side, hiV),
+  /** Уникальные границы сетки в % отрыва (6, 6.25, 6.5 …). */
+  function gridStretchLevels(ctx, bandRows) {
+    const seen = new Set();
+    const add = (v) => {
+      const n = Number(v);
+      if (Number.isFinite(n)) seen.add(Math.round(n * 10000) / 10000);
+    };
+    if (bandRows?.length) {
+      bandRows.forEach((lv) => {
+        add(lv.stretch_lo);
+        add(lv.stretch_hi);
       });
+    } else {
+      for (const band of ctx.levels || []) {
+        const lo = Array.isArray(band) ? band[0] : band.stretch_lo;
+        const hi = Array.isArray(band) ? band[1] : band.stretch_hi;
+        add(lo);
+        add(hi);
+      }
     }
-    return out;
+    return [...seen].sort((a, b) => a - b);
   }
 
   function ensureChart(el) {
@@ -319,16 +322,11 @@
       addPriceLine(ema, "#f0b429", "EMA60 5m");
     }
 
-    const grids = ctx.grid_levels?.length ? ctx.grid_levels : gridLevelsFromCandidate(ctx);
-    grids.forEach((lv) => {
-      const p = Number(lv.price_lo);
-      const ph = Number(lv.price_hi);
-      if (p > 0) {
-        addPriceLine(p, "rgba(160, 120, 255, 0.85)", `${lv.stretch_lo}–${lv.stretch_hi}%`);
-      }
-      if (ph > 0 && Math.abs(ph - p) > 1e-12) {
-        addPriceLine(ph, "rgba(120, 160, 255, 0.45)", "");
-      }
+    const side = ctx.side || "short";
+    const bandRows = ctx.grid_levels?.length ? ctx.grid_levels : null;
+    gridStretchLevels(ctx, bandRows).forEach((stretchPct) => {
+      const p = priceAtStretch(ema, side, stretchPct);
+      if (p > 0) addPriceLine(p, "rgba(160, 120, 255, 0.85)", `${stretchPct}%`);
     });
 
     const entry = Number(ctx.entry_price || 0);
