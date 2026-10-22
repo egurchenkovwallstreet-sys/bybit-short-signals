@@ -162,7 +162,7 @@ class Em6BybitStrategy:
         return ema60_stretch_trail_stop(
             entry,
             best,
-            config.PAPER_LEVERAGE,
+            config.em6_bybit_leverage(),
             margin=margin,
             entry_fee=fee,
             funding_paid=0.0,
@@ -321,7 +321,7 @@ class Em6BybitStrategy:
         symbol: str,
         state: SymbolState,
         now_ms: int,
-        margin: float,
+        wallet_available: float,
         *,
         on_exchange: set[str],
         threshold_pct: float,
@@ -344,13 +344,19 @@ class Em6BybitStrategy:
         price = float(state.last_price or 0)
         if price <= 0:
             return
-        if margin < 1.0:
+        lev = config.em6_bybit_leverage()
+        target_margin = config.em6_bybit_margin_usd()
+        if wallet_available + 1e-9 < target_margin:
             return
-        lev = config.PAPER_LEVERAGE
-        qty = self.broker.cap_order_qty(symbol, margin * lev / price)
-        if qty <= 0:
+        planned = self.broker.qty_for_margin(symbol, price, target_margin, lev)
+        if planned is None:
+            log.warning(
+                "em6 bybit %s: не удалось набрать маржу $%.0f (шаг/cap/min order)",
+                symbol,
+                target_margin,
+            )
             return
-        margin = qty * price / lev
+        qty, margin = planned  # margin ≈ $50 после шага qty
         side = ev.side or "short"
         stop = self._compute_stop_for(side, price, price, margin, qty)
         link = f"e6b-{symbol}-{now_ms}"[:36]
@@ -425,7 +431,7 @@ class Em6BybitStrategy:
         except Exception:
             log.exception("em6 bybit wallet")
             equity = avail = 0.0
-        margin_per_trade = equity * config.PAPER_MARGIN_PCT / 100.0
+        margin_per_trade = config.em6_bybit_margin_usd()
         try:
             on_exchange = {p["symbol"] for p in self.broker.linear_positions()}
         except Exception:
@@ -456,7 +462,7 @@ class Em6BybitStrategy:
                 symbol,
                 state,
                 now_ms,
-                margin_per_trade,
+                avail,
                 on_exchange=on_exchange,
                 threshold_pct=threshold,
             )
@@ -467,7 +473,7 @@ class Em6BybitStrategy:
             )
             log.info(
                 "EMA6 Bybit: монет %s, EMA60 %s, канд≥%.2f%% %s, watch %s, открыто %s, "
-                "equity $%.0f, margin/trade $%.2f (%.0f%%)",
+                "equity $%.0f, margin/trade $%.0f × %sx",
                 len(states),
                 ema_ready,
                 threshold,
@@ -476,7 +482,7 @@ class Em6BybitStrategy:
                 len(self.open_trades),
                 equity,
                 margin_per_trade,
-                config.PAPER_MARGIN_PCT,
+                config.em6_bybit_leverage(),
             )
         return {"type": BOARD_TYPE, "timestamp": now_ms, "data": self.view(now_ms)}
 
@@ -528,8 +534,12 @@ class Em6BybitStrategy:
                 "label": "EMA6 Bybit Demo",
                 "wallet_equity": round(wallet.get("equity", 0), 2),
                 "wallet_available": round(wallet.get("available", 0), 2),
-                "margin_pct": config.PAPER_MARGIN_PCT,
-                "leverage": config.PAPER_LEVERAGE,
+                "margin_usd": config.em6_bybit_margin_usd(),
+                "margin_pct": None,
+                "leverage": config.em6_bybit_leverage(),
+                "notional_usd": round(
+                    config.em6_bybit_margin_usd() * config.em6_bybit_leverage(), 2
+                ),
                 "open_trades": len(open_rows),
                 "closed_trades": n_closed,
                 "win_rate": round(100.0 * wins / n_closed, 1) if n_closed else 0.0,

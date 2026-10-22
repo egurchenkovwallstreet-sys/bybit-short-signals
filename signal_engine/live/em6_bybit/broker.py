@@ -77,6 +77,49 @@ class Em6BybitBroker:
             return cap
         return qty
 
+    def qty_for_margin(
+        self,
+        symbol: str,
+        price: float,
+        margin_usd: float,
+        leverage: int,
+    ) -> tuple[float, float] | None:
+        """Подобрать qty под целевую маржу; (qty, фактическая маржа) или None."""
+        if price <= 0 or margin_usd <= 0 or leverage <= 0:
+            return None
+        target_notional = margin_usd * leverage
+        raw_qty = self.cap_order_qty(symbol, target_notional / price)
+        if raw_qty <= 0:
+            return None
+        step, _ = self._instrument(symbol)
+        steps = max(1, int(math.floor(raw_qty / step + 1e-12)))
+        qty = steps * step
+        cap = self._max_mkt_qty.get(symbol) or 0.0
+        if cap > 0 and qty > cap:
+            steps = max(1, int(math.floor(cap / step + 1e-12)))
+            qty = steps * step
+        if qty <= 0:
+            return None
+        notional = qty * price
+        if notional + 1e-9 < config.EM6_BYBIT_MIN_ORDER_VALUE_USDT:
+            return None
+        actual_margin = notional / leverage
+        min_margin = margin_usd * 0.95
+        if actual_margin + 1e-9 < min_margin:
+            extra_steps = int(math.ceil((margin_usd * leverage / price) / step - steps))
+            for _ in range(max(0, extra_steps) + 2):
+                steps += 1
+                qty = steps * step
+                if cap > 0 and qty > cap:
+                    return None
+                notional = qty * price
+                actual_margin = notional / leverage
+                if actual_margin + 1e-9 >= min_margin:
+                    break
+            if actual_margin + 1e-9 < min_margin:
+                return None
+        return qty, actual_margin
+
     def format_qty(self, symbol: str, qty: float) -> str | None:
         if qty <= 0:
             return None
@@ -125,13 +168,15 @@ class Em6BybitBroker:
                     "mark_price": float(p.get("markPrice") or 0),
                     "stop_loss": float(p.get("stopLoss") or 0),
                     "unrealised_pnl": float(p.get("unrealisedPnl") or 0),
-                    "leverage": float(p.get("leverage") or config.PAPER_LEVERAGE),
+                    "leverage": float(
+                        p.get("leverage") or config.em6_bybit_leverage()
+                    ),
                 }
             )
         return out
 
     def set_leverage(self, symbol: str) -> None:
-        lev = str(config.PAPER_LEVERAGE)
+        lev = str(config.em6_bybit_leverage())
         try:
             self._client().set_leverage(
                 category="linear",

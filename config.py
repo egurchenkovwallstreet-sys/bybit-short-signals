@@ -105,6 +105,19 @@ EM6_BYBIT_ADAPT_RAISE_IF_COINS = _env_int("EM6_BYBIT_ADAPT_RAISE_IF_COINS", 5)
 EM6_BYBIT_WATCH_SAMPLE_MS = _env_int("EM6_BYBIT_WATCH_SAMPLE_MS", 10_000)
 EM6_BYBIT_WATCH_STABLE_MS = _env_int("EM6_BYBIT_WATCH_STABLE_MS", 20_000)
 EM6_BYBIT_INITIAL_STOP_COOLDOWN_MS = _env_int("EM6_BYBIT_INITIAL_STOP_COOLDOWN_MS", 15_000)
+# Жёсткий размер: $50 собственных × 10 = $500 номинал на сделку (только EMA6 Bybit).
+EM6_BYBIT_MARGIN_USD = _env_float("EM6_BYBIT_MARGIN_USD", 50.0)
+EM6_BYBIT_LEVERAGE = _env_int("EM6_BYBIT_LEVERAGE", 10)
+EM6_BYBIT_MIN_ORDER_VALUE_USDT = _env_float("EM6_BYBIT_MIN_ORDER_VALUE_USDT", 5.0)
+
+
+def em6_bybit_margin_usd() -> float:
+    return float(EM6_BYBIT_MARGIN_USD)
+
+
+def em6_bybit_leverage() -> int:
+    return int(EM6_BYBIT_LEVERAGE)
+
 
 # 1 — бумажный em6r на «Тесте» параллельно EMA6 Bybit (сравнение PnL).
 EM6R_PAPER_PARALLEL = _env("EM6R_PAPER_PARALLEL", "1")

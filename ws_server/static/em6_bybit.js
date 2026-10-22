@@ -19,7 +19,7 @@
       <div class="paper-card"><span class="label">Закрыто</span><div class="value">${s.closed_trades ?? 0}</div></div>
       <div class="paper-card"><span class="label">Win rate</span><div class="value">${pct(s.win_rate)}</div></div>
       <div class="paper-card"><span class="label">PnL закрытых</span><div class="value ${pnlCls}">$${num(s.total_pnl_closed)}</div></div>
-      <div class="paper-card"><span class="label">Маржа / плечо</span><div class="value">${s.margin_pct ?? 5}% × ${s.leverage ?? 10}</div></div>
+      <div class="paper-card"><span class="label">Маржа / плечо</span><div class="value">$${num(s.margin_usd ?? 50)} × ${s.leverage ?? 10} ($${num(s.notional_usd ?? 500)})</div></div>
     `;
   }
 

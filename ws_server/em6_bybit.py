@@ -50,8 +50,11 @@ def snapshot_from_db() -> dict[str, Any]:
                 "label": "EMA6 Bybit Demo",
                 "wallet_equity": round(wallet_equity, 2),
                 "wallet_available": round(wallet_available, 2),
-                "margin_pct": config.PAPER_MARGIN_PCT,
-                "leverage": config.PAPER_LEVERAGE,
+                "margin_usd": config.em6_bybit_margin_usd(),
+                "leverage": config.em6_bybit_leverage(),
+                "notional_usd": round(
+                    config.em6_bybit_margin_usd() * config.em6_bybit_leverage(), 2
+                ),
                 "open_trades": len(open_rows),
                 "closed_trades": n,
                 "win_rate": round(100.0 * wins / n, 1) if n else 0.0,
