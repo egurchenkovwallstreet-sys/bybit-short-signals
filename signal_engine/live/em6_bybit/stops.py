@@ -1,4 +1,4 @@
-"""EMA6 Bybit: лестница стопа (только ужесточение): 50% → +5% → max−10% → trail 5%."""
+"""EMA6 Bybit: trailing-only лестница 50% → 15% @ +20% ROE → 10% @ +50% ROE."""
 
 from __future__ import annotations
 
@@ -17,51 +17,68 @@ def em6_bybit_initial_trail_roe_pct() -> float:
     return config.em6_bybit_trail_initial_roe()
 
 
-def em6_bybit_ladder_target_stop_roe(current_roe: float) -> float | None:
-    """ROE стопа от текущей цены (mark). До +20% — None (широкий trail 50%)."""
-    if current_roe + 1e-6 < config.em6_bybit_trail_profit_arm_roe():
-        return None
-    floor = config.em6_bybit_trail_lock_roe()
-    if current_roe + 1e-6 >= config.EM6_BYBIT_LADDER_ROE_2:
-        floor = max(floor, current_roe - config.EM6_BYBIT_LADDER_BELOW_MAX)
-    if current_roe + 1e-6 >= config.EM6_BYBIT_LADDER_ROE_3:
-        floor = max(floor, current_roe - config.EM6_BYBIT_LADDER_TRAIL_3)
-    return floor
-
-
-def em6_bybit_use_tight_trail(current_roe: float) -> bool:
-    return current_roe + 1e-6 >= config.EM6_BYBIT_LADDER_ROE_3
-
-
-def em6_bybit_active_trail_roe_pct(current_roe: float) -> float:
-    """До лестницы: 50%. На 3-й ступени: 5% от цены."""
-    if em6_bybit_use_tight_trail(current_roe):
-        return config.EM6_BYBIT_LADDER_TRAIL_3
+def em6_bybit_ladder_trail_gap_candidate(current_roe: float) -> float:
+    """Желаемый зазор trailing (ROE) от текущей цены по порогам."""
+    if current_roe + 1e-6 >= config.em6_bybit_trail_tight_arm_roe():
+        return config.em6_bybit_trail_tight_dist_roe()
+    if current_roe + 1e-6 >= config.em6_bybit_trail_profit_arm_roe():
+        return config.em6_bybit_trail_mid_dist_roe()
     return em6_bybit_initial_trail_roe_pct()
 
 
-def em6_bybit_profit_lock_trail_roe_pct(current_roe: float) -> float:
-    """Устар.: совместимость UI — хвост для lock +5% при первом arm."""
-    arm = config.em6_bybit_trail_profit_arm_roe()
-    lock = config.em6_bybit_trail_lock_roe()
-    return max(arm - lock, current_roe - lock)
+def em6_bybit_active_trail_roe_pct(
+    current_roe: float,
+    locked_trail_gap_roe: float | None = None,
+) -> float:
+    """Фактический/целевой зазор с учётом храповика (только ужесточение)."""
+    cand = em6_bybit_ladder_trail_gap_candidate(current_roe)
+    if locked_trail_gap_roe is None or locked_trail_gap_roe <= 0 or locked_trail_gap_roe > 900:
+        return cand
+    return min(locked_trail_gap_roe, cand)
 
 
-def stop_price_for_roe(
+def normalize_locked_trail_gap(raw: float | None) -> float:
+    """Колонка locked_stop_roe в БД хранит зазор trailing (10 / 15 / 50)."""
+    initial = em6_bybit_initial_trail_roe_pct()
+    if raw is None:
+        return initial
+    v = float(raw)
+    for ok in (
+        initial,
+        config.em6_bybit_trail_mid_dist_roe(),
+        config.em6_bybit_trail_tight_dist_roe(),
+    ):
+        if abs(v - ok) < 0.05:
+            return ok
+    if v <= 0 or v > 900:
+        return initial
+    return initial
+
+
+def stop_price_for_trail_gap(
     side: str,
     entry: float,
+    ref_price: float,
     margin: float,
-    qty: float,
-    stop_roe: float,
+    trail_gap_roe: float,
+    *,
+    entry_fee: float = 0.0,
+    funding_paid: float = 0.0,
 ) -> float:
-    fee = qty * entry * config.PAPER_FEE_RATE_TAKER
+    """Ориентир SL: ref_price минус trail_gap в ROE (для журнала/UI)."""
     lev = config.em6_bybit_leverage()
     if side == "long":
-        if margin > 0:
-            return net_roe_stop_price_long(entry, margin, stop_roe, lev, fee, 0.0)
-        return price_for_long_roe(entry, stop_roe, lev)
+        roe_at_ref = long_roe_pct(entry, ref_price, lev)
+    else:
+        roe_at_ref = roe_pct(entry, ref_price, lev)
+    stop_roe = roe_at_ref - abs(trail_gap_roe)
     if margin > 0:
-        return net_roe_stop_price(entry, margin, stop_roe, lev, fee, 0.0)
+        fee = entry_fee
+        if side == "long":
+            return net_roe_stop_price_long(entry, margin, stop_roe, lev, fee, funding_paid)
+        return net_roe_stop_price(entry, margin, stop_roe, lev, fee, funding_paid)
+    if side == "long":
+        return price_for_long_roe(entry, stop_roe, lev)
     return price_for_roe(entry, stop_roe, lev)
 
 
@@ -74,32 +91,25 @@ def em6_bybit_trailing_stop_price(
     entry_fee: float = 0.0,
     funding_paid: float = 0.0,
     current_roe: float | None = None,
-    locked_stop_roe: float | None = None,
+    locked_trail_gap_roe: float | None = None,
+    ref_price: float | None = None,
 ) -> float:
     lev = config.em6_bybit_leverage()
+    ref = ref_price if ref_price and ref_price > 0 else best_price
     if side == "long":
-        peak = long_roe_pct(entry, best_price, lev)
+        roe_for_trail = current_roe if current_roe is not None else long_roe_pct(entry, ref, lev)
     else:
-        peak = roe_pct(entry, best_price, lev)
-    roe_for_trail = current_roe if current_roe is not None else peak
-    if locked_stop_roe is not None and locked_stop_roe > -900:
-        target_roe = locked_stop_roe
-    else:
-        target = em6_bybit_ladder_target_stop_roe(roe_for_trail)
-        if target is None:
-            trail_gap = em6_bybit_initial_trail_roe_pct()
-            target_roe = roe_for_trail - trail_gap if roe_for_trail > 0 else -trail_gap
-        else:
-            target_roe = target
-    if side == "long":
-        if margin > 0:
-            return net_roe_stop_price_long(
-                entry, margin, target_roe, lev, entry_fee, funding_paid
-            )
-        return price_for_long_roe(entry, target_roe, lev)
-    if margin > 0:
-        return net_roe_stop_price(entry, margin, target_roe, lev, entry_fee, funding_paid)
-    return price_for_roe(entry, target_roe, lev)
+        roe_for_trail = current_roe if current_roe is not None else roe_pct(entry, ref, lev)
+    gap = em6_bybit_active_trail_roe_pct(roe_for_trail, locked_trail_gap_roe)
+    return stop_price_for_trail_gap(
+        side,
+        entry,
+        ref,
+        margin,
+        gap,
+        entry_fee=entry_fee,
+        funding_paid=funding_paid,
+    )
 
 
 def trailing_stop_distance_price(ref_price: float, trail_roe_pct: float | None = None) -> float:

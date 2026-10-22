@@ -417,19 +417,10 @@ class Em6BybitBroker:
         _, tick = self._instrument(symbol)
         dist = max(dist, tick * 2)
         dist_s = self.format_price(symbol, dist)
-        client = self._client()
-        try:
-            client.set_trading_stop(
-                category="linear",
-                symbol=symbol,
-                stopLoss="0",
-                positionIdx=0,
-            )
-        except Exception:
-            pass
-        return client.set_trading_stop(
+        return self._client().set_trading_stop(
             category="linear",
             symbol=symbol,
+            stopLoss="0",
             trailingStop=dist_s,
             slTriggerBy="LastPrice",
             positionIdx=0,
@@ -474,6 +465,7 @@ class Em6BybitBroker:
             category="linear",
             symbol=symbol,
             stopLoss=stop_s,
+            trailingStop="0",
             slTriggerBy="LastPrice",
             positionIdx=0,
         )
