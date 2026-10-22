@@ -375,9 +375,14 @@ class Em6BybitBroker:
         )
 
     def set_trailing_stop_roe(
-        self, symbol: str, *, ref_price: float, side: str
+        self,
+        symbol: str,
+        *,
+        ref_price: float,
+        side: str,
+        trail_roe_pct: float | None = None,
     ) -> dict[str, Any]:
-        dist = trailing_stop_distance_price(ref_price)
+        dist = trailing_stop_distance_price(ref_price, trail_roe_pct)
         _, tick = self._instrument(symbol)
         dist = max(dist, tick * 2)
         dist_s = self.format_price(symbol, dist)

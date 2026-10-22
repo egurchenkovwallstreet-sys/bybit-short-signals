@@ -18,7 +18,10 @@ from signal_engine.live.em6_bybit.grid_entry import (
 from signal_engine.live.em6_bybit.store import Em6BybitStore
 from signal_engine.paper.ema60_stretch_detect import evaluate_ema60_stretch
 from signal_engine.live.em6_bybit.grid_entry import price_at_stretch
-from signal_engine.live.em6_bybit.stops import em6_bybit_trailing_stop_price
+from signal_engine.live.em6_bybit.stops import (
+    em6_bybit_active_trail_roe_pct,
+    em6_bybit_trailing_stop_price,
+)
 from signal_engine.paper.position import long_roe_pct, roe_pct
 from signal_engine.state import SymbolState
 
@@ -41,6 +44,7 @@ class LiveOpen:
     worst_price: float
     opened_at: int
     last_exchange_stop: float = 0.0
+    last_trail_roe_pct: float = 0.0
     ema60: float = 0.0
     grid_levels: list[dict[str, float]] = field(default_factory=list)
 
@@ -232,7 +236,8 @@ class Em6BybitStrategy:
                 "max_roe": round(max_roe, 2),
                 "min_roe": round(self._min_roe(live), 2) if live else round(min(0.0, roe), 2),
                 "opened_at": int(live.opened_at if live else pos.get("open_time_ms") or 0),
-                "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
+                "trail_roe_pct": em6_bybit_active_trail_roe_pct(max_roe),
+                "trail_armed": max_roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
                 "source": "bybit",
                 "ema60": live.ema60 if live else 0.0,
                 "grid_levels": live.grid_levels if live else [],
@@ -255,20 +260,41 @@ class Em6BybitStrategy:
 
     def _ensure_trailing(self, live: LiveOpen, state: SymbolState | None = None) -> None:
         ref = self._ref_price(live, state)
+        peak = self._max_roe(live)
+        trail_roe = em6_bybit_active_trail_roe_pct(peak)
+        if (
+            live.last_trail_roe_pct > 0
+            and abs(trail_roe - live.last_trail_roe_pct) < 1e-6
+            and live.last_exchange_stop > 0
+        ):
+            return
         try:
             resp = self.broker.set_trailing_stop_roe(
-                live.symbol, ref_price=ref, side=live.side
+                live.symbol,
+                ref_price=ref,
+                side=live.side,
+                trail_roe_pct=trail_roe,
             )
             code = resp.get("retCode") if isinstance(resp, dict) else None
             if code not in (0, "0", None):
                 log.warning("em6 bybit trailing %s: %s", live.symbol, resp)
                 return
+            prev = live.last_trail_roe_pct
+            live.last_trail_roe_pct = trail_roe
             live.last_exchange_stop = live.stop_price
             self.store.update_open(
                 self._conn,
                 live.id,
                 {"stop_price": live.stop_price, "last_exchange_stop": live.last_exchange_stop},
             )
+            if prev > 0 and abs(prev - trail_roe) > 1e-6:
+                log.info(
+                    "em6 bybit %s: trail %.0f%% → %.0f%% ROE (peak %.2f%%)",
+                    live.symbol,
+                    prev,
+                    trail_roe,
+                    peak,
+                )
         except Exception:
             log.exception("em6 bybit: trailing %s", live.symbol)
 
@@ -298,10 +324,10 @@ class Em6BybitStrategy:
             "min_roe": self._min_roe(live),
         }
         self.store.update_open(self._conn, live.id, fields)
-        # Trailing −14% ROE на бирже; stop_price — расчёт для UI.
+        self._ensure_trailing(live, state)
 
     def _is_initial_stop_close(self, live: LiveOpen | None, row: dict[str, Any]) -> bool:
-        arm = float(config.PAPER_EM6R_LOCK0_ARM_ROE)
+        arm = config.em6_bybit_trail_arm_roe()
         if live is not None:
             return self._max_roe(live) + 1e-6 < arm
         max_roe = row.get("max_roe")
@@ -484,7 +510,10 @@ class Em6BybitStrategy:
                 return
             stop = self._compute_stop_for(side, price, price, margin, qty)
             tr = self.broker.set_trailing_stop_roe(
-                symbol, ref_price=price, side=side
+                symbol,
+                ref_price=price,
+                side=side,
+                trail_roe_pct=config.em6_bybit_trail_initial_roe(),
             )
             if tr.get("retCode") not in (0, "0", None):
                 log.warning("em6 bybit trailing after open %s: %s", symbol, tr)
@@ -523,18 +552,20 @@ class Em6BybitStrategy:
             worst_price=price,
             opened_at=now_ms,
             last_exchange_stop=stop,
+            last_trail_roe_pct=config.em6_bybit_trail_initial_roe(),
             ema60=ema,
             grid_levels=grid_levels,
         )
         self.open_trades[symbol] = live
         self._watch.pop(symbol, None)
         log.info(
-            "em6 bybit OPEN %s %s notional=$%.2f margin=$%.2f stretch=%.2f trail−14%%",
+            "em6 bybit OPEN %s %s notional=$%.2f margin=$%.2f stretch=%.2f trail−%.0f%% ROE",
             side,
             symbol,
             notional,
             margin,
             stretch,
+            config.em6_bybit_trail_initial_roe(),
         )
 
     def _tick_candidates(
@@ -646,7 +677,9 @@ class Em6BybitStrategy:
                         "exchange_stop": live.last_exchange_stop,
                         "ema60": live.ema60,
                         "grid_levels": live.grid_levels,
-                        "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
+                        "trail_roe_pct": em6_bybit_active_trail_roe_pct(
+                            self._max_roe(live)
+                        ),
                         "notional_usd": round(live.qty * live.entry_price, 2),
                         "source": "local",
                     }

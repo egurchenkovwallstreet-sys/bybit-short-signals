@@ -65,7 +65,7 @@
       <td>${num(r.mark_price)}</td>
       <td class="${pnlClass(upnl)}">$${num(upnl)}</td>
       <td class="${pnlClass(roe)}">${pct(roe)}</td>
-      <td>${fmtStop(r)}</td>
+      <td>${fmtStop(r)} · ${pct(r.trail_roe_pct)}${r.trail_armed ? " ✓" : ""}</td>
       <td>${pct(r.max_roe)}</td>
       <td>$${num(r.notional_usd)}</td>
       <td>${num(r.margin)}</td>

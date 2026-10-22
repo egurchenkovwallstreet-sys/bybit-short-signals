@@ -6,6 +6,7 @@ from typing import Any
 
 import config
 from signal_engine.live.em6_bybit.broker import Em6BybitBroker
+from signal_engine.live.em6_bybit.stops import em6_bybit_active_trail_roe_pct
 from signal_engine.live.em6_bybit.store import Em6BybitStore
 
 
@@ -22,6 +23,7 @@ def _open_rows_from_positions(positions: list[dict[str, Any]]) -> list[dict[str,
         notional = pv if pv > 0 else qty * mark
         upnl = float(pos.get("unrealised_pnl") or 0)
         roe = (upnl / margin * 100.0) if margin > 0 else 0.0
+        max_roe = roe
         rows.append(
             {
                 "symbol": pos["symbol"],
@@ -36,9 +38,10 @@ def _open_rows_from_positions(positions: list[dict[str, Any]]) -> list[dict[str,
                 "roe_pct": round(roe, 2),
                 "stop_loss": float(pos.get("stop_loss") or 0),
                 "trailing_stop": float(pos.get("trailing_stop") or 0),
-                "max_roe": round(roe, 2),
+                "max_roe": round(max_roe, 2),
                 "opened_at": int(pos.get("open_time_ms") or 0),
-                "trail_roe_pct": abs(float(config.PAPER_EM6R_INITIAL_STOP_ROE)),
+                "trail_roe_pct": em6_bybit_active_trail_roe_pct(max_roe),
+                "trail_armed": max_roe + 1e-6 >= config.em6_bybit_trail_arm_roe(),
                 "source": "bybit",
                 "grid_levels": [],
                 "ema60": 0.0,
