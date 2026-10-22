@@ -161,31 +161,28 @@ class Em6BybitBroker:
         return f"{value:.{decimals}f}".rstrip("0").rstrip(".") or str(value)
 
     def wallet_usdt(self) -> dict[str, float]:
-        """Только доступная маржа USDT для новых позиций (не equity всего аккаунта)."""
+        """Доступная маржа USDT (кошелёк USDT − IM), не totalEquity unified."""
         resp = self._client().get_wallet_balance(accountType="UNIFIED")
         avail = 0.0
         wallet_usdt = 0.0
         for acct in (resp.get("result") or {}).get("list") or []:
-            acct_av = float(acct.get("totalAvailableBalance") or 0)
-            if acct_av > 0:
-                avail = acct_av
             for coin in acct.get("coin") or []:
                 if str(coin.get("coin")) != "USDT":
                     continue
                 wallet_usdt = float(coin.get("walletBalance") or 0)
-                coin_av = float(
-                    coin.get("availableBalance")
-                    or coin.get("availableToWithdraw")
-                    or 0
-                )
-                if coin_av > 0:
-                    avail = max(avail, coin_av)
-            if avail > 0:
-                break
+                eq = float(coin.get("equity") or wallet_usdt)
+                im = float(coin.get("totalPositionIM") or 0)
+                oim = float(coin.get("totalOrderIM") or 0)
+                avail = max(0.0, eq - im - oim)
+                if avail <= 0 and wallet_usdt > 0:
+                    avail = max(0.0, wallet_usdt - im - oim)
+            if avail <= 0:
+                tav = acct.get("totalAvailableBalance")
+                if tav not in (None, ""):
+                    avail = float(tav or 0)
         return {
             "available": avail,
             "wallet_balance_usdt": wallet_usdt,
-            # legacy key: дублируем available, не totalEquity
             "equity": avail,
         }
 

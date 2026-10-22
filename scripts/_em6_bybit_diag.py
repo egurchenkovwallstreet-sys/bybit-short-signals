@@ -58,6 +58,16 @@ def main() -> None:
     states = ingest_redis()
     now_ms = int(time.time() * 1000)
     print("symbols from redis", len(states))
+    ema_ready = 0
+    bars5_ok = 0
+    for sym, st in states.items():
+        n5 = len(st.bars_htf.get("5") or [])
+        if n5 >= 62:
+            bars5_ok += 1
+        ev = evaluate_ema60_stretch(st, now_ms)
+        if ev.checks.get("ema_ready", {}).get("ok"):
+            ema_ready += 1
+    print("symbols with >=62 bars 5m:", bars5_ok, "ema60_ready:", ema_ready)
     min_turn = config.ema60_stretch_min_turnover_usdt(VARIANT)
     print("turnover min (em6r variant)", min_turn)
     ge4: list[tuple[float, str, str, str]] = []
