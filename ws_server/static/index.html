@@ -11,6 +11,7 @@
     <div class="brand">Сигналы на шорт</div>
     <nav class="tabs">
       <button type="button" class="tab" data-tab="stats">Статистика</button>
+      <button type="button" class="tab" data-tab="pump-signals">Памп сигналы</button>
       <button type="button" class="tab" data-tab="paper" hidden>Тест стратегии</button>
       <button type="button" class="tab active" data-tab="em6-bybit">EMA6 Bybit</button>
       <button type="button" class="tab" data-tab="balance">Баланс</button>
@@ -89,6 +90,15 @@
     </section>
   </section>
 
+  <section id="view-pump-signals" class="paper-view" hidden>
+    <p class="quiet paper-intro">
+      Три колонки: <strong class="psig-inline-green">зелёная</strong> — готовность к шорту (остановка, разворот, откат ≤15%);
+      <strong class="psig-inline-yellow">жёлтая</strong> — затухание без новых пиков;
+      <strong class="psig-inline-red">красная</strong> — активный рост. Время старта — по Москве.
+    </p>
+    <div id="psig-board" class="psig-board"></div>
+  </section>
+
   <section id="view-em6-bybit" class="paper-view">
     <p class="quiet paper-intro">
       <strong>Bybit Demo</strong>: топ‑7 отрывов EMA60 (5m) ≥4%, сетка 0,25% к EMA и +3% от пика.
@@ -143,7 +153,8 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/paper_test.js?v=20261019pnlglyph"></script>
   <script src="/static/em6_bybit.js?v=20261023chartpan"></script>
+  <script src="/static/pump_signals.js?v=20261023psig1"></script>
   <script src="/static/board_chart.js?v=20261019ema333engine"></script>
-  <script src="/static/app.js?v=20261022em6tab"></script>
+  <script src="/static/app.js?v=20261023psig1"></script>
 </body>
 </html>

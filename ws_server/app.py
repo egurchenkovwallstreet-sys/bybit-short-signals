@@ -80,6 +80,12 @@ async def em6_bybit_snapshot() -> dict[str, Any]:
     return await asyncio.to_thread(em6_bybit_db.snapshot_for_ui, cache)
 
 
+@app.get("/api/pump/signals")
+async def pump_signals_board() -> dict[str, Any]:
+    columns = app.state.hub.cache.view_pump_signals_board()
+    return {"columns": columns, "updated_at": int(time.time() * 1000)}
+
+
 @app.get("/api/paper/trades")
 async def paper_trades(
     status: str = "closed",

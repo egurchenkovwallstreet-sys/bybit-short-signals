@@ -168,10 +168,15 @@ function connectSocket() {
         window.em6Bybit.onTab();
       }
     }
+    if (message.pump_signals && window.pumpSignals) {
+      window.pumpSignals.onSnapshot(message.pump_signals);
+    }
   } else if (message.type === "paper_test") {
     if (window.paperTest) window.paperTest.onSnapshot(message.data);
   } else if (message.type === "em6_bybit") {
     if (window.em6Bybit) window.em6Bybit.onSnapshot(message.data);
+  } else if (message.type === "pump_signals") {
+    if (window.pumpSignals) window.pumpSignals.onBoard(message.data);
   } else if (message.type === "stats") {
     state.stats = message.data;
     renderStats();
@@ -200,6 +205,11 @@ function showTab(name) {
   if (balanceView) balanceView.hidden = name !== "balance";
   const em6View = document.getElementById("view-em6-bybit");
   if (em6View) em6View.hidden = name !== "em6-bybit";
+  const psigView = document.getElementById("view-pump-signals");
+  if (psigView) psigView.hidden = name !== "pump-signals";
+  if (name === "pump-signals" && window.pumpSignals) {
+    requestAnimationFrame(() => window.pumpSignals.onTab());
+  }
   if (name === "em6-bybit" && window.em6Bybit) {
     requestAnimationFrame(() => window.em6Bybit.onTab());
   }

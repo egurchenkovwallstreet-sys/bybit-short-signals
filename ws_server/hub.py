@@ -55,6 +55,7 @@ class Hub:
         self._had_live_board = False
         self.board_dirty = False
         self.pump_scan_dirty = False
+        self.pump_signals_dirty = False
         self.x2_retrace_dirty = False
         self.pump_strategy_dirty = False
         self.vacuum_lh_dirty = False
@@ -105,6 +106,7 @@ class Hub:
             "stats": self.stats(),
             "paper_test": self.paper.view(),
             "em6_bybit": snapshot_for_ui(self.em6_bybit.view()),
+            "pump_signals": self.cache.view_pump_signals_board(),
         }
 
     def on_client(self, client: Client, message: dict[str, Any]) -> None:
@@ -245,6 +247,9 @@ class Hub:
                 elif kind == "pump_scan":
                     self.demo = False
                     self.pump_scan_dirty = True
+                elif kind == "pump_signals":
+                    self.demo = False
+                    self.pump_signals_dirty = True
                 elif kind == "x2_retrace":
                     self.demo = False
                     self.x2_retrace_dirty = True
@@ -279,9 +284,11 @@ class Hub:
             now = time.monotonic()
             paper = self.paper.view() if self.paper_dirty else None
             em6_dirty = self.em6_bybit_dirty
+            pump_signals_push = self.pump_signals_dirty
             em6_tick = bool(self.clients) and now - self._last_em6_push >= em6_gap
             self.board_dirty = False
             self.pump_scan_dirty = False
+            self.pump_signals_dirty = False
             self.x2_retrace_dirty = False
             self.pump_strategy_dirty = False
             self.vacuum_lh_dirty = False
@@ -295,6 +302,9 @@ class Hub:
                     snapshot_for_ui, self.em6_bybit.view()
                 )
                 self._last_em6_push = now
+            pump_sig = (
+                self.cache.view_pump_signals_board() if pump_signals_push else None
+            )
             for client in list(self.clients):
                 try:
                     if paper is not None:
@@ -302,6 +312,10 @@ class Hub:
                     if em6_payload is not None:
                         await client.websocket.send_json(
                             {"type": "em6_bybit", "data": em6_payload}
+                        )
+                    if pump_sig is not None:
+                        await client.websocket.send_json(
+                            {"type": "pump_signals", "data": pump_sig}
                         )
                 except Exception:
                     self.clients.discard(client)

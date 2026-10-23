@@ -303,6 +303,12 @@ def engine_kline_warmup_on_start() -> bool:
     return ENGINE_KLINE_WARMUP.strip().lower() in ("1", "true", "yes", "on")
 PUMP_BOARD_INTERVAL_SEC = _env_int("PUMP_BOARD_INTERVAL_SEC", 9)
 
+# Доска «Памп сигналы» (три колонки).
+PUMP_SIGNALS_GREEN_MAX_DRAWDOWN_PCT = _env_float("PUMP_SIGNALS_GREEN_MAX_DRAWDOWN_PCT", 15.0)
+PUMP_SIGNALS_GREEN_MIN_DRAWDOWN_PCT = _env_float("PUMP_SIGNALS_GREEN_MIN_DRAWDOWN_PCT", 3.0)
+PUMP_SIGNALS_GREEN_MIN_PASSED = _env_int("PUMP_SIGNALS_GREEN_MIN_PASSED", 7)
+PUMP_SIGNALS_RED_MAX_SINCE_PEAK_MIN = _env_int("PUMP_SIGNALS_RED_MAX_SINCE_PEAK_MIN", 25)
+
 # Страница и WebSocket. Только локальный просмотр, сервер не торгует.
 WEB_HOST = _env("WEB_HOST", "127.0.0.1")
 WEB_PORT = _env_int("WEB_PORT", 8787)

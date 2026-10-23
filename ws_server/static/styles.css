@@ -2635,3 +2635,105 @@ th { cursor: pointer; color: var(--muted); }
     padding: 11px 8px;
   }
 }
+
+/* Памп сигналы — три колонки */
+.psig-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.psig-col h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.psig-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.psig-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+
+.psig-card {
+  border-radius: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(20, 22, 28, 0.85);
+}
+
+.psig-col-green .psig-card {
+  border-color: rgba(46, 160, 67, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(46, 160, 67, 0.15);
+}
+
+.psig-col-yellow .psig-card {
+  border-color: rgba(210, 153, 34, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.12);
+}
+
+.psig-col-red .psig-card {
+  border-color: rgba(248, 81, 73, 0.5);
+  box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.12);
+}
+
+.psig-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.psig-symbol {
+  font-size: 15px;
+}
+
+.psig-meta {
+  font-size: 11px;
+  opacity: 0.65;
+}
+
+.psig-dl {
+  margin: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.psig-dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.psig-dl dt {
+  opacity: 0.72;
+  margin: 0;
+}
+
+.psig-dl dd {
+  margin: 0;
+  text-align: right;
+}
+
+.psig-inline-green { color: #3fb950; }
+.psig-inline-yellow { color: #d29922; }
+.psig-inline-red { color: #f85149; }
+
+.psig-empty {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 960px) {
+  .psig-board {
+    grid-template-columns: 1fr;
+  }
+}

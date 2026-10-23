@@ -105,6 +105,8 @@ class MarketCache:
         self.price_24h_pct: dict[str, float] = {}
         self.pump_scan_columns: list[dict[str, Any]] = []
         self.pump_scan_signals: dict[str, dict[str, Any]] = {}
+        self.pump_signals_columns: list[dict[str, Any]] = []
+        self.pump_signals_by_symbol: dict[str, dict[str, Any]] = {}
         self.x2_retrace_columns: list[dict[str, Any]] = []
         self.x2_retrace_signals: dict[str, dict[str, Any]] = {}
         self.pump_strategy_signals: list[dict[str, Any]] = []
@@ -126,6 +128,10 @@ class MarketCache:
             self.pump_scan_columns = list((message.get("data") or {}).get("columns") or [])
             self._reindex_pump_scan()
             return "pump_scan"
+        if kind == "pump_signals_board":
+            self.pump_signals_columns = list((message.get("data") or {}).get("columns") or [])
+            self._reindex_pump_signals()
+            return "pump_signals"
         if kind == "x2_retrace_board":
             self.x2_retrace_columns = list((message.get("data") or {}).get("columns") or [])
             self._reindex_x2_retrace()
@@ -592,6 +598,26 @@ class MarketCache:
                 symbol = signal.get("symbol")
                 if symbol:
                     self.pump_scan_signals[symbol] = signal
+
+    def _reindex_pump_signals(self) -> None:
+        self.pump_signals_by_symbol = {}
+        for column in self.pump_signals_columns:
+            for signal in column.get("signals") or []:
+                symbol = signal.get("symbol")
+                if symbol:
+                    self.pump_signals_by_symbol[str(symbol)] = signal
+
+    def view_pump_signals_board(self) -> list[dict[str, Any]]:
+        view = []
+        for column in self.pump_signals_columns:
+            signals = []
+            for signal in column.get("signals") or []:
+                symbol = str(signal.get("symbol") or "")
+                if not self._signal_turnover_ok(symbol):
+                    continue
+                signals.append(dict(signal))
+            view.append({**column, "signals": signals})
+        return view
 
     def _reindex_x2_retrace(self) -> None:
         self.x2_retrace_signals = {}
