@@ -19,14 +19,7 @@ def _checks(**flags: bool) -> dict:
 class PumpSignalsColumnTests(unittest.TestCase):
     def test_green_when_confluence(self) -> None:
         col = raw_column(
-            checks=_checks(
-                stall=True,
-                oi_1h_negative=True,
-                sells_dominate=True,
-                buys_faded=True,
-                volume_fade=True,
-                short_liq_faded=True,
-            ),
+            checks={k: {"ok": True} for k in MANDATORY},
             metrics={
                 "since_peak_min": 60,
                 "drawdown_from_peak_pct": 8.0,
