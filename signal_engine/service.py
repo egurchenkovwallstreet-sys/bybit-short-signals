@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 
 import config
@@ -34,6 +35,21 @@ class SignalService:
         self._market = None
         self._publisher_redis = None
         self._publisher: RedisPublisher | None = None
+        self._state_lock = threading.Lock()
+
+    def _ingest_locked(self, message: dict) -> None:
+        with self._state_lock:
+            self.engine.ingest(message)
+
+    def _scan_locked(
+        self,
+        ts: int,
+        *,
+        boards: bool,
+        pivots: bool,
+    ) -> list:
+        with self._state_lock:
+            return self.engine.scan(ts, boards=boards, pivots=pivots)
 
     async def run(self) -> None:
         self.engine.store.open()
@@ -98,7 +114,7 @@ class SignalService:
                         paper.process_bab_opposite_exits(self.engine.symbols, ts)
                     if not self._confirm_burst:
                         items = await asyncio.to_thread(
-                            self.engine.scan,
+                            self._scan_locked,
                             ts,
                             boards=boards,
                             pivots=pivots,
@@ -144,18 +160,24 @@ class SignalService:
             out.add(symbol)
         return out
 
-    def _pump_kline_symbols(self) -> list[str]:
-        """Ликвидные пары: для «Памп сигналов» нужна история 15m (find_pump / unified)."""
+    def _pump_board_symbols(self) -> set[str]:
+        from signal_engine.pump_signals import BOARD_ID
+
+        return set(self.engine.watches.active(BOARD_ID).keys())
+
+    def _pump_feed_symbols(self) -> list[str]:
+        """Ликвидные пары + монеты на доске «Памп сигналы» — REST 15m и OI без отдельного опроса."""
         floor = float(config.PUMP_UNIFIED_MIN_TURNOVER_USDT)
-        out: list[str] = []
+        board = self._pump_board_symbols()
+        out: set[str] = set(board)
         for symbol, state in self.engine.symbols.items():
             if not state.last_price:
                 continue
             turn = state.turnover_24h_usdt
             if turn is None or float(turn) < floor:
                 continue
-            out.append(symbol)
-        return sorted(out)
+            out.add(symbol)
+        return sorted(out, key=lambda s: (0 if s in board else 1, s))
 
     async def _warmup_klines_engine(self) -> None:
         """REST: 5m + 15m в движок после рестарта (EMA60, памп-доска)."""
@@ -183,7 +205,7 @@ class SignalService:
                             log.exception("Прогрев %sm %s не получен", interval, symbol)
                             return
                         if message:
-                            self.engine.ingest(message)
+                            self._ingest_locked(message)
 
                 await asyncio.gather(*(one(s) for s in symbols))
 
@@ -199,52 +221,71 @@ class SignalService:
             await rest.close()
 
     async def _engine_pump_15m_loop(self) -> None:
-        """Поддержка 15m для памп-доски, пока paper-test выключен или REST-круг collector далеко."""
+        """REST 15m + OI 5m для памп-доски (те же данные, что на карточках — без второго контура)."""
         from collector.rest_client import BybitRest
         from signal_engine.paper.detect import merged_15m
 
         rest = BybitRest()
         await rest.open()
-        limit = config.KLINE_FETCH_LIMIT
+        kline_limit = config.KLINE_FETCH_LIMIT
         parallel = max(1, config.ENGINE_KLINE_WARMUP_PARALLEL // 2)
         refresh = float(config.PAPER_KLINE_REFRESH_SEC)
-        last_at: dict[str, float] = {}
+        last_kline_at: dict[str, float] = {}
+        last_oi_at: dict[str, float] = {}
         min_bars = 8
+        min_oi_points = 13
         try:
             while True:
                 if self._confirm_burst:
                     await asyncio.sleep(0.5)
                     continue
                 now = time.time()
-                pending: list[str] = []
-                for symbol in self._pump_kline_symbols():
-                    state = self.engine.symbols.get(symbol)
-                    if state is None:
-                        continue
-                    bars = len(merged_15m(state))
-                    if bars >= min_bars and now - last_at.get(symbol, 0.0) < refresh:
-                        continue
-                    pending.append(symbol)
+                pending: list[tuple[str, bool, bool]] = []
+                for symbol in self._pump_feed_symbols():
+                    with self._state_lock:
+                        state = self.engine.symbols.get(symbol)
+                        if state is None:
+                            continue
+                        bars = len(merged_15m(state))
+                        oi_pts = len(state.oi_5m)
+                    need_kline = bars < min_bars or now - last_kline_at.get(symbol, 0.0) >= refresh
+                    need_oi = oi_pts < min_oi_points or now - last_oi_at.get(symbol, 0.0) >= refresh
+                    if need_kline or need_oi:
+                        pending.append((symbol, need_kline, need_oi))
                 if pending:
                     sem = asyncio.Semaphore(parallel)
                     batch = pending[:48]
 
-                    async def fetch(sym: str) -> None:
+                    async def fetch(sym: str, want_kline: bool, want_oi: bool) -> None:
                         async with sem:
-                            try:
-                                message = await rest.fetch_klines(
-                                    sym, "15", limit, locked=False
-                                )
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception:
-                                log.exception("Памп 15m %s не получены", sym)
-                                return
-                            if message:
-                                self.engine.ingest(message)
-                                last_at[sym] = time.time()
+                            if want_kline:
+                                try:
+                                    message = await rest.fetch_klines(
+                                        sym, "15", kline_limit, locked=False
+                                    )
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception:
+                                    log.exception("Памп 15m %s не получены", sym)
+                                else:
+                                    if message:
+                                        self._ingest_locked(message)
+                                        last_kline_at[sym] = time.time()
+                            if want_oi:
+                                try:
+                                    oi_msg = await rest.fetch_open_interest(sym, "5min")
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception:
+                                    log.exception("Памп OI %s не получен", sym)
+                                else:
+                                    if oi_msg:
+                                        self._ingest_locked(oi_msg)
+                                        last_oi_at[sym] = time.time()
 
-                    await asyncio.gather(*(fetch(s) for s in batch))
+                    await asyncio.gather(
+                        *(fetch(sym, nk, no) for sym, nk, no in batch)
+                    )
                 await asyncio.sleep(5)
         finally:
             await rest.close()
@@ -287,7 +328,7 @@ class SignalService:
                             continue
                         if not message:
                             continue
-                        self.engine.ingest(message)
+                        self._ingest_locked(message)
                         candles = ((message.get("data") or {}).get("candles") or [])
                         paper.on_klines(symbol, interval, candles)
                 await asyncio.sleep(5)
@@ -353,7 +394,7 @@ class SignalService:
                     message = fetched.get(symbol)
                     candles = ((message or {}).get("data") or {}).get("candles") or []
                     if message and batch_has_closed_bar(candles, close_ms, now_ms, step):
-                        self.engine.ingest(message)
+                        self._ingest_locked(message)
                         ready += 1
                     else:
                         still.append(symbol)
@@ -399,7 +440,7 @@ class SignalService:
             log.warning("Кадр рынка не JSON")
             return
         if isinstance(message, dict):
-            self.engine.ingest(message)
+            self._ingest_locked(message)
 
 
 def main() -> None:

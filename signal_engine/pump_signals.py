@@ -394,6 +394,13 @@ def build_pump_signals_board(
         elapsed = max(0.0, (now_ms - pump.valley_ts) / MIN_MS)
         tr = reading.taker_ratio
         turnover = state.turnover_24h_usdt
+        vol_ratio = pump.volume_ratio
+        if vol_ratio is None:
+            vol_ratio = reading.volume_ratio
+        if vol_ratio is None:
+            raw_vr = metrics.get("volume_ratio_20m")
+            if raw_vr is not None:
+                vol_ratio = float(raw_vr)
         cards.append(
             PumpSignalCard(
                 symbol=symbol,
@@ -403,7 +410,7 @@ def build_pump_signals_board(
                 growth_start_msk=fmt_msk(pump.valley_ts),
                 elapsed_min=elapsed,
                 growth_pct=float(pump.growth_pct),
-                volume_ratio=pump.volume_ratio,
+                volume_ratio=vol_ratio,
                 taker_buy_pct=buy_pct,
                 taker_sell_pct=sell_pct,
                 taker_ratio=round(tr, 3) if tr is not None else None,
