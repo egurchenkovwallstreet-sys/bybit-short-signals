@@ -90,14 +90,52 @@ def _passed_nine(checks: dict[str, dict]) -> int:
 
 
 def _minutes_no_new_high(state: SymbolState, peak_ts: int, now_ms: int) -> float | None:
-    peak = float(state.last_price or 0)
-    if peak <= 0:
-        return None
+    """Минут с последнего максимума цены с момента peak_ts (1m, иначе 15m)."""
+    session_high = 0.0
     hi_ts = peak_ts
     for bar in state.bars_1m:
-        if bar.timestamp >= peak_ts and bar.high >= peak * 0.999:
-            hi_ts = max(hi_ts, bar.timestamp)
+        if bar.timestamp >= peak_ts and bar.high > session_high:
+            session_high = bar.high
+            hi_ts = bar.timestamp
+    if session_high <= 0:
+        for bar in merged_15m(state):
+            if bar.timestamp >= peak_ts and bar.high > session_high:
+                session_high = bar.high
+                hi_ts = bar.timestamp
+    if session_high <= 0:
+        return None
+    last = float(state.last_price or 0)
+    if last >= session_high * 0.999:
+        hi_ts = max(hi_ts, now_ms - 60_000)
     return max(0.0, (now_ms - hi_ts) / MIN_MS)
+
+
+def _pump_still_active(
+    drawdown: float | None,
+    minutes_no_high: float | None,
+    since_peak: float | None,
+) -> bool:
+    """Рост ещё идёт — не «памп прошёл» (фиолетовая)."""
+    lo = config.PUMP_SIGNALS_PURPLE_MIN_DRAWDOWN_PCT
+    if drawdown is not None and drawdown <= lo:
+        return True
+    min_no_high = config.PUMP_SIGNALS_PURPLE_MIN_MINUTES_NO_HIGH
+    if minutes_no_high is not None and minutes_no_high < min_no_high:
+        return True
+    red_early = config.PUMP_SIGNALS_RED_MAX_SINCE_PEAK_MIN
+    if since_peak is not None and since_peak < red_early:
+        return True
+    return False
+
+
+def _purple_column_ok(
+    drawdown: float | None,
+    minutes_no_high: float | None,
+    since_peak: float | None,
+) -> bool:
+    return is_purple_drawdown(drawdown) and not _pump_still_active(
+        drawdown, minutes_no_high, since_peak
+    )
 
 
 def raw_column(
@@ -139,7 +177,7 @@ def raw_column(
         and config.PAPER_ENTRY_SINCE_PEAK_MIN <= since_peak <= config.PAPER_ENTRY_SINCE_PEAK_MAX
     ):
         return COLUMN_GREEN
-    if is_purple_drawdown(drawdown):
+    if _purple_column_ok(drawdown, minutes_no_high, since_peak):
         return COLUMN_PURPLE
 
     red_min = config.PUMP_SIGNALS_RED_MAX_SINCE_PEAK_MIN
@@ -304,27 +342,47 @@ def build_pump_signals_board(
         metrics = dict(ev.metrics)
         since_peak = (now_ms - pump.peak_ts) / MIN_MS
         metrics["since_peak_min"] = round(since_peak, 1)
-        drawdown = metrics.get("drawdown_from_peak_pct")
+        last = float(state.last_price or pump.peak_price)
+        effective_peak = max(
+            float(pump.peak_price),
+            float(watch.meta.get("peak_price") or 0),
+            last,
+        )
+        for bar in state.bars_1m:
+            if bar.timestamp >= pump.peak_ts:
+                effective_peak = max(effective_peak, bar.high)
+        if effective_peak > 0:
+            drawdown = max(0.0, (1.0 - last / effective_peak) * 100.0)
+            metrics["drawdown_from_peak_pct"] = round(drawdown, 2)
+        else:
+            drawdown = metrics.get("drawdown_from_peak_pct")
         minutes_no_high = _minutes_no_new_high(state, pump.peak_ts, now_ms)
+        dd_f = float(drawdown) if drawdown is not None else None
         candidate = raw_column(
             checks=ev.checks,
             metrics=metrics,
             reading=reading,
             weaken=weaken,
-            drawdown=float(drawdown) if drawdown is not None else None,
+            drawdown=dd_f,
             since_peak=since_peak,
             minutes_no_high=minutes_no_high,
         )
         prev = str(watch.meta.get("column") or COLUMN_RED)
-        confirmed_rank, pending, pending_since = resolve_stage(
-            confirmed=_column_rank(prev),
-            candidate=_column_rank(candidate),
-            pending_stage=watch.pending_stage,
-            pending_since=watch.pending_since,
-            now_ms=now_ms,
-            continued_pump=False,
-        )
-        confirmed_col = _rank_to_column(confirmed_rank)
+        purple_hold = _purple_column_ok(dd_f, minutes_no_high, since_peak)
+        if prev == COLUMN_PURPLE and not purple_hold:
+            confirmed_col = candidate
+            pending = None
+            pending_since = None
+        else:
+            confirmed_rank, pending, pending_since = resolve_stage(
+                confirmed=_column_rank(prev),
+                candidate=_column_rank(candidate),
+                pending_stage=watch.pending_stage,
+                pending_since=watch.pending_since,
+                now_ms=now_ms,
+                continued_pump=_pump_still_active(dd_f, minutes_no_high, since_peak),
+            )
+            confirmed_col = _rank_to_column(confirmed_rank)
         watch.confirmed_stage = confirmed_rank
         watch.pending_stage = pending
         watch.pending_since = pending_since

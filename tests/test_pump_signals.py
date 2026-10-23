@@ -87,6 +87,30 @@ class PumpSignalsColumnTests(unittest.TestCase):
         )
         self.assertEqual(col, COLUMN_PURPLE)
 
+    def test_no_purple_while_new_highs(self) -> None:
+        col = raw_column(
+            checks={k: {"ok": False} for k in MANDATORY},
+            metrics={"since_peak_min": 120, "drawdown_from_peak_pct": 25.0, "pump": {}},
+            reading=Reading(),
+            weaken=1,
+            drawdown=25.0,
+            since_peak=120.0,
+            minutes_no_high=5.0,
+        )
+        self.assertNotEqual(col, COLUMN_PURPLE)
+
+    def test_no_purple_low_drawdown_active(self) -> None:
+        col = raw_column(
+            checks=_checks(stall=False),
+            metrics={"since_peak_min": 10, "drawdown_from_peak_pct": 5.0, "pump": {}},
+            reading=Reading(),
+            weaken=0,
+            drawdown=5.0,
+            since_peak=10.0,
+            minutes_no_high=2.0,
+        )
+        self.assertEqual(col, COLUMN_RED)
+
     def test_remove_at_70(self) -> None:
         st = SymbolState("X")
         st.last_price = 30.0
