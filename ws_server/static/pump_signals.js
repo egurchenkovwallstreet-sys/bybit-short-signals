@@ -1,4 +1,4 @@
-/** Вкладка «Памп сигналы»: три колонки red / yellow / green. */
+/** Вкладка «Памп сигналы»: колонки + карточки монет. */
 
 (function () {
   const COL_CLASS = {
@@ -6,6 +6,13 @@
     yellow: "psig-col-yellow",
     red: "psig-col-red",
     purple: "psig-col-purple",
+  };
+
+  const CARD_CLASS = {
+    green: "psig-card-green",
+    yellow: "psig-card-yellow",
+    red: "psig-card-red",
+    purple: "psig-card-purple",
   };
 
   let columns = [];
@@ -26,33 +33,64 @@
     return `×${Number(v).toFixed(1)}`;
   }
 
+  function metric(label, value, extraClass) {
+    const row = document.createElement("div");
+    row.className = "psig-metric";
+    const lab = document.createElement("span");
+    lab.className = "psig-m-label";
+    lab.textContent = label;
+    const val = document.createElement("span");
+    val.className = `psig-m-value${extraClass ? ` ${extraClass}` : ""}`;
+    val.textContent = value;
+    row.appendChild(lab);
+    row.appendChild(val);
+    return row;
+  }
+
   function renderCard(sig) {
     const col = sig.column || "red";
     const card = document.createElement("article");
-    card.className = `psig-card ${COL_CLASS[col] || ""}`;
+    card.className = `psig-card ${CARD_CLASS[col] || ""}`;
     card.dataset.symbol = sig.symbol;
 
-    const oi1 = sig.oi_1h_pct;
-    const oi4 = sig.oi_4h_pct;
-    const buy = sig.taker_buy_pct;
-    const sell = sig.taker_sell_pct;
+    const head = document.createElement("header");
+    head.className = "psig-card-head";
+    const sym = document.createElement("strong");
+    sym.className = "psig-symbol";
+    sym.textContent = sig.symbol || "—";
+    const meta = document.createElement("span");
+    meta.className = "psig-meta";
+    meta.textContent = sig.trigger || "";
+    head.appendChild(sym);
+    head.appendChild(meta);
+    card.appendChild(head);
 
-    card.innerHTML = `
-      <header class="psig-card-head">
-        <strong class="psig-symbol">${sig.symbol}</strong>
-        <span class="psig-meta">${sig.trigger || ""}</span>
-      </header>
-      <dl class="psig-dl">
-        <div><dt>Старт роста (МСК)</dt><dd>${sig.growth_start_msk || "—"}</dd></div>
-        <div><dt>Прошло</dt><dd>${sig.elapsed_label || "—"}</dd></div>
-        <div><dt>Рост от дна</dt><dd>${fmtPct(sig.growth_pct)}</dd></div>
-        <div><dt>Объём (ratio)</dt><dd>${fmtVolRatio(sig.volume_ratio)}</dd></div>
-        <div><dt>Покупки / продажи</dt><dd>${fmtNum(buy, 0)}% / ${fmtNum(sell, 0)}%</dd></div>
-        <div><dt>OI 1ч / 4ч</dt><dd>${fmtPct(oi1)} / ${fmtPct(oi4)}</dd></div>
-        <div><dt>Откат от пика</dt><dd>${fmtPct(sig.drawdown_from_peak_pct)}</dd></div>
-        <div><dt>Условий 9</dt><dd>${sig.passed_count ?? "—"} · ослабление ${sig.weaken_score ?? "—"}</dd></div>
-      </dl>
-    `;
+    const grid = document.createElement("div");
+    grid.className = "psig-metrics";
+    const dd = sig.drawdown_from_peak_pct;
+    const ddClass = dd != null && Number(dd) > 0 ? "psig-val-warn" : "";
+    const growthClass = sig.growth_pct != null && Number(sig.growth_pct) >= 0 ? "psig-val-up" : "";
+    grid.appendChild(metric("Старт (МСК)", sig.growth_start_msk || "—"));
+    grid.appendChild(metric("Прошло", sig.elapsed_label || "—"));
+    grid.appendChild(metric("Рост от дна", fmtPct(sig.growth_pct), growthClass));
+    grid.appendChild(metric("Объём", fmtVolRatio(sig.volume_ratio)));
+    grid.appendChild(
+      metric(
+        "Покупки / продажи",
+        `${fmtNum(sig.taker_buy_pct, 0)}% / ${fmtNum(sig.taker_sell_pct, 0)}%`
+      )
+    );
+    grid.appendChild(
+      metric("OI 1ч / 4ч", `${fmtPct(sig.oi_1h_pct)} / ${fmtPct(sig.oi_4h_pct)}`)
+    );
+    grid.appendChild(metric("Откат от пика", fmtPct(dd), ddClass));
+    grid.appendChild(
+      metric(
+        "Шлюз · ослабление",
+        `${sig.passed_count ?? "—"} / 9 · ${sig.weaken_score ?? "—"}`
+      )
+    );
+    card.appendChild(grid);
     return card;
   }
 
@@ -71,38 +109,66 @@
     for (const col of columns) {
       const wrap = document.createElement("section");
       wrap.className = `psig-col ${COL_CLASS[col.id] || ""}`;
+
+      const panel = document.createElement("div");
+      panel.className = "psig-col-panel";
+
       const title = document.createElement("h3");
+      title.className = "psig-col-title";
       title.textContent = col.title || col.id;
-      wrap.appendChild(title);
+      panel.appendChild(title);
+
       if (col.hint) {
         const hint = document.createElement("p");
-        hint.className = "quiet psig-hint";
+        hint.className = "psig-hint";
         hint.textContent = col.hint;
-        wrap.appendChild(hint);
+        panel.appendChild(hint);
       }
+
       const list = document.createElement("div");
       list.className = "psig-list";
       const signals = col.signals || [];
       if (!signals.length) {
         const none = document.createElement("p");
-        none.className = "quiet";
-        none.textContent = "—";
+        none.className = "psig-none";
+        none.textContent = "Пусто";
         list.appendChild(none);
       } else {
         for (const sig of signals) {
           list.appendChild(renderCard(sig));
         }
       }
-      wrap.appendChild(list);
+      panel.appendChild(list);
+      wrap.appendChild(panel);
       root.appendChild(wrap);
     }
   }
 
   const EMPTY_COLUMNS = [
-    { id: "green", title: "Готовы к шорту", hint: "", signals: [] },
-    { id: "yellow", title: "Затухание", hint: "", signals: [] },
-    { id: "red", title: "Активный рост", hint: "", signals: [] },
-    { id: "purple", title: "Памп прошёл", hint: "", signals: [] },
+    {
+      id: "green",
+      title: "Готовы к шорту",
+      hint: "Памп остановился, откат от пика ≤15%",
+      signals: [],
+    },
+    {
+      id: "yellow",
+      title: "Затухание",
+      hint: "Нет новых пиков, ослабление пампа",
+      signals: [],
+    },
+    {
+      id: "red",
+      title: "Активный рост",
+      hint: "Памп идёт, затухания мало",
+      signals: [],
+    },
+    {
+      id: "purple",
+      title: "Памп прошёл",
+      hint: "Откат от пика 15–70% — дамп уже идёт",
+      signals: [],
+    },
   ];
 
   function onBoard(data) {
@@ -113,15 +179,17 @@
 
   function onTab() {
     render();
-    if (!columns.length) {
-      fetch("/api/pump/signals")
-        .then((r) => r.json())
-        .then((payload) => onBoard(payload.columns))
-        .catch(() => {});
-    }
+    fetch("/api/pump/signals")
+      .then((r) => r.json())
+      .then((payload) => onBoard(payload.columns))
+      .catch(() => {});
   }
 
-  window.pumpSignals = { onBoard, onTab, onSnapshot(payload) {
-    if (payload) onBoard(payload);
-  } };
+  window.pumpSignals = {
+    onBoard,
+    onTab,
+    onSnapshot(payload) {
+      if (payload) onBoard(payload);
+    },
+  };
 })();
