@@ -1,4 +1,7 @@
-"""Отбор USDT-перпетуалов: без innovation/delisting, возраст и объём."""
+"""Отбор USDT-перпетуалов: при обороте ≥ UNIVERSE_LIQUID_TURNOVER — любой Trading-перп (innovation, delist, молодые).
+
+Ниже порога ликвидности — прежние ограничения (innovation, delist, возраст) и UNIVERSE_MIN_TURNOVER.
+"""
 
 from __future__ import annotations
 
@@ -93,6 +96,11 @@ def reject_reason(
         return "status"
     if item.get("isPreListing"):
         return "pre_listing"
+    if turnover_24h is None:
+        return "no_ticker"
+    liquid_floor = float(config.UNIVERSE_LIQUID_TURNOVER_USDT)
+    if turnover_24h >= liquid_floor:
+        return None
     if _is_innovation_zone(item):
         return "innovation"
     if _scheduled_delisting(item):
@@ -105,8 +113,6 @@ def reject_reason(
         return "no_launch"
     if now_ms - launch_ms < min_listing_age_ms:
         return "too_young"
-    if turnover_24h is None:
-        return "no_ticker"
     if turnover_24h < min_turnover_usdt:
         return "low_volume"
     return None

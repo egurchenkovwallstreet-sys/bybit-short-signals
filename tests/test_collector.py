@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+import unittest.mock
 
+import config
 from collector.buffer import DropOldestQueue
 from collector.normalize import (
     kline_message,
@@ -257,11 +259,37 @@ class UniverseFilterTest(unittest.TestCase):
             min_turnover_usdt=100_000.0,
             min_listing_age_ms=three_months_ms,
         )
-        self.assertEqual(symbols, ["GOODUSDT"])
-        self.assertEqual(stats.skipped_innovation, 1)
-        self.assertEqual(stats.skipped_too_young, 1)
-        self.assertEqual(stats.skipped_delisting, 1)
+        self.assertEqual(
+            symbols,
+            ["DELISTUSDT", "GOODUSDT", "INNOUSDT", "YOUNGUSDT"],
+        )
         self.assertEqual(stats.skipped_low_volume, 1)
+
+    def test_innovation_excluded_below_liquid_floor(self) -> None:
+        now_ms = 1_700_000_000_000
+        three_months_ms = 90 * 86400 * 1000
+        instruments = [
+            {
+                "symbol": "INNOUSDT",
+                "quoteCoin": "USDT",
+                "contractType": "LinearPerpetual",
+                "status": "Trading",
+                "symbolType": "innovation",
+                "launchTime": str(now_ms - three_months_ms - 86400000),
+                "deliveryTime": "0",
+            },
+        ]
+        turnover = {"INNOUSDT": 250_000.0}
+        with unittest.mock.patch.object(config, "UNIVERSE_LIQUID_TURNOVER_USDT", 300_000.0):
+            symbols, stats = filter_universe(
+                instruments,
+                turnover,
+                now_ms=now_ms,
+                min_turnover_usdt=300_000.0,
+                min_listing_age_ms=three_months_ms,
+            )
+        self.assertEqual(symbols, [])
+        self.assertEqual(stats.skipped_innovation, 1)
 
 
 class InstrumentsTest(unittest.TestCase):
