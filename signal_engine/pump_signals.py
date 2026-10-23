@@ -186,6 +186,7 @@ class PumpSignalCard:
     trigger: str
     cvd_divergence: bool
     updated_at: int
+    turnover_24h_usdt: float | None = None
 
     def to_data(self) -> dict[str, Any]:
         return {
@@ -210,6 +211,7 @@ class PumpSignalCard:
             "trigger": self.trigger,
             "cvd_divergence": self.cvd_divergence,
             "updated_at": self.updated_at,
+            "turnover_24h_usdt": self.turnover_24h_usdt,
         }
 
 
@@ -333,6 +335,7 @@ def build_pump_signals_board(
         buy_pct, sell_pct = _taker_pcts(reading.taker_ratio)
         elapsed = max(0.0, (now_ms - pump.valley_ts) / MIN_MS)
         tr = reading.taker_ratio
+        turnover = state.turnover_24h_usdt
         cards.append(
             PumpSignalCard(
                 symbol=symbol,
@@ -355,6 +358,7 @@ def build_pump_signals_board(
                 trigger=str(pump.trigger or ""),
                 cvd_divergence=reading.cvd_divergence,
                 updated_at=now_ms,
+                turnover_24h_usdt=float(turnover) if turnover is not None else None,
             )
         )
 

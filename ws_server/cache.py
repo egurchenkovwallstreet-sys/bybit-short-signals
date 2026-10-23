@@ -613,7 +613,7 @@ class MarketCache:
             signals = []
             for signal in column.get("signals") or []:
                 symbol = str(signal.get("symbol") or "")
-                if not self._signal_turnover_ok(symbol):
+                if not self._pump_strategy_turnover_ok(symbol, signal):
                     continue
                 signals.append(dict(signal))
             view.append({**column, "signals": signals})

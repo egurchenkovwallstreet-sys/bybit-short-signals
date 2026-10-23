@@ -59,7 +59,8 @@ class SignalService:
         self._confirm_burst = False
         side_tasks: list[asyncio.Task] = []
         if config.engine_kline_warmup_on_start():
-            side_tasks.append(asyncio.create_task(self._warmup_klines_5m()))
+            side_tasks.append(asyncio.create_task(self._warmup_klines_engine()))
+        side_tasks.append(asyncio.create_task(self._engine_pump_15m_loop()))
         if self.engine.paper is not None and config.paper_test_enabled():
             side_tasks.append(asyncio.create_task(self._paper_kline_loop()))
             side_tasks.append(asyncio.create_task(self._pivot_confirm_loop()))
@@ -137,8 +138,21 @@ class SignalService:
             out.add(symbol)
         return out
 
-    async def _warmup_klines_5m(self) -> None:
-        """REST: 5m история в движок после рестарта (EMA60 без 15-минутного ожидания collector)."""
+    def _pump_kline_symbols(self) -> list[str]:
+        """Ликвидные пары: для «Памп сигналов» нужна история 15m (find_pump / unified)."""
+        floor = float(config.PUMP_UNIFIED_MIN_TURNOVER_USDT)
+        out: list[str] = []
+        for symbol, state in self.engine.symbols.items():
+            if not state.last_price:
+                continue
+            turn = state.turnover_24h_usdt
+            if turn is None or float(turn) < floor:
+                continue
+            out.append(symbol)
+        return sorted(out)
+
+    async def _warmup_klines_engine(self) -> None:
+        """REST: 5m + 15m в движок после рестарта (EMA60, памп-доска)."""
         from collector.rest_client import BybitRest
 
         rest = BybitRest()
@@ -153,24 +167,81 @@ class SignalService:
             async def one(symbol: str) -> None:
                 nonlocal loaded
                 async with sem:
-                    try:
-                        message = await rest.fetch_klines(symbol, "5", limit, locked=False)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception:
-                        log.exception("Прогрев 5m %s не получен", symbol)
-                        return
-                    if message:
-                        self.engine.ingest(message)
+                    ok = False
+                    for interval in ("5", "15"):
+                        try:
+                            message = await rest.fetch_klines(
+                                symbol, interval, limit, locked=False
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            log.exception("Прогрев %sm %s не получен", interval, symbol)
+                            continue
+                        if message:
+                            self.engine.ingest(message)
+                            ok = True
+                    if ok:
                         loaded += 1
 
             await asyncio.gather(*(one(s) for s in symbols))
             log.info(
-                "Прогрев 5m для EMA: %s/%s монет (limit=%s)",
+                "Прогрев 5m+15m: %s/%s монет (limit=%s)",
                 loaded,
                 len(symbols),
                 limit,
             )
+        finally:
+            await rest.close()
+
+    async def _engine_pump_15m_loop(self) -> None:
+        """Поддержка 15m для памп-доски, пока paper-test выключен или REST-круг collector далеко."""
+        from collector.rest_client import BybitRest
+        from signal_engine.paper.detect import merged_15m
+
+        rest = BybitRest()
+        await rest.open()
+        limit = config.KLINE_FETCH_LIMIT
+        parallel = max(1, config.ENGINE_KLINE_WARMUP_PARALLEL // 2)
+        refresh = float(config.PAPER_KLINE_REFRESH_SEC)
+        last_at: dict[str, float] = {}
+        min_bars = 8
+        try:
+            while True:
+                if self._confirm_burst:
+                    await asyncio.sleep(0.5)
+                    continue
+                now = time.time()
+                pending: list[str] = []
+                for symbol in self._pump_kline_symbols():
+                    state = self.engine.symbols.get(symbol)
+                    if state is None:
+                        continue
+                    bars = len(merged_15m(state))
+                    if bars >= min_bars and now - last_at.get(symbol, 0.0) < refresh:
+                        continue
+                    pending.append(symbol)
+                if pending:
+                    sem = asyncio.Semaphore(parallel)
+                    batch = pending[:48]
+
+                    async def fetch(sym: str) -> None:
+                        async with sem:
+                            try:
+                                message = await rest.fetch_klines(
+                                    sym, "15", limit, locked=False
+                                )
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception:
+                                log.exception("Памп 15m %s не получены", sym)
+                                return
+                            if message:
+                                self.engine.ingest(message)
+                                last_at[sym] = time.time()
+
+                    await asyncio.gather(*(fetch(s) for s in batch))
+                await asyncio.sleep(5)
         finally:
             await rest.close()
 
