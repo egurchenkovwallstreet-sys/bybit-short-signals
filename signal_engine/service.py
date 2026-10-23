@@ -97,7 +97,13 @@ class SignalService:
                             self.engine.symbols.setdefault(sym, SymbolState(sym))
                         paper.process_bab_opposite_exits(self.engine.symbols, ts)
                     if not self._confirm_burst:
-                        for item in self.engine.scan(ts, boards=boards, pivots=pivots):
+                        items = await asyncio.to_thread(
+                            self.engine.scan,
+                            ts,
+                            boards=boards,
+                            pivots=pivots,
+                        )
+                        for item in items:
                             self._publisher.publish(item)
                     next_scan = now + config.MARKET_SCAN_INTERVAL_SEC
                     if boards:
@@ -164,11 +170,9 @@ class SignalService:
             sem = asyncio.Semaphore(parallel)
             loaded = 0
 
-            async def one(symbol: str) -> None:
-                nonlocal loaded
-                async with sem:
-                    ok = False
-                    for interval in ("5", "15"):
+            async def fetch_interval(interval: str) -> None:
+                async def one(symbol: str) -> None:
+                    async with sem:
                         try:
                             message = await rest.fetch_klines(
                                 symbol, interval, limit, locked=False
@@ -177,18 +181,18 @@ class SignalService:
                             raise
                         except Exception:
                             log.exception("Прогрев %sm %s не получен", interval, symbol)
-                            continue
+                            return
                         if message:
                             self.engine.ingest(message)
-                            ok = True
-                    if ok:
-                        loaded += 1
 
-            await asyncio.gather(*(one(s) for s in symbols))
+                await asyncio.gather(*(one(s) for s in symbols))
+
+            await fetch_interval("15")
+            await fetch_interval("5")
+            loaded = len(symbols)
             log.info(
-                "Прогрев 5m+15m: %s/%s монет (limit=%s)",
+                "Прогрев 15m+5m: %s монет (limit=%s)",
                 loaded,
-                len(symbols),
                 limit,
             )
         finally:

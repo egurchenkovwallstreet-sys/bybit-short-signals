@@ -63,14 +63,17 @@ class Engine:
                 log.exception("Тест стратегии: ошибка скана")
         if boards:
             try:
-                out.append(
-                    build_pump_signals_board(
-                        self.symbols,
-                        now_ms,
-                        self.watches,
-                        self.paper,
-                    )
+                board = build_pump_signals_board(
+                    self.symbols,
+                    now_ms,
+                    self.watches,
+                    self.paper,
                 )
+                cols = (board.get("data") or {}).get("columns") or []
+                n_cards = sum(len(c.get("signals") or []) for c in cols)
+                if n_cards:
+                    log.info("Памп сигналы: карточек %s", n_cards)
+                out.append(board)
             except Exception:
                 log.exception("Памп сигналы: ошибка скана")
         return out

@@ -98,8 +98,16 @@
     }
   }
 
+  const EMPTY_COLUMNS = [
+    { id: "green", title: "Готовы к шорту", hint: "", signals: [] },
+    { id: "yellow", title: "Затухание", hint: "", signals: [] },
+    { id: "red", title: "Активный рост", hint: "", signals: [] },
+    { id: "purple", title: "Памп прошёл", hint: "", signals: [] },
+  ];
+
   function onBoard(data) {
-    columns = Array.isArray(data) ? data : data?.columns || [];
+    const raw = Array.isArray(data) ? data : data?.columns || [];
+    columns = raw.length ? raw : EMPTY_COLUMNS;
     render();
   }
 
