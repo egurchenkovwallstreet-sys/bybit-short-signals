@@ -5,6 +5,7 @@
     green: "psig-col-green",
     yellow: "psig-col-yellow",
     red: "psig-col-red",
+    purple: "psig-col-purple",
   };
 
   let columns = [];

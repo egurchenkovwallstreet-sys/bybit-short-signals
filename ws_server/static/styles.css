@@ -2639,7 +2639,7 @@ th { cursor: pointer; color: var(--muted); }
 /* Памп сигналы — три колонки */
 .psig-board {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   align-items: start;
 }
@@ -2682,6 +2682,11 @@ th { cursor: pointer; color: var(--muted); }
 .psig-col-red .psig-card {
   border-color: rgba(248, 81, 73, 0.5);
   box-shadow: inset 0 0 0 1px rgba(248, 81, 73, 0.12);
+}
+
+.psig-col-purple .psig-card {
+  border-color: rgba(163, 113, 247, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(163, 113, 247, 0.15);
 }
 
 .psig-card-head {
@@ -2727,12 +2732,19 @@ th { cursor: pointer; color: var(--muted); }
 .psig-inline-green { color: #3fb950; }
 .psig-inline-yellow { color: #d29922; }
 .psig-inline-red { color: #f85149; }
+.psig-inline-purple { color: #a371f7; }
 
 .psig-empty {
   grid-column: 1 / -1;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1200px) {
+  .psig-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
   .psig-board {
     grid-template-columns: 1fr;
   }

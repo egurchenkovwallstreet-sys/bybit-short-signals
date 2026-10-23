@@ -1,4 +1,4 @@
-"""Доска «Памп сигналы»: красная / жёлтая / зелёная колонки."""
+"""Доска «Памп сигналы»: зелёная / жёлтая / красная / фиолетовая колонки."""
 
 from __future__ import annotations
 
@@ -19,11 +19,8 @@ from signal_engine.paper.detect import (
 )
 from signal_engine.paper.tape import SymbolTape
 from signal_engine.pump_scan import _weakening_score
-from signal_engine.pump_unified import (
-    detect_unified_episode,
-    should_remove_after_peak_drawdown,
-    symbol_has_unified_pump,
-)
+from signal_engine.pump_phases import drawdown_from_peak_pct
+from signal_engine.pump_unified import detect_unified_episode, symbol_has_unified_pump
 from signal_engine.stage_debounce import resolve_stage
 from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
 
@@ -38,8 +35,38 @@ MIN_MS = 60_000
 COLUMN_RED = "red"
 COLUMN_YELLOW = "yellow"
 COLUMN_GREEN = "green"
-_COLUMN_RANK = {COLUMN_RED: 1, COLUMN_YELLOW: 2, COLUMN_GREEN: 3}
-_RANK_COLUMN = {1: COLUMN_RED, 2: COLUMN_YELLOW, 3: COLUMN_GREEN}
+COLUMN_PURPLE = "purple"
+_COLUMN_RANK = {
+    COLUMN_RED: 1,
+    COLUMN_YELLOW: 2,
+    COLUMN_GREEN: 3,
+    COLUMN_PURPLE: 4,
+}
+_RANK_COLUMN = {
+    1: COLUMN_RED,
+    2: COLUMN_YELLOW,
+    3: COLUMN_GREEN,
+    4: COLUMN_PURPLE,
+}
+
+
+def should_remove_pump_signal(state: SymbolState, peak_price: float) -> bool:
+    """Снять с доски: откат от пика пампа ≥ порога удаления (по умолчанию 70%)."""
+    if peak_price <= 0:
+        return False
+    price = state.last_price
+    if price is None or price <= 0:
+        return False
+    return drawdown_from_peak_pct(price, peak_price) >= config.PUMP_SIGNALS_REMOVE_DRAWDOWN_PCT
+
+
+def is_purple_drawdown(drawdown: float | None) -> bool:
+    if drawdown is None:
+        return False
+    lo = config.PUMP_SIGNALS_PURPLE_MIN_DRAWDOWN_PCT
+    hi = config.PUMP_SIGNALS_PURPLE_MAX_DRAWDOWN_PCT
+    # Зелёная колонка держит откат до 15% включительно; фиолетовая — строго выше.
+    return drawdown > lo and drawdown < hi
 
 
 def fmt_msk(ts_ms: int) -> str:
@@ -112,6 +139,8 @@ def raw_column(
         and config.PAPER_ENTRY_SINCE_PEAK_MIN <= since_peak <= config.PAPER_ENTRY_SINCE_PEAK_MAX
     ):
         return COLUMN_GREEN
+    if is_purple_drawdown(drawdown):
+        return COLUMN_PURPLE
 
     red_min = config.PUMP_SIGNALS_RED_MAX_SINCE_PEAK_MIN
     if not stall and since_peak is not None and since_peak < red_min:
@@ -122,9 +151,6 @@ def raw_column(
     if drawdown is not None and drawdown < 2.0 and not stall:
         return COLUMN_RED
     if weaken <= 1 and not stall and (reading.oi_change_1h_pct or 0) > 0:
-        return COLUMN_RED
-
-    if drawdown is not None and drawdown > green_dd_max:
         return COLUMN_RED
 
     return COLUMN_YELLOW
@@ -252,7 +278,7 @@ def build_pump_signals_board(
         if state.last_price > peak:
             peak = float(state.last_price)
             watch.meta["peak_price"] = peak
-        if should_remove_after_peak_drawdown(state, peak):
+        if should_remove_pump_signal(state, peak):
             watches.remove(BOARD_ID, symbol)
             continue
         if growth_pct_negative(state):
@@ -336,21 +362,39 @@ def build_pump_signals_board(
         COLUMN_GREEN: [],
         COLUMN_YELLOW: [],
         COLUMN_RED: [],
+        COLUMN_PURPLE: [],
     }
     for card in cards:
         grouped[card.column].append(card)
 
     columns = []
-    for col_id, title, hint in (
-        (COLUMN_GREEN, "Готовы к шорту", "Памп остановился, разворот, откат от пика ≤15%"),
-        (COLUMN_YELLOW, "Затухание", "Нет новых пиков, ослабление пампа"),
-        (COLUMN_RED, "Активный рост", "Памп идёт, затухания мало"),
+    for col_id, title, hint, sort_key in (
+        (
+            COLUMN_GREEN,
+            "Готовы к шорту",
+            "Памп остановился, разворот, откат от пика ≤15%",
+            lambda c: (c.passed_count, c.weaken_score, c.growth_pct),
+        ),
+        (
+            COLUMN_YELLOW,
+            "Затухание",
+            "Нет новых пиков, ослабление пампа",
+            lambda c: (c.passed_count, c.weaken_score, c.growth_pct),
+        ),
+        (
+            COLUMN_RED,
+            "Активный рост",
+            "Памп идёт, затухания мало",
+            lambda c: (c.passed_count, c.weaken_score, c.growth_pct),
+        ),
+        (
+            COLUMN_PURPLE,
+            "Памп прошёл",
+            "Откат от пика 15–70% — дамп уже идёт; при ≥70% монета с доски снимается",
+            lambda c: (c.drawdown_pct or 0, c.since_peak_min or 0),
+        ),
     ):
-        ordered = sorted(
-            grouped[col_id],
-            key=lambda c: (c.passed_count, c.weaken_score, c.growth_pct),
-            reverse=True,
-        )
+        ordered = sorted(grouped[col_id], key=sort_key, reverse=True)
         columns.append(
             {
                 "id": col_id,

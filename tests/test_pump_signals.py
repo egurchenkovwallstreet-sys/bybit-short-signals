@@ -6,7 +6,16 @@ import unittest
 
 from signal_engine.evaluate import Reading
 from signal_engine.paper.detect import MANDATORY
-from signal_engine.pump_signals import COLUMN_GREEN, COLUMN_RED, COLUMN_YELLOW, raw_column
+from signal_engine.pump_signals import (
+    COLUMN_GREEN,
+    COLUMN_PURPLE,
+    COLUMN_RED,
+    COLUMN_YELLOW,
+    is_purple_drawdown,
+    raw_column,
+    should_remove_pump_signal,
+)
+from signal_engine.state import SymbolState
 
 
 def _checks(**flags: bool) -> dict:
@@ -60,6 +69,28 @@ class PumpSignalsColumnTests(unittest.TestCase):
             minutes_no_high=30.0,
         )
         self.assertEqual(col, COLUMN_YELLOW)
+
+    def test_purple_drawdown_band(self) -> None:
+        self.assertFalse(is_purple_drawdown(15.0))
+        self.assertTrue(is_purple_drawdown(20.0))
+        self.assertFalse(is_purple_drawdown(70.0))
+
+    def test_purple_column(self) -> None:
+        col = raw_column(
+            checks={k: {"ok": False} for k in MANDATORY},
+            metrics={"since_peak_min": 120, "drawdown_from_peak_pct": 25.0, "pump": {}},
+            reading=Reading(),
+            weaken=1,
+            drawdown=25.0,
+            since_peak=120.0,
+            minutes_no_high=60.0,
+        )
+        self.assertEqual(col, COLUMN_PURPLE)
+
+    def test_remove_at_70(self) -> None:
+        st = SymbolState("X")
+        st.last_price = 30.0
+        self.assertTrue(should_remove_pump_signal(st, 100.0))
 
 
 if __name__ == "__main__":
