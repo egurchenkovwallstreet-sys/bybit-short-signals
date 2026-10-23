@@ -56,9 +56,5 @@ class Engine:
                 out.append(self.paper.scan(self.symbols, now_ms, pivots=pivots))
             except Exception:
                 log.exception("Тест стратегии: ошибка скана")
-        if self.em6_bybit is not None and config.em6_bybit_enabled():
-            try:
-                out.append(self.em6_bybit.scan(self.symbols, now_ms))
-            except Exception:
-                log.exception("EMA6 Bybit: ошибка скана")
+        # EMA6 Bybit: свой цикл ~1 Гц в signal_engine.service (претенденты + вход).
         return out
