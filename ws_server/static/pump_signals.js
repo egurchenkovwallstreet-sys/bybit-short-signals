@@ -2,6 +2,7 @@
 
 (function () {
   const COL_CLASS = {
+    short: "psig-col-short",
     green: "psig-col-green",
     yellow: "psig-col-yellow",
     red: "psig-col-red",
@@ -9,6 +10,7 @@
   };
 
   const CARD_CLASS = {
+    short: "psig-card-short",
     green: "psig-card-green",
     yellow: "psig-card-yellow",
     red: "psig-card-red",
@@ -24,6 +26,7 @@
   let ema200Series = null;
   let peakLine = null;
   let valleyLine = null;
+  let entryLine = null;
   let chartLoadSeq = 0;
   const CHART_HEIGHT = 520;
 
@@ -195,6 +198,10 @@
       chartSeries.removePriceLine(valleyLine);
       valleyLine = null;
     }
+    if (entryLine) {
+      chartSeries.removePriceLine(entryLine);
+      entryLine = null;
+    }
   }
 
   function addPriceLine(price, title, color) {
@@ -232,6 +239,7 @@
     clearPriceLines();
     peakLine = addPriceLine(sig.peak_price_m15, "пик M15", "#f0b429");
     valleyLine = addPriceLine(sig.valley_price, "дно", "#3dd68c");
+    if (sig.entry_price) entryLine = addPriceLine(sig.entry_price, "вход шорт", "#ff7b2c");
     chartApi.timeScale().fitContent();
   }
 
@@ -244,6 +252,8 @@
     const grid = document.createElement("div");
     grid.className = "psig-metrics psig-detail-grid";
     const dd = sig.drawdown_from_peak_pct;
+    grid.appendChild(metric("Вход шорт", fmtNum(sig.entry_price || sig.last_price, 6), "psig-val-entry"));
+    grid.appendChild(metric("Стоп-снятие (пик)", fmtNum(sig.invalidation_price || sig.peak_price_m15, 6)));
     grid.appendChild(metric("Пик M15 (зафикс.)", sig.peak_msk || "—"));
     grid.appendChild(metric("Цена пика", fmtNum(sig.peak_price_m15, 6)));
     grid.appendChild(metric("Дно / старт", sig.growth_start_msk || "—"));
@@ -251,7 +261,12 @@
     grid.appendChild(metric("С пика, мин", fmtNum(sig.since_peak_min, 0)));
     grid.appendChild(metric("Откат от пика", fmtPct(dd)));
     grid.appendChild(metric("Триггер", sig.trigger || "—"));
-    grid.appendChild(metric("Объём", fmtVolRatio(sig.volume_ratio)));
+    grid.appendChild(metric("Объём ноги", fmtVolRatio(sig.volume_ratio)));
+    grid.appendChild(metric("Кульмин. объём", fmtVolRatio(sig.peak_vol_x)));
+    grid.appendChild(metric("Диапазон / ATR", fmtNum(sig.range_vs_atr, 2)));
+    grid.appendChild(metric("Фитиль пика", fmtPct(sig.upper_wick_pct)));
+    grid.appendChild(metric("Два нижних хая", sig.two_lower_highs ? "да" : "нет"));
+    grid.appendChild(metric("OI в пик 4ч", fmtPct(sig.oi_into_peak_pct)));
     grid.appendChild(
       metric(
         "Покупки / продажи",
@@ -266,6 +281,8 @@
     );
     grid.appendChild(metric("Оборот 24ч", fmtTurnover(sig.turnover_24h_usdt)));
     grid.appendChild(metric("CVD див.", sig.cvd_divergence ? "да" : "нет"));
+    grid.appendChild(metric("Ликв. шортов затихли", sig.short_liq_faded ? "да" : "нет"));
+    grid.appendChild(metric("Funding", fmtPct((sig.funding_rate || 0) * 100)));
     grid.appendChild(metric("Цена сейчас", fmtNum(sig.last_price, 6)));
     box.appendChild(grid);
   }
@@ -306,27 +323,37 @@
     const dd = sig.drawdown_from_peak_pct;
     const ddClass = dd != null && Number(dd) > 0 ? "psig-val-warn" : "";
     const growthClass = sig.growth_pct != null && Number(sig.growth_pct) >= 0 ? "psig-val-up" : "";
-    grid.appendChild(metric("Пик M15", sig.peak_msk || "—"));
-    grid.appendChild(metric("Старт (МСК)", sig.growth_start_msk || "—"));
-    grid.appendChild(metric("Прошло", sig.elapsed_label || "—"));
-    grid.appendChild(metric("Рост от дна", fmtPct(sig.growth_pct), growthClass));
-    grid.appendChild(metric("Объём", fmtVolRatio(sig.volume_ratio)));
-    grid.appendChild(
-      metric(
-        "Покупки / продажи",
-        `${fmtNum(sig.taker_buy_pct, 0)}% / ${fmtNum(sig.taker_sell_pct, 0)}%`
-      )
-    );
-    grid.appendChild(
-      metric("OI 1ч / 4ч", `${fmtPct(sig.oi_1h_pct)} / ${fmtPct(sig.oi_4h_pct)}`)
-    );
-    grid.appendChild(metric("Откат от пика", fmtPct(dd), ddClass));
-    grid.appendChild(
-      metric(
-        "Шлюз · ослабление",
-        `${sig.passed_count ?? "—"} / 9 · ${sig.weaken_score ?? "—"}`
-      )
-    );
+    if (col === "short") {
+      grid.appendChild(metric("Вход шорт", fmtNum(sig.entry_price || sig.last_price, 6), "psig-val-entry"));
+      grid.appendChild(metric("Пик", fmtNum(sig.peak_price_m15, 6)));
+      grid.appendChild(metric("Рост / откат", `${fmtPct(sig.growth_pct)} / ${fmtPct(dd)}`));
+      grid.appendChild(metric("Кульмин. объём", fmtVolRatio(sig.peak_vol_x)));
+      grid.appendChild(metric("Диапазон / ATR", fmtNum(sig.range_vs_atr, 2)));
+      grid.appendChild(metric("OI 1ч", fmtPct(sig.oi_1h_pct)));
+      grid.appendChild(metric("С пика", `${fmtNum(sig.since_peak_min, 0)} мин`));
+    } else {
+      grid.appendChild(metric("Пик M15", sig.peak_msk || "—"));
+      grid.appendChild(metric("Старт (МСК)", sig.growth_start_msk || "—"));
+      grid.appendChild(metric("Прошло", sig.elapsed_label || "—"));
+      grid.appendChild(metric("Рост от дна", fmtPct(sig.growth_pct), growthClass));
+      grid.appendChild(metric("Объём", fmtVolRatio(sig.volume_ratio)));
+      grid.appendChild(
+        metric(
+          "Покупки / продажи",
+          `${fmtNum(sig.taker_buy_pct, 0)}% / ${fmtNum(sig.taker_sell_pct, 0)}%`
+        )
+      );
+      grid.appendChild(
+        metric("OI 1ч / 4ч", `${fmtPct(sig.oi_1h_pct)} / ${fmtPct(sig.oi_4h_pct)}`)
+      );
+      grid.appendChild(metric("Откат от пика", fmtPct(dd), ddClass));
+      grid.appendChild(
+        metric(
+          "Шлюз · ослабление",
+          `${sig.passed_count ?? "—"} / 9 · ${sig.weaken_score ?? "—"}`
+        )
+      );
+    }
     card.appendChild(grid);
 
     card.tabIndex = 0;
@@ -411,6 +438,12 @@
   }
 
   const EMPTY_COLUMNS = [
+    {
+      id: "short",
+      title: "Сигнал шорт",
+      hint: "Памп развернулся. Вход по рынку.",
+      signals: [],
+    },
     {
       id: "green",
       title: "Готовы к шорту",

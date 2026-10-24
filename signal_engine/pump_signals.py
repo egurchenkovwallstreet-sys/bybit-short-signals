@@ -1,4 +1,4 @@
-"""Доска «Памп сигналы»: зелёная / жёлтая / красная / фиолетовая колонки."""
+"""Доска «Памп сигналы»: сигнал шорт / зелёная / жёлтая / красная / фиолетовая."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import config
 from signal_engine.evaluate import evaluate as evaluate_reading
 from signal_engine.flow import taker_sellers_control
+from signal_engine.paper.css2_detect import book_imbalance_1pct
 from signal_engine.paper.detect import (
     MANDATORY,
     PumpInfo,
@@ -23,6 +24,7 @@ from signal_engine.pump_scan import _weakening_score
 from signal_engine.pump_phases import drawdown_from_peak_pct
 from signal_engine.pump_unified import detect_unified_episode, symbol_has_unified_pump
 from signal_engine.stage_debounce import resolve_stage
+from signal_engine.swing_highs import closed_bars
 from signal_engine.watch_store import WatchRow, WatchStore
 
 if TYPE_CHECKING:
@@ -37,18 +39,22 @@ COLUMN_RED = "red"
 COLUMN_YELLOW = "yellow"
 COLUMN_GREEN = "green"
 COLUMN_PURPLE = "purple"
+COLUMN_SHORT = "short"
 _COLUMN_RANK = {
     COLUMN_RED: 1,
     COLUMN_YELLOW: 2,
     COLUMN_GREEN: 3,
     COLUMN_PURPLE: 4,
+    COLUMN_SHORT: 5,
 }
 _RANK_COLUMN = {
     1: COLUMN_RED,
     2: COLUMN_YELLOW,
     3: COLUMN_GREEN,
     4: COLUMN_PURPLE,
+    5: COLUMN_SHORT,
 }
+SHORT_TRIGGERS = frozenset({"1h", "2h", "24h", "4h", "fast", "medium"})
 
 
 def should_remove_pump_signal(
@@ -113,10 +119,135 @@ def _passed_nine(checks: dict[str, dict]) -> int:
     return sum(1 for key in MANDATORY if (checks.get(key) or {}).get("ok"))
 
 
+def _median(xs: list[float]) -> float | None:
+    vals = [float(x) for x in xs if x is not None and x > 0]
+    if not vals:
+        return None
+    vals.sort()
+    return vals[len(vals) // 2]
+
+
+def _climax_from_bars(bars: list, peak_ts: int, lookback: int) -> dict[str, Any]:
+    empty = {
+        "peak_vol_x": None,
+        "range_vs_atr": None,
+        "upper_wick_pct": None,
+        "two_lower_highs": False,
+        "close_in_bar": None,
+    }
+    if not bars or lookback < 4:
+        return empty
+    peak_i = 0
+    for i, bar in enumerate(bars):
+        if bar.timestamp <= peak_ts:
+            peak_i = i
+    bar = bars[peak_i]
+    pre = bars[max(0, peak_i - lookback) : peak_i]
+    pre_vol = _median([b.volume for b in pre])
+    peak_vol_x = (bar.volume / pre_vol) if pre_vol else None
+    rng = bar.high - bar.low
+    pre_rng = _median([(b.high - b.low) / b.close * 100.0 for b in pre if b.close > 0])
+    rng_pct = (rng / bar.close * 100.0) if bar.close > 0 else None
+    range_vs_atr = (rng_pct / pre_rng) if rng_pct and pre_rng else None
+    upper_wick = ((bar.high - max(bar.close, bar.open)) / bar.high * 100.0) if bar.high else None
+    close_loc = ((bar.close - bar.low) / rng) if rng > 0 else None
+    two_lh = (
+        peak_i + 2 < len(bars)
+        and bars[peak_i + 1].high < bar.high
+        and bars[peak_i + 2].high < bars[peak_i + 1].high
+    )
+    return {
+        "peak_vol_x": round(peak_vol_x, 2) if peak_vol_x is not None else None,
+        "range_vs_atr": round(range_vs_atr, 2) if range_vs_atr is not None else None,
+        "upper_wick_pct": round(upper_wick, 2) if upper_wick is not None else None,
+        "two_lower_highs": two_lh,
+        "close_in_bar": round(close_loc, 3) if close_loc is not None else None,
+    }
+
+
+def climax_at_peak(state: SymbolState, peak_ts: int, now_ms: int) -> dict[str, Any]:
+    """Кульминация на свече пика: 1h если есть ряд, иначе 15m."""
+    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
+    if len(bars_1h) >= 16:
+        return _climax_from_bars(bars_1h, peak_ts, 24)
+    bars_15 = closed_bars(merged_15m(state), "15", now_ms)
+    return _climax_from_bars(bars_15, peak_ts, 16)
+
+
+def oi_change_into_peak_pct(state: SymbolState, peak_ts: int, hours: int = 4) -> float | None:
+    points = list(state.oi_points())
+    if len(points) < 2:
+        return None
+
+    def nearest(target: int) -> float | None:
+        best = None
+        best_dt = None
+        for ts, val in points:
+            dt = abs(int(ts) - target)
+            if best_dt is None or dt < best_dt:
+                best_dt, best = dt, float(val)
+        if best_dt is None or best_dt > 2 * 3600_000 or not best:
+            return None
+        return best
+
+    now_v = nearest(peak_ts)
+    pre_v = nearest(peak_ts - hours * 3_600_000)
+    if now_v is None or pre_v is None or pre_v == 0:
+        return None
+    return (now_v - pre_v) / abs(pre_v) * 100.0
+
+
+def evaluate_reversal_short(
+    *,
+    trigger: str,
+    since_peak: float | None,
+    drawdown: float | None,
+    minutes_no_high: float | None,
+    oi_1h_pct: float | None,
+    climax: dict[str, Any],
+    oi_into_peak_pct: float | None,
+) -> dict[str, Any]:
+    """Разворот для колонки «Сигнал шорт». Нет цифры по обязательному пункту — отказ."""
+    reasons: list[str] = []
+    trig = str(trigger or "").lower()
+    if trig not in SHORT_TRIGGERS:
+        reasons.append("trigger")
+    if since_peak is None or not (
+        config.PUMP_SIGNALS_SHORT_SINCE_MIN <= since_peak <= config.PUMP_SIGNALS_SHORT_SINCE_MAX
+    ):
+        reasons.append("since_peak")
+    if drawdown is None or not (
+        config.PUMP_SIGNALS_SHORT_MIN_DRAWDOWN_PCT
+        <= drawdown
+        <= config.PUMP_SIGNALS_SHORT_MAX_DRAWDOWN_PCT
+    ):
+        reasons.append("drawdown")
+    vol_x = climax.get("peak_vol_x")
+    if vol_x is None or vol_x < config.PUMP_SIGNALS_SHORT_PEAK_VOL_X:
+        reasons.append("peak_vol")
+    rng = climax.get("range_vs_atr")
+    wick = climax.get("upper_wick_pct")
+    if (rng is None or rng < config.PUMP_SIGNALS_SHORT_RANGE_ATR) and (
+        wick is None or wick < config.PUMP_SIGNALS_SHORT_WICK_PCT
+    ):
+        reasons.append("climax_range")
+    confirmed_lh = bool(climax.get("two_lower_highs")) or (
+        minutes_no_high is not None and minutes_no_high >= config.PUMP_SIGNALS_SHORT_SINCE_MIN
+    )
+    if not confirmed_lh:
+        reasons.append("no_lower_highs")
+    if oi_1h_pct is None or oi_1h_pct >= 0:
+        reasons.append("oi_1h")
+    return {
+        "ok": not reasons,
+        "failed": reasons,
+        "oi_into_peak_pct": None if oi_into_peak_pct is None else round(oi_into_peak_pct, 2),
+        **climax,
+    }
+
+
 def _episode_high_7d(state: SymbolState, now_ms: int) -> tuple[float, int] | None:
     """Max high за 7 сут (1h + 15m) — пик long-пампа, не локальный M15 от сегодня."""
-    from signal_engine.swing_highs import closed_bars
-
     lookback = int(config.PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS) * 24 * 3_600_000
     best_p = 0.0
     best_t = 0
@@ -445,12 +576,25 @@ class PumpSignalCard:
     peak_ts_m15: int | None = None
     peak_msk: str = ""
     valley_price: float | None = None
+    entry_price: float | None = None
+    invalidation_price: float | None = None
+    peak_vol_x: float | None = None
+    range_vs_atr: float | None = None
+    upper_wick_pct: float | None = None
+    two_lower_highs: bool = False
+    oi_into_peak_pct: float | None = None
+    funding_rate: float | None = None
+    short_liq_faded: bool = False
+    book_imbalance: float | None = None
+    reversal_ok: bool = False
 
     def to_data(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "column": self.column,
             "last_price": self.last_price,
+            "entry_price": self.entry_price,
+            "invalidation_price": self.invalidation_price,
             "peak_price_m15": self.peak_price_m15,
             "peak_ts_m15": self.peak_ts_m15,
             "peak_msk": self.peak_msk,
@@ -461,6 +605,11 @@ class PumpSignalCard:
             "elapsed_label": elapsed_label(self.elapsed_min),
             "growth_pct": round(self.growth_pct, 2),
             "volume_ratio": self.volume_ratio,
+            "peak_vol_x": self.peak_vol_x,
+            "range_vs_atr": self.range_vs_atr,
+            "upper_wick_pct": self.upper_wick_pct,
+            "two_lower_highs": self.two_lower_highs,
+            "oi_into_peak_pct": self.oi_into_peak_pct,
             "taker_buy_pct": self.taker_buy_pct,
             "taker_sell_pct": self.taker_sell_pct,
             "taker_ratio": self.taker_ratio,
@@ -472,6 +621,10 @@ class PumpSignalCard:
             "weaken_score": self.weaken_score,
             "trigger": self.trigger,
             "cvd_divergence": self.cvd_divergence,
+            "funding_rate": self.funding_rate,
+            "short_liq_faded": self.short_liq_faded,
+            "book_imbalance": self.book_imbalance,
+            "reversal_ok": self.reversal_ok,
             "updated_at": self.updated_at,
             "turnover_24h_usdt": self.turnover_24h_usdt,
         }
@@ -613,19 +766,39 @@ def build_pump_signals_board(
             state, fixed_ts, now_ms, peak_price=fixed_p
         )
         dd_f = float(drawdown) if drawdown is not None else None
-        candidate = raw_column(
-            checks=ev.checks,
-            metrics=metrics,
-            reading=reading,
-            weaken=weaken,
-            drawdown=dd_f,
+        climax = climax_at_peak(state, fixed_ts, now_ms)
+        oi_into = oi_change_into_peak_pct(state, fixed_ts)
+        rev = evaluate_reversal_short(
+            trigger=str(pump.trigger or watch.meta.get("trigger") or ""),
             since_peak=since_peak,
+            drawdown=dd_f,
             minutes_no_high=minutes_no_high,
+            oi_1h_pct=reading.oi_change_1h_pct,
+            climax=climax,
+            oi_into_peak_pct=oi_into,
         )
+        if rev["ok"]:
+            candidate = COLUMN_SHORT
+        else:
+            candidate = raw_column(
+                checks=ev.checks,
+                metrics=metrics,
+                reading=reading,
+                weaken=weaken,
+                drawdown=dd_f,
+                since_peak=since_peak,
+                minutes_no_high=minutes_no_high,
+            )
         prev = str(watch.meta.get("column") or COLUMN_RED)
         purple_hold = _purple_column_ok(dd_f, minutes_no_high, since_peak)
-        if prev == COLUMN_PURPLE and not purple_hold:
+        if candidate == COLUMN_SHORT:
+            confirmed_col = COLUMN_SHORT
+            confirmed_rank = _column_rank(COLUMN_SHORT)
+            pending = None
+            pending_since = None
+        elif prev == COLUMN_PURPLE and not purple_hold:
             confirmed_col = candidate
+            confirmed_rank = _column_rank(candidate)
             pending = None
             pending_since = None
         else:
@@ -690,20 +863,38 @@ def build_pump_signals_board(
                 cvd_divergence=reading.cvd_divergence,
                 updated_at=now_ms,
                 turnover_24h_usdt=float(turnover) if turnover is not None else None,
+                entry_price=float(state.last_price or 0) or None,
+                invalidation_price=fixed_p,
+                peak_vol_x=rev.get("peak_vol_x"),
+                range_vs_atr=rev.get("range_vs_atr"),
+                upper_wick_pct=rev.get("upper_wick_pct"),
+                two_lower_highs=bool(rev.get("two_lower_highs")),
+                oi_into_peak_pct=rev.get("oi_into_peak_pct"),
+                funding_rate=reading.funding_rate,
+                short_liq_faded=bool(reading.liquidations_faded),
+                book_imbalance=book_imbalance_1pct(state),
+                reversal_ok=bool(rev.get("ok")),
             )
         )
 
     grouped: dict[str, list[PumpSignalCard]] = {
+        COLUMN_SHORT: [],
         COLUMN_GREEN: [],
         COLUMN_YELLOW: [],
         COLUMN_RED: [],
         COLUMN_PURPLE: [],
     }
     for card in cards:
-        grouped[card.column].append(card)
+        grouped.setdefault(card.column, []).append(card)
 
     columns = []
     for col_id, title, hint, sort_key in (
+        (
+            COLUMN_SHORT,
+            "Сигнал шорт",
+            "Памп развернулся: кульминация, нет нового хая, OI вниз. Вход по рынку.",
+            lambda c: (c.growth_pct, c.peak_vol_x or 0, c.passed_count),
+        ),
         (
             COLUMN_GREEN,
             "Готовы к шорту",

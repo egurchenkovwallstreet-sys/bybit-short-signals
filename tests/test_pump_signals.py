@@ -11,10 +11,12 @@ from signal_engine.pump_signals import (
     COLUMN_PURPLE,
     COLUMN_RED,
     COLUMN_YELLOW,
+    evaluate_reversal_short,
     is_purple_drawdown,
     lock_m15_peak_at_entry,
     raw_column,
     should_remove_pump_signal,
+    _climax_from_bars,
     _ratchet_fixed_peak,
 )
 from signal_engine.watch_store import WatchRow
@@ -193,6 +195,46 @@ class PumpSignalsColumnTests(unittest.TestCase):
         p, ts = _ratchet_fixed_peak(watch, st, now, 0.0036, t0)
         self.assertAlmostEqual(p, 0.0042)
         self.assertEqual(ts, t0 + 900_000)
+
+    def test_reversal_short_ok(self) -> None:
+        rev = evaluate_reversal_short(
+            trigger="1h",
+            since_peak=90.0,
+            drawdown=6.0,
+            minutes_no_high=70.0,
+            oi_1h_pct=-1.2,
+            climax={"peak_vol_x": 8.0, "range_vs_atr": 3.5, "upper_wick_pct": 4.0, "two_lower_highs": True},
+            oi_into_peak_pct=5.0,
+        )
+        self.assertTrue(rev["ok"])
+
+    def test_reversal_rejects_7d_and_missing_climax(self) -> None:
+        rev = evaluate_reversal_short(
+            trigger="7d",
+            since_peak=90.0,
+            drawdown=6.0,
+            minutes_no_high=70.0,
+            oi_1h_pct=-1.2,
+            climax={"peak_vol_x": None, "range_vs_atr": None, "upper_wick_pct": None, "two_lower_highs": False},
+            oi_into_peak_pct=None,
+        )
+        self.assertFalse(rev["ok"])
+        self.assertIn("trigger", rev["failed"])
+        self.assertIn("peak_vol", rev["failed"])
+
+    def test_climax_two_lower_highs(self) -> None:
+        t0 = 1_700_000_000_000
+        hour = 3_600_000
+        bars = []
+        for i in range(26):
+            ts = t0 + i * hour
+            vol = 10.0 if i != 23 else 80.0
+            high = 1.0 + i * 0.01 if i <= 23 else 1.23 - (i - 23) * 0.03
+            bars.append(Bar(ts, high - 0.01, high, high - 0.02, high - 0.015, vol))
+        peak_ts = t0 + 23 * hour
+        out = _climax_from_bars(bars, peak_ts, 24)
+        self.assertGreaterEqual(out["peak_vol_x"], 5)
+        self.assertTrue(out["two_lower_highs"])
 
 
 if __name__ == "__main__":
