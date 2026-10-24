@@ -28,6 +28,7 @@
   let valleyLine = null;
   let entryLine = null;
   let chartLoadSeq = 0;
+  let chartSymbol = "";
   const CHART_HEIGHT = 520;
 
   function fmtNum(v, digits = 1) {
@@ -68,9 +69,7 @@
     return row;
   }
 
-  function parseCandles(raw, interval) {
-    const sec =
-      interval === "15" ? 900 : interval === "5" ? 300 : interval === "1" ? 60 : 900;
+  function parseCandles(raw, _interval) {
     const out = [];
     for (const row of raw || []) {
       let t;
@@ -97,10 +96,13 @@
     }
     out.sort((a, b) => a.time - b.time);
     const dedup = [];
-    let lastT = 0;
     for (const b of out) {
-      if (b.time <= lastT) b.time = lastT + sec;
-      lastT = b.time;
+      const prev = dedup[dedup.length - 1];
+      if (prev && b.time === prev.time) {
+        dedup[dedup.length - 1] = b;
+        continue;
+      }
+      if (prev && b.time < prev.time) continue;
       dedup.push(b);
     }
     return dedup;
@@ -151,7 +153,7 @@
       grid: { vertLines: { color: "#222a36" }, horzLines: { color: "#222a36" } },
       localization: { locale: "ru-RU" },
       rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false },
+      timeScale: { borderVisible: false, shiftVisibleRangeOnNewBar: false },
     });
     chartSeries = chartApi.addCandlestickSeries({
       upColor: "#3dd68c",
@@ -225,8 +227,9 @@
     if (title) {
       title.textContent = `${sig.symbol} · 15m · EMA50/100/200 · пик M15 зафиксирован`;
     }
+    const sameSymbol = chartSymbol === sig.symbol;
     const seq = ++chartLoadSeq;
-    const q = new URLSearchParams({ interval: "15", days: "5", refresh: "1" });
+    const q = new URLSearchParams({ interval: "15", days: "5" });
     const resp = await fetch(`/api/klines/${encodeURIComponent(sig.symbol)}?${q}`);
     if (seq !== chartLoadSeq || !chartSeries) return;
     const payload = await resp.json();
@@ -240,7 +243,10 @@
     peakLine = addPriceLine(sig.peak_price_m15, "пик M15", "#f0b429");
     valleyLine = addPriceLine(sig.valley_price, "дно", "#3dd68c");
     if (sig.entry_price) entryLine = addPriceLine(sig.entry_price, "вход шорт", "#ff7b2c");
-    chartApi.timeScale().fitContent();
+    chartSymbol = sig.symbol;
+    if (!sameSymbol) {
+      chartApi.timeScale().fitContent();
+    }
   }
 
   function renderDetail(sig) {
@@ -430,7 +436,6 @@
       if (found) {
         selected = found;
         renderDetail(found);
-        loadChart(found);
         const el = root.querySelector(`[data-symbol="${CSS.escape(found.symbol)}"]`);
         if (el) el.classList.add("psig-card-selected");
       }
