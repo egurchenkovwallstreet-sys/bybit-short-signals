@@ -142,7 +142,7 @@ def load_closed_for_dashboard(
     *,
     symbol_hints: list[str] | None = None,
     limit: int = 200,
-    start_days: int = 90,
+    start_days: int = 7,
 ) -> list[dict[str, Any]]:
     """Список закрытых и статистика — только get_closed_pnl (Demo), журнал не подмешивается."""
     del symbol_hints  # полная история счёта linear, как в Bybit

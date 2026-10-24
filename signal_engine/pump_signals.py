@@ -12,6 +12,7 @@ from signal_engine.evaluate import evaluate as evaluate_reading
 from signal_engine.flow import taker_sellers_control
 from signal_engine.paper.detect import (
     MANDATORY,
+    PumpInfo,
     find_pump,
     merged_15m,
     paper_entry_blocks,
@@ -22,7 +23,7 @@ from signal_engine.pump_scan import _weakening_score
 from signal_engine.pump_phases import drawdown_from_peak_pct
 from signal_engine.pump_unified import detect_unified_episode, symbol_has_unified_pump
 from signal_engine.stage_debounce import resolve_stage
-from signal_engine.watch_store import WatchRow, WatchStore, growth_pct_negative
+from signal_engine.watch_store import WatchRow, WatchStore
 
 if TYPE_CHECKING:
     from signal_engine.paper.strategy import PaperStrategy
@@ -118,6 +119,30 @@ def _watch_fixed_peak(watch: WatchRow) -> tuple[float, int] | None:
     if p <= 0 or t <= 0:
         return None
     return p, t
+
+
+def _pump_from_watch(
+    watch: WatchRow,
+    fixed_p: float,
+    fixed_ts: int,
+) -> PumpInfo:
+    """Карточка на доске: не снимать, если find_pump временно не видит 15m."""
+    valley_ts = int(watch.meta.get("valley_ts") or fixed_ts)
+    valley_p = float(watch.meta.get("valley_price") or fixed_p)
+    growth = watch.meta.get("growth_pct_lock")
+    if growth is None and valley_p > 0:
+        growth = (fixed_p / valley_p - 1.0) * 100.0
+    trigger = str(watch.meta.get("trigger") or watch.meta.get("pump_class") or "watch")
+    return PumpInfo(
+        kind="short",
+        trigger=trigger,
+        growth_pct=float(growth or 0),
+        valley_price=valley_p,
+        valley_ts=valley_ts,
+        peak_price=fixed_p,
+        peak_ts=fixed_ts,
+        growth={},
+    )
 
 
 def _ensure_fixed_peak(
@@ -393,6 +418,7 @@ def build_pump_signals_board(
                 "valley_price": draft.valley_price,
                 "growth_pct_lock": draft.growth_pct,
                 "pump_class": draft.pump_class,
+                "trigger": draft.pump_class,
                 "column": COLUMN_RED,
             },
         )
@@ -411,16 +437,15 @@ def build_pump_signals_board(
         if should_remove_pump_signal(state, peak):
             watches.remove(BOARD_ID, symbol)
             continue
-        if growth_pct_negative(state):
-            watches.remove(BOARD_ID, symbol)
-            continue
 
         tape = _tape_for(paper, symbol)
         pump = find_pump(state, tape, now_ms)
         if pump is None:
-            continue
-        pump.peak_price = fixed_p
-        pump.peak_ts = fixed_ts
+            pump = _pump_from_watch(watch, fixed_p, fixed_ts)
+        else:
+            pump.peak_price = fixed_p
+            pump.peak_ts = fixed_ts
+            watch.meta["trigger"] = str(pump.trigger or watch.meta.get("trigger") or "")
 
         klines = _klines_for(paper, symbol)
         if not klines.get("15"):

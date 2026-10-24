@@ -240,6 +240,7 @@ class SignalService:
                     await asyncio.sleep(0.5)
                     continue
                 now = time.time()
+                board = self._pump_board_symbols()
                 pending: list[tuple[str, bool, bool]] = []
                 for symbol in self._pump_feed_symbols():
                     with self._state_lock:
@@ -248,8 +249,17 @@ class SignalService:
                             continue
                         bars = len(merged_15m(state))
                         oi_pts = len(state.oi_5m)
-                    need_kline = bars < min_bars or now - last_kline_at.get(symbol, 0.0) >= refresh
-                    need_oi = oi_pts < min_oi_points or now - last_oi_at.get(symbol, 0.0) >= refresh
+                    on_board = symbol in board
+                    need_kline = (
+                        bars < min_bars
+                        or on_board
+                        or now - last_kline_at.get(symbol, 0.0) >= refresh
+                    )
+                    need_oi = (
+                        oi_pts < min_oi_points
+                        or on_board
+                        or now - last_oi_at.get(symbol, 0.0) >= refresh
+                    )
                     if need_kline or need_oi:
                         pending.append((symbol, need_kline, need_oi))
                 if pending:
