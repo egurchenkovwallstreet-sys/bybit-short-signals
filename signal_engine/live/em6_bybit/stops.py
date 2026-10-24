@@ -1,4 +1,4 @@
-"""EMA6 Bybit: trailing-only лестница 50% → 15% @ +20% ROE → 10% @ +50% ROE."""
+"""EMA6 Bybit: trailing-only — 50% → @+10% gap 10% → @+20% gap 15% → @+50% gap 10% (каждый уровень один раз)."""
 
 from __future__ import annotations
 
@@ -17,12 +17,35 @@ def em6_bybit_initial_trail_roe_pct() -> float:
     return config.em6_bybit_trail_initial_roe()
 
 
+def em6_bybit_trail_ladder_milestones() -> list[tuple[int, float, float]]:
+    """(step_index, arm_roe, trail_gap_roe) по возрастанию порога."""
+    return [
+        (1, config.em6_bybit_trail_be_arm_roe(), config.em6_bybit_trail_be_dist_roe()),
+        (2, config.em6_bybit_trail_profit_arm_roe(), config.em6_bybit_trail_mid_dist_roe()),
+        (3, config.em6_bybit_trail_tight_arm_roe(), config.em6_bybit_trail_tight_dist_roe()),
+    ]
+
+
+def em6_bybit_next_trail_milestone(
+    max_roe: float, applied_step: int
+) -> tuple[int, float] | None:
+    """Следующая ступень, которую ещё не выставляли (max_roe — пик по сделке)."""
+    for step, arm, gap in em6_bybit_trail_ladder_milestones():
+        if applied_step >= step:
+            continue
+        if max_roe + 1e-6 >= arm:
+            return step, gap
+    return None
+
+
 def em6_bybit_ladder_trail_gap_candidate(current_roe: float) -> float:
-    """Желаемый зазор trailing (ROE) от текущей цены по порогам."""
+    """Ориентир зазора для UI по текущему ROE (не учитывает «уже выставлено один раз»)."""
     if current_roe + 1e-6 >= config.em6_bybit_trail_tight_arm_roe():
         return config.em6_bybit_trail_tight_dist_roe()
     if current_roe + 1e-6 >= config.em6_bybit_trail_profit_arm_roe():
         return config.em6_bybit_trail_mid_dist_roe()
+    if current_roe + 1e-6 >= config.em6_bybit_trail_be_arm_roe():
+        return config.em6_bybit_trail_be_dist_roe()
     return em6_bybit_initial_trail_roe_pct()
 
 
@@ -30,11 +53,10 @@ def em6_bybit_active_trail_roe_pct(
     current_roe: float,
     locked_trail_gap_roe: float | None = None,
 ) -> float:
-    """Фактический/целевой зазор с учётом храповика (только ужесточение)."""
-    cand = em6_bybit_ladder_trail_gap_candidate(current_roe)
-    if locked_trail_gap_roe is None or locked_trail_gap_roe <= 0 or locked_trail_gap_roe > 900:
-        return cand
-    return min(locked_trail_gap_roe, cand)
+    """Фактический зазор на бирже: зафиксированный после ступени лестницы."""
+    if locked_trail_gap_roe is not None and 0 < locked_trail_gap_roe <= 900:
+        return locked_trail_gap_roe
+    return em6_bybit_ladder_trail_gap_candidate(current_roe)
 
 
 def normalize_locked_trail_gap(raw: float | None) -> float:
@@ -45,6 +67,7 @@ def normalize_locked_trail_gap(raw: float | None) -> float:
     v = float(raw)
     for ok in (
         initial,
+        config.em6_bybit_trail_be_dist_roe(),
         config.em6_bybit_trail_mid_dist_roe(),
         config.em6_bybit_trail_tight_dist_roe(),
     ):
@@ -53,6 +76,21 @@ def normalize_locked_trail_gap(raw: float | None) -> float:
     if v <= 0 or v > 900:
         return initial
     return initial
+
+
+def infer_trail_ladder_step(locked_gap: float, max_roe: float) -> int:
+    """Восстановление ступени после рестарта (10% зазор на шагах 1 и 3)."""
+    gap = normalize_locked_trail_gap(locked_gap)
+    initial = em6_bybit_initial_trail_roe_pct()
+    if abs(gap - initial) < 0.05:
+        return 0
+    if abs(gap - config.em6_bybit_trail_mid_dist_roe()) < 0.05:
+        return 2
+    if abs(gap - config.em6_bybit_trail_be_dist_roe()) < 0.05:
+        if max_roe + 1e-6 >= config.em6_bybit_trail_tight_arm_roe():
+            return 3
+        return 1
+    return 0
 
 
 def stop_price_for_trail_gap(

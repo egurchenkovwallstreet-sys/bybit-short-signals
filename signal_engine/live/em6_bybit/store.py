@@ -60,6 +60,12 @@ class Em6BybitStore:
                 "ALTER TABLE em6_bybit_trades ADD COLUMN locked_stop_roe REAL NOT NULL DEFAULT -1000"
             )
             conn.commit()
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(em6_bybit_trades)")}
+        if "trail_ladder_step" not in cols:
+            conn.execute(
+                "ALTER TABLE em6_bybit_trades ADD COLUMN trail_ladder_step INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.commit()
         return conn
 
     def insert_open(self, conn: sqlite3.Connection, row: dict[str, Any]) -> int:
@@ -105,6 +111,7 @@ class Em6BybitStore:
             "qty",
             "profit_lock_armed",
             "locked_stop_roe",
+            "trail_ladder_step",
         }
         parts = []
         vals: list[Any] = []
