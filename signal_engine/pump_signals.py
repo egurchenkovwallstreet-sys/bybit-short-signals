@@ -113,23 +113,65 @@ def _passed_nine(checks: dict[str, dict]) -> int:
     return sum(1 for key in MANDATORY if (checks.get(key) or {}).get("ok"))
 
 
+def _episode_high_7d(state: SymbolState, now_ms: int) -> tuple[float, int] | None:
+    """Max high на 1h за окно PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS (истинный пик long-пампа)."""
+    from signal_engine.swing_highs import closed_bars
+
+    lookback = int(config.PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS) * 24 * 3_600_000
+    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
+    recent = [b for b in bars_1h if now_ms - lookback <= b.timestamp <= now_ms]
+    if not recent:
+        return None
+    peak_bar = max(recent, key=lambda b: b.high)
+    if peak_bar.high <= 0:
+        return None
+    return float(peak_bar.high), int(peak_bar.timestamp)
+
+
 def lock_m15_peak_at_entry(
     state: SymbolState,
     draft: Any,
     now_ms: int,
 ) -> tuple[float, int]:
-    """Зафиксировать max(high) на 15m от впадины эпизода до момента постановки на доску."""
+    """Пик эпизода: max(7d/1h, unified draft, 15m от впадины) — не локальный отскок после обвала."""
+    ep_p = float(draft.peak_price or 0)
+    ep_t = int(draft.peak_ts or 0)
+    hi_7d = _episode_high_7d(state, now_ms)
+    if hi_7d and hi_7d[0] > ep_p:
+        ep_p, ep_t = hi_7d
+
     bars = merged_15m(state)
     valley_ts = int(draft.valley_ts)
-    if not bars:
-        return float(draft.peak_price), int(draft.peak_ts)
-    window = [b for b in bars if valley_ts <= b.timestamp <= now_ms]
-    if not window:
-        window = [b for b in bars if b.timestamp <= now_ms][-48:]
-    if not window:
-        return float(draft.peak_price), int(draft.peak_ts)
-    peak_bar = max(window, key=lambda b: b.high)
-    return float(peak_bar.high), int(peak_bar.timestamp)
+    m15_p, m15_t = ep_p, ep_t
+    if bars:
+        window = [b for b in bars if valley_ts <= b.timestamp <= now_ms]
+        if not window:
+            window = [b for b in bars if b.timestamp <= now_ms][-48:]
+        if window:
+            peak_bar = max(window, key=lambda b: b.high)
+            m15_p, m15_t = float(peak_bar.high), int(peak_bar.timestamp)
+    if ep_p >= m15_p:
+        return ep_p, ep_t
+    return m15_p, m15_t
+
+
+def _reconcile_peak_with_episode(
+    watch: WatchRow,
+    state: SymbolState,
+    now_ms: int,
+    fixed_p: float,
+    fixed_ts: int,
+) -> tuple[float, int]:
+    """Поднять зафиксированный пик, если 7d-high выше (legacy watch после обвала)."""
+    hi = _episode_high_7d(state, now_ms)
+    if hi is None:
+        return fixed_p, fixed_ts
+    h_p, h_t = hi
+    if h_p > fixed_p * 1.02:
+        watch.meta["m15_peak_price"] = h_p
+        watch.meta["m15_peak_ts"] = h_t
+        return h_p, h_t
+    return fixed_p, fixed_ts
 
 
 def _watch_fixed_peak(watch: WatchRow) -> tuple[float, int] | None:
@@ -424,7 +466,22 @@ def build_pump_signals_board(
         draft = detect_unified_episode(state, now_ms)
         if draft is None:
             continue
+        price = state.last_price
+        if (
+            price
+            and draft.peak_price > 0
+            and drawdown_from_peak_pct(float(price), float(draft.peak_price))
+            >= config.PUMP_SIGNALS_REMOVE_DRAWDOWN_PCT
+        ):
+            continue
         m15_p, m15_t = lock_m15_peak_at_entry(state, draft, now_ms)
+        if (
+            price
+            and m15_p > 0
+            and drawdown_from_peak_pct(float(price), m15_p)
+            >= config.PUMP_SIGNALS_REMOVE_DRAWDOWN_PCT
+        ):
+            continue
         row = WatchRow(
             board=BOARD_ID,
             symbol=symbol,
@@ -456,6 +513,9 @@ def build_pump_signals_board(
         fixed_p, fixed_ts = _ensure_fixed_peak(watch, state, now_ms)
         if fixed_p <= 0:
             continue
+        fixed_p, fixed_ts = _reconcile_peak_with_episode(
+            watch, state, now_ms, fixed_p, fixed_ts
+        )
         peak = fixed_p
         if should_remove_pump_signal(
             state,

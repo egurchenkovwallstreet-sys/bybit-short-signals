@@ -145,6 +145,30 @@ class PumpSignalsColumnTests(unittest.TestCase):
         self.assertAlmostEqual(p, 1.6)
         self.assertEqual(ts, t0 + 1_800_000)
 
+    def test_lock_prefers_episode_peak_over_local_15m(self) -> None:
+        st = SymbolState("IRYSUSDT")
+        t0 = 1_700_000_000_000
+        st.bars_htf["15"] = [
+            Bar(t0, 0.05, 0.067, 0.05, 0.057, 100),
+        ]
+        st.bars_htf["60"] = [
+            Bar(t0 - 3_600_000, 0.01, 0.53, 0.01, 0.5, 1000),
+            Bar(t0, 0.05, 0.06, 0.05, 0.057, 100),
+        ]
+        draft = EpisodeDraft(
+            symbol="IRYSUSDT",
+            valley_price=0.01,
+            valley_ts=t0 - 7_200_000,
+            peak_price=0.535,
+            peak_ts=t0 - 3_600_000,
+            growth_pct=5000.0,
+            pump_class="long",
+            volume_ratio=50.0,
+            source="valley_7d_1h",
+        )
+        p, _ = lock_m15_peak_at_entry(st, draft, t0)
+        self.assertGreaterEqual(p, 0.53)
+
 
 if __name__ == "__main__":
     unittest.main()
