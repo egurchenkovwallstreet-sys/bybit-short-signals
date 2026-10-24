@@ -15,7 +15,9 @@ from signal_engine.pump_signals import (
     lock_m15_peak_at_entry,
     raw_column,
     should_remove_pump_signal,
+    _ratchet_fixed_peak,
 )
+from signal_engine.watch_store import WatchRow
 from signal_engine.pump_unified import EpisodeDraft
 from signal_engine.state import Bar
 from signal_engine.state import Bar, SymbolState
@@ -169,6 +171,28 @@ class PumpSignalsColumnTests(unittest.TestCase):
         )
         p, _ = lock_m15_peak_at_entry(st, draft, t0)
         self.assertGreaterEqual(p, 0.53)
+
+    def test_ratchet_peak_on_new_15m_high(self) -> None:
+        t0 = 1_700_000_000_000
+        st = SymbolState("ANIMEUSDT")
+        st.bars_htf["15"] = [
+            Bar(t0, 0.003, 0.0036, 0.0029, 0.0035, 100),
+            Bar(t0 + 900_000, 0.0035, 0.0042, 0.0034, 0.0040, 200),
+        ]
+        watch = WatchRow(
+            board="pump_signals",
+            symbol="ANIMEUSDT",
+            entered_at=t0,
+            dismissed=False,
+            confirmed_stage=1,
+            pending_stage=None,
+            pending_since=None,
+            meta={"valley_ts": t0 - 3_600_000, "m15_peak_price": 0.0036, "m15_peak_ts": t0},
+        )
+        now = t0 + 1_800_000
+        p, ts = _ratchet_fixed_peak(watch, st, now, 0.0036, t0)
+        self.assertAlmostEqual(p, 0.0042)
+        self.assertEqual(ts, t0 + 900_000)
 
 
 if __name__ == "__main__":

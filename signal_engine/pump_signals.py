@@ -182,6 +182,42 @@ def _reconcile_peak_with_episode(
     return fixed_p, fixed_ts
 
 
+def _ratchet_fixed_peak(
+    watch: WatchRow,
+    state: SymbolState,
+    now_ms: int,
+    fixed_p: float,
+    fixed_ts: int,
+) -> tuple[float, int]:
+    """Поднять пик watch, если в том же эпизоде появился более высокий 15m/1m хай."""
+    valley_ts = int(watch.meta.get("valley_ts") or 0)
+    best_p, best_t = fixed_p, fixed_ts
+    for bar in merged_15m(state):
+        if valley_ts > 0 and bar.timestamp < valley_ts:
+            continue
+        if bar.timestamp > now_ms:
+            continue
+        if float(bar.high) > best_p + 1e-12:
+            best_p, best_t = float(bar.high), int(bar.timestamp)
+    last_closed_15 = 0
+    for bar in merged_15m(state):
+        if bar.timestamp <= now_ms:
+            last_closed_15 = max(last_closed_15, int(bar.timestamp))
+    for bar in state.bars_1m:
+        if bar.timestamp <= last_closed_15:
+            continue
+        if valley_ts > 0 and bar.timestamp < valley_ts:
+            continue
+        if float(bar.high) > best_p + 1e-12:
+            best_p, best_t = float(bar.high), int(bar.timestamp)
+    if best_p > fixed_p + 1e-12:
+        watch.meta["m15_peak_price"] = best_p
+        watch.meta["m15_peak_ts"] = best_t
+        watch.meta["peak_price"] = best_p
+        return best_p, best_t
+    return fixed_p, fixed_ts
+
+
 def _watch_fixed_peak(watch: WatchRow) -> tuple[float, int] | None:
     raw_p = watch.meta.get("m15_peak_price")
     raw_t = watch.meta.get("m15_peak_ts")
@@ -530,6 +566,9 @@ def build_pump_signals_board(
         if fixed_p <= 0:
             continue
         fixed_p, fixed_ts = _reconcile_peak_with_episode(
+            watch, state, now_ms, fixed_p, fixed_ts
+        )
+        fixed_p, fixed_ts = _ratchet_fixed_peak(
             watch, state, now_ms, fixed_p, fixed_ts
         )
         peak = fixed_p
