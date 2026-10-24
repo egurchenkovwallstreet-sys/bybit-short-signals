@@ -19,9 +19,13 @@
   let selected = null;
   let chartApi = null;
   let chartSeries = null;
+  let ema50Series = null;
+  let ema100Series = null;
+  let ema200Series = null;
   let peakLine = null;
   let valleyLine = null;
   let chartLoadSeq = 0;
+  const CHART_HEIGHT = 520;
 
   function fmtNum(v, digits = 1) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
@@ -99,6 +103,43 @@
     return dedup;
   }
 
+  function emaRollingValues(values, period) {
+    const BC = window.boardChart;
+    if (BC?.emaRollingValues) {
+      return BC.emaRollingValues(values, period);
+    }
+    const out = new Array(values?.length || 0).fill(null);
+    const p = period;
+    if (p < 1 || !values?.length) return out;
+    const k = 2 / (p + 1);
+    let ema = null;
+    for (let i = 0; i < values.length; i++) {
+      const v = Number(values[i]);
+      if (Number.isNaN(v)) continue;
+      if (ema == null) {
+        if (i < p - 1) continue;
+        let sum = 0;
+        for (let j = i - p + 1; j <= i; j++) sum += Number(values[j]);
+        ema = sum / p;
+        out[i] = ema;
+        continue;
+      }
+      ema = v * k + ema * (1 - k);
+      out[i] = ema;
+    }
+    return out;
+  }
+
+  function emaLineData(bars, period) {
+    const closes = (bars || []).map((b) => Number(b.close));
+    const ema = emaRollingValues(closes, period);
+    const out = [];
+    for (let i = 0; i < bars.length; i++) {
+      if (ema[i] != null) out.push({ time: bars[i].time, value: ema[i] });
+    }
+    return out;
+  }
+
   function ensureChart() {
     const el = document.getElementById("psig-chart");
     if (!el || !window.LightweightCharts || chartApi) return;
@@ -116,8 +157,29 @@
       wickUpColor: "#3dd68c",
       wickDownColor: "#ff5d73",
     });
+    ema50Series = chartApi.addLineSeries({
+      color: "#58a6ff",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: "EMA50",
+    });
+    ema100Series = chartApi.addLineSeries({
+      color: "#d29922",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: "EMA100",
+    });
+    ema200Series = chartApi.addLineSeries({
+      color: "#bc8cff",
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      title: "EMA200",
+    });
     const resize = () => {
-      if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, 320);
+      if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, CHART_HEIGHT);
     };
     new ResizeObserver(resize).observe(el);
     requestAnimationFrame(resize);
@@ -153,7 +215,9 @@
     const wrap = document.getElementById("psig-detail-wrap");
     const title = document.getElementById("psig-chart-title");
     if (wrap) wrap.hidden = false;
-    if (title) title.textContent = `${sig.symbol} · 15m (пик зафиксирован)`;
+    if (title) {
+      title.textContent = `${sig.symbol} · 15m · EMA50/100/200 · пик M15 зафиксирован`;
+    }
     const seq = ++chartLoadSeq;
     const q = new URLSearchParams({ interval: "15", days: "5", refresh: "1" });
     const resp = await fetch(`/api/klines/${encodeURIComponent(sig.symbol)}?${q}`);
@@ -162,9 +226,12 @@
     const bars = parseCandles(payload.candles || payload.klines || [], "15");
     if (!bars.length) return;
     chartSeries.setData(bars);
+    if (ema50Series) ema50Series.setData(emaLineData(bars, 50));
+    if (ema100Series) ema100Series.setData(emaLineData(bars, 100));
+    if (ema200Series) ema200Series.setData(emaLineData(bars, 200));
     clearPriceLines();
     peakLine = addPriceLine(sig.peak_price_m15, "пик M15", "#f0b429");
-    valleyLine = addPriceLine(sig.valley_price, "дно", "#58a6ff");
+    valleyLine = addPriceLine(sig.valley_price, "дно", "#3dd68c");
     chartApi.timeScale().fitContent();
   }
 
