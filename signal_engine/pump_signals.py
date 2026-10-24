@@ -51,14 +51,37 @@ _RANK_COLUMN = {
 }
 
 
-def should_remove_pump_signal(state: SymbolState, peak_price: float) -> bool:
-    """Снять с доски: откат от пика пампа ≥ порога удаления (по умолчанию 70%)."""
+def should_remove_pump_signal(
+    state: SymbolState,
+    peak_price: float,
+    *,
+    now_ms: int | None = None,
+    peak_ts: int | None = None,
+    entered_at: int | None = None,
+) -> bool:
+    """Снять с доски: глубокий откат, протухший эпизод или долго без хая."""
     if peak_price <= 0:
         return False
     price = state.last_price
     if price is None or price <= 0:
         return False
-    return drawdown_from_peak_pct(price, peak_price) >= config.PUMP_SIGNALS_REMOVE_DRAWDOWN_PCT
+    dd = drawdown_from_peak_pct(price, peak_price)
+    if dd >= config.PUMP_SIGNALS_REMOVE_DRAWDOWN_PCT:
+        return True
+    if now_ms is None:
+        return False
+    max_days = int(config.PUMP_SIGNALS_MAX_EPISODE_DAYS)
+    if entered_at and now_ms - entered_at >= max_days * 24 * 3_600_000:
+        return True
+    if peak_ts:
+        stale_h = int(config.PUMP_SIGNALS_STALE_HOURS_NO_HIGH)
+        stale_dd = float(config.PUMP_SIGNALS_STALE_MIN_DRAWDOWN_PCT)
+        mins_no_high = _minutes_no_new_high(
+            state, peak_ts, now_ms, peak_price=peak_price
+        )
+        if mins_no_high >= stale_h * 60 and dd >= stale_dd:
+            return True
+    return False
 
 
 def is_purple_drawdown(drawdown: float | None) -> bool:
@@ -434,7 +457,13 @@ def build_pump_signals_board(
         if fixed_p <= 0:
             continue
         peak = fixed_p
-        if should_remove_pump_signal(state, peak):
+        if should_remove_pump_signal(
+            state,
+            peak,
+            now_ms=now_ms,
+            peak_ts=fixed_ts,
+            entered_at=int(watch.entered_at or 0) or None,
+        ):
             watches.remove(BOARD_ID, symbol)
             continue
 

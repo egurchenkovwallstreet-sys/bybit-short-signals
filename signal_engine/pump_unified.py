@@ -6,6 +6,7 @@ detect_unified_episodes() для paper/кандидатов (UI «Анализ �
 
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
 
 import config
@@ -13,6 +14,7 @@ from signal_engine.pump_history import history_pump_metrics
 from signal_engine.paper.detect import merged_15m
 from signal_engine.pump_phases import drawdown_from_peak_pct, pump_class_from_duration
 from signal_engine.state import Bar, SymbolState
+from signal_engine.swing_highs import closed_bars
 
 
 def price_24h_pct(raw: float | None) -> float | None:
@@ -104,6 +106,107 @@ def volume_ratio_min_to_peak(
     if base_vol <= 0:
         return None
     return leg_vol / base_vol
+
+
+def _median_volume(bars: list[Bar]) -> float | None:
+    vols = [float(b.volume) for b in bars if b.volume and b.volume > 0]
+    if not vols:
+        return None
+    return float(statistics.median(vols))
+
+
+def volume_ratio_median_24h_48h(state: SymbolState, now_ms: int) -> float | None:
+    """Медиана объёма 24h / медиана 48h до этого (1h бары, иначе 15m)."""
+    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
+    if len(bars_1h) >= 72:
+        last_24 = bars_1h[-24:]
+        prev_48 = bars_1h[-72:-24]
+        med_leg = _median_volume(last_24)
+        med_pre = _median_volume(prev_48)
+        if med_leg and med_pre and med_pre > 0:
+            return med_leg / med_pre
+    bars_15 = merged_15m(state)
+    closed = [b for b in bars_15 if b.timestamp <= now_ms]
+    if len(closed) < 96 + 48:
+        return None
+    last_96 = closed[-96:]
+    prev_192 = closed[-96 - 192 : -96]
+    med_leg = _median_volume(last_96)
+    med_pre = _median_volume(prev_192)
+    if med_leg and med_pre and med_pre > 0:
+        return med_leg / med_pre
+    return None
+
+
+def _price_trend_ok(state: SymbolState, bars_15: list[Bar], now_ms: int) -> bool:
+    """Не боковик: close выше, чем 72h назад, или ≥3 из 6 последних 15m бычьи."""
+    closed = [b for b in bars_15 if b.timestamp <= now_ms]
+    if len(closed) < 8:
+        return True
+    last = closed[-1]
+    idx_72h = len(closed) - 1 - 288
+    if idx_72h >= 0 and last.close >= closed[idx_72h].close:
+        return True
+    last6 = closed[-6:]
+    green = sum(1 for b in last6 if b.close > b.open)
+    return green >= 3
+
+
+def _draft_valley_lookback(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
+    """Основной путь: дно за 7 сут → пик, рост и объём по правилам recall ~90%."""
+    lookback = int(config.PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS) * DAY_MS
+    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
+    bars_15 = merged_15m(state)
+    if len(bars_1h) >= 48:
+        recent = [b for b in bars_1h if now_ms - lookback <= b.timestamp <= now_ms]
+        source = "valley_7d_1h"
+    elif len(bars_15) >= 96:
+        recent = [b for b in bars_15 if now_ms - lookback <= b.timestamp <= now_ms]
+        source = "valley_7d_15m"
+    else:
+        return None
+    if len(recent) < 4:
+        return None
+    valley_bar = min(recent, key=lambda b: b.low)
+    after = [b for b in recent if b.timestamp >= valley_bar.timestamp]
+    if len(after) < 2:
+        return None
+    peak_bar = max(after, key=lambda b: b.high)
+    pump_class = _class_from_duration(valley_bar.timestamp, peak_bar.timestamp)
+    growth = (peak_bar.high / valley_bar.low - 1.0) * 100.0
+    if growth < min_growth_pct(pump_class):
+        return None
+    vol_ratio = volume_ratio_median_24h_48h(state, now_ms)
+    if vol_ratio is None:
+        vol_ratio = volume_ratio_min_to_peak(
+            bars_15,
+            valley_bar.timestamp,
+            peak_bar.timestamp,
+            now_ms - lookback,
+        )
+    if not _volume_ok(
+        pump_class,
+        vol_ratio,
+        relaxed=True,
+        allow_missing_volume=False,
+    ):
+        return None
+    if not _price_trend_ok(state, bars_15, now_ms):
+        return None
+    price = state.last_price or peak_bar.high
+    if drawdown_from_peak_pct(price or 0, peak_bar.high) >= max_drawdown_pct():
+        return None
+    return EpisodeDraft(
+        symbol=state.symbol,
+        valley_price=valley_bar.low,
+        valley_ts=valley_bar.timestamp,
+        peak_price=peak_bar.high,
+        peak_ts=peak_bar.timestamp,
+        growth_pct=growth,
+        pump_class=pump_class,
+        volume_ratio=vol_ratio,
+        source=source,
+    )
 
 
 def _class_from_duration(valley_ts: int, peak_ts: int) -> str:
@@ -336,6 +439,9 @@ def detect_unified_episodes(state: SymbolState, now_ms: int) -> list[EpisodeDraf
     if not meets_unified_turnover(state):
         return []
     collected: list[EpisodeDraft] = []
+    d7 = _draft_valley_lookback(state, now_ms)
+    if d7 is not None:
+        collected.append(d7)
     collected.extend(_drafts_15m_windows(state, now_ms))
     d24 = _draft_24h_ticker(state, now_ms)
     if d24 is not None:

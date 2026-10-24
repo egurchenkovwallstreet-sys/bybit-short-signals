@@ -10,14 +10,15 @@ from signal_engine.pump_unified import (
     meets_unified_turnover,
     min_growth_pct,
     should_remove_after_peak_drawdown,
+    volume_ratio_median_24h_48h,
 )
 from signal_engine.state import Bar, SymbolState
 
 
 class PumpUnifiedTests(unittest.TestCase):
     def test_thresholds_match_lab_defaults(self) -> None:
-        self.assertEqual(min_growth_pct("fast"), 40.0)
-        self.assertEqual(min_growth_pct("long"), 100.0)
+        self.assertEqual(min_growth_pct("fast"), 25.0)
+        self.assertEqual(min_growth_pct("long"), 25.0)
 
     def test_remove_at_50pct_drawdown(self) -> None:
         state = SymbolState("X", last_price=51.0)
@@ -31,6 +32,26 @@ class PumpUnifiedTests(unittest.TestCase):
         self.assertFalse(meets_unified_turnover(state))
         state.turnover_24h_usdt = config.PUMP_UNIFIED_MIN_TURNOVER_USDT
         self.assertTrue(meets_unified_turnover(state))
+
+    def test_valley_7d_with_volume_median(self) -> None:
+        now_ms = 1_700_500_000_000
+        state = SymbolState("PUMPUSDT", last_price=130.0)
+        state.turnover_24h_usdt = config.PUMP_UNIFIED_MIN_TURNOVER_USDT
+        step = 3_600_000
+        for i in range(168):
+            ts = now_ms - (167 - i) * step
+            low = 100.0 if i < 20 else 100.0 + (i - 20) * 0.35
+            high = low + 1.5
+            vol = 1_000.0 if i < 120 else 3_000.0
+            state.bars_htf.setdefault("60", []).append(
+                Bar(ts, low, high, low, low + 0.5, vol)
+            )
+        vr = volume_ratio_median_24h_48h(state, now_ms)
+        self.assertIsNotNone(vr)
+        assert vr is not None
+        self.assertGreaterEqual(vr, 1.5)
+        episodes = detect_unified_episodes(state, now_ms)
+        self.assertTrue(any(e.source.startswith("valley_7d") for e in episodes))
 
     def test_24h_ticker_path(self) -> None:
         now_ms = 1_700_000_000_000

@@ -114,10 +114,12 @@ class PumpSignalsColumnTests(unittest.TestCase):
         )
         self.assertEqual(col, COLUMN_RED)
 
-    def test_remove_at_70(self) -> None:
+    def test_remove_at_50pct_drawdown(self) -> None:
         st = SymbolState("X")
-        st.last_price = 30.0
+        st.last_price = 49.0
         self.assertTrue(should_remove_pump_signal(st, 100.0))
+        st.last_price = 51.0
+        self.assertFalse(should_remove_pump_signal(st, 100.0))
 
     def test_lock_m15_peak_at_entry(self) -> None:
         st = SymbolState("BTCUSDT")
