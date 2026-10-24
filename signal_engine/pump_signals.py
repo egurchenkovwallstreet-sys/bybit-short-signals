@@ -23,7 +23,6 @@ from signal_engine.paper.tape import SymbolTape
 from signal_engine.pump_scan import _weakening_score
 from signal_engine.pump_phases import drawdown_from_peak_pct
 from signal_engine.pump_unified import detect_unified_episode, symbol_has_unified_pump
-from signal_engine.stage_debounce import resolve_stage
 from signal_engine.swing_highs import closed_bars
 from signal_engine.watch_store import WatchRow, WatchStore
 
@@ -789,31 +788,11 @@ def build_pump_signals_board(
                 since_peak=since_peak,
                 minutes_no_high=minutes_no_high,
             )
-        prev = str(watch.meta.get("column") or COLUMN_RED)
-        purple_hold = _purple_column_ok(dd_f, minutes_no_high, since_peak)
-        if candidate == COLUMN_SHORT:
-            confirmed_col = COLUMN_SHORT
-            confirmed_rank = _column_rank(COLUMN_SHORT)
-            pending = None
-            pending_since = None
-        elif prev == COLUMN_PURPLE and not purple_hold:
-            confirmed_col = candidate
-            confirmed_rank = _column_rank(candidate)
-            pending = None
-            pending_since = None
-        else:
-            confirmed_rank, pending, pending_since = resolve_stage(
-                confirmed=_column_rank(prev),
-                candidate=_column_rank(candidate),
-                pending_stage=watch.pending_stage,
-                pending_since=watch.pending_since,
-                now_ms=now_ms,
-                continued_pump=_pump_still_active(dd_f, minutes_no_high, since_peak),
-            )
-            confirmed_col = _rank_to_column(confirmed_rank)
-        watch.confirmed_stage = confirmed_rank
-        watch.pending_stage = pending
-        watch.pending_since = pending_since
+        # Без 15-мин debounce: окно шорта 60–180 мин с пика, задержка его съедает.
+        confirmed_col = candidate
+        watch.confirmed_stage = _column_rank(confirmed_col)
+        watch.pending_stage = None
+        watch.pending_since = None
         watch.meta["column"] = confirmed_col
         watches.upsert(watch)
 
