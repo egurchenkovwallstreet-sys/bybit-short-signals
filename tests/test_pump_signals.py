@@ -74,7 +74,8 @@ class PumpSignalsColumnTests(unittest.TestCase):
         self.assertEqual(col, COLUMN_YELLOW)
 
     def test_purple_drawdown_band(self) -> None:
-        self.assertFalse(is_purple_drawdown(15.0))
+        self.assertFalse(is_purple_drawdown(8.0))
+        self.assertTrue(is_purple_drawdown(15.0))
         self.assertTrue(is_purple_drawdown(20.0))
         self.assertFalse(is_purple_drawdown(70.0))
 

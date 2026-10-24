@@ -114,18 +114,26 @@ def _passed_nine(checks: dict[str, dict]) -> int:
 
 
 def _episode_high_7d(state: SymbolState, now_ms: int) -> tuple[float, int] | None:
-    """Max high на 1h за окно PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS (истинный пик long-пампа)."""
+    """Max high за 7 сут (1h + 15m) — пик long-пампа, не локальный M15 от сегодня."""
     from signal_engine.swing_highs import closed_bars
 
     lookback = int(config.PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS) * 24 * 3_600_000
+    best_p = 0.0
+    best_t = 0
     bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
     recent = [b for b in bars_1h if now_ms - lookback <= b.timestamp <= now_ms]
-    if not recent:
+    if recent:
+        peak_bar = max(recent, key=lambda b: b.high)
+        best_p, best_t = float(peak_bar.high), int(peak_bar.timestamp)
+    bars_15 = merged_15m(state)
+    recent15 = [b for b in bars_15 if now_ms - lookback <= b.timestamp <= now_ms]
+    if recent15:
+        peak15 = max(recent15, key=lambda b: b.high)
+        if float(peak15.high) > best_p:
+            best_p, best_t = float(peak15.high), int(peak15.timestamp)
+    if best_p <= 0:
         return None
-    peak_bar = max(recent, key=lambda b: b.high)
-    if peak_bar.high <= 0:
-        return None
-    return float(peak_bar.high), int(peak_bar.timestamp)
+    return best_p, best_t
 
 
 def lock_m15_peak_at_entry(
@@ -283,6 +291,12 @@ def _pump_still_active(
 ) -> bool:
     """Рост ещё идёт — не «памп прошёл» (фиолетовая)."""
     lo = config.PUMP_SIGNALS_PURPLE_MIN_DRAWDOWN_PCT
+    dd = float(drawdown) if drawdown is not None else 0.0
+    # Долго без нового хая / после пика — это уже затухание, не «активный памп».
+    if since_peak is not None and since_peak >= 180 and dd >= 5.0:
+        return False
+    if minutes_no_high is not None and minutes_no_high >= 90 and dd >= 8.0:
+        return False
     if drawdown is not None and drawdown <= lo:
         return True
     min_no_high = config.PUMP_SIGNALS_PURPLE_MIN_MINUTES_NO_HIGH
@@ -465,6 +479,8 @@ def build_pump_signals_board(
             continue
         draft = detect_unified_episode(state, now_ms)
         if draft is None:
+            continue
+        if float(draft.growth_pct or 0) < float(config.PUMP_SIGNALS_MIN_EPISODE_GROWTH_PCT):
             continue
         price = state.last_price
         if (
