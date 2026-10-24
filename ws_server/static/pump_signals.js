@@ -1,4 +1,4 @@
-/** Вкладка «Памп сигналы»: колонки + карточки монет. */
+/** Вкладка «Памп сигналы»: колонки + карточки; клик — детали и 15m график. */
 
 (function () {
   const COL_CLASS = {
@@ -16,6 +16,12 @@
   };
 
   let columns = [];
+  let selected = null;
+  let chartApi = null;
+  let chartSeries = null;
+  let peakLine = null;
+  let valleyLine = null;
+  let chartLoadSeq = 0;
 
   function fmtNum(v, digits = 1) {
     if (v === null || v === undefined || Number.isNaN(Number(v))) return "—";
@@ -33,6 +39,14 @@
     return `×${Number(v).toFixed(1)}`;
   }
 
+  function fmtTurnover(v) {
+    if (v == null || Number.isNaN(Number(v))) return "—";
+    const n = Number(v);
+    if (n >= 1e6) return `$${(n / 1e6).toFixed(2)}M`;
+    if (n >= 1e3) return `$${(n / 1e3).toFixed(0)}k`;
+    return `$${n.toFixed(0)}`;
+  }
+
   function metric(label, value, extraClass) {
     const row = document.createElement("div");
     row.className = "psig-metric";
@@ -47,11 +61,166 @@
     return row;
   }
 
+  function parseCandles(raw, interval) {
+    const sec =
+      interval === "15" ? 900 : interval === "5" ? 300 : interval === "1" ? 60 : 900;
+    const out = [];
+    for (const row of raw || []) {
+      let t;
+      let o;
+      let h;
+      let l;
+      let c;
+      if (Array.isArray(row)) {
+        t = Number(row[0]);
+        o = Number(row[1]);
+        h = Number(row[2]);
+        l = Number(row[3]);
+        c = Number(row[4]);
+      } else if (row && typeof row === "object") {
+        t = Number(row.time ?? row.timestamp ?? row.t);
+        o = Number(row.open ?? row.o);
+        h = Number(row.high ?? row.h);
+        l = Number(row.low ?? row.l);
+        c = Number(row.close ?? row.c);
+      } else continue;
+      if (!t || !c) continue;
+      const time = t > 1e12 ? Math.floor(t / 1000) : Math.floor(t);
+      out.push({ time, open: o, high: h, low: l, close: c });
+    }
+    out.sort((a, b) => a.time - b.time);
+    const dedup = [];
+    let lastT = 0;
+    for (const b of out) {
+      if (b.time <= lastT) b.time = lastT + sec;
+      lastT = b.time;
+      dedup.push(b);
+    }
+    return dedup;
+  }
+
+  function ensureChart() {
+    const el = document.getElementById("psig-chart");
+    if (!el || !window.LightweightCharts || chartApi) return;
+    chartApi = window.LightweightCharts.createChart(el, {
+      layout: { background: { color: "#10141b" }, textColor: "#c5d0de" },
+      grid: { vertLines: { color: "#222a36" }, horzLines: { color: "#222a36" } },
+      localization: { locale: "ru-RU" },
+      rightPriceScale: { borderVisible: false },
+      timeScale: { borderVisible: false },
+    });
+    chartSeries = chartApi.addCandlestickSeries({
+      upColor: "#3dd68c",
+      downColor: "#ff5d73",
+      borderVisible: true,
+      wickUpColor: "#3dd68c",
+      wickDownColor: "#ff5d73",
+    });
+    const resize = () => {
+      if (chartApi && el.clientWidth > 0) chartApi.resize(el.clientWidth, 320);
+    };
+    new ResizeObserver(resize).observe(el);
+    requestAnimationFrame(resize);
+  }
+
+  function clearPriceLines() {
+    if (!chartSeries) return;
+    if (peakLine) {
+      chartSeries.removePriceLine(peakLine);
+      peakLine = null;
+    }
+    if (valleyLine) {
+      chartSeries.removePriceLine(valleyLine);
+      valleyLine = null;
+    }
+  }
+
+  function addPriceLine(price, title, color) {
+    if (!chartSeries || !price || price <= 0) return null;
+    return chartSeries.createPriceLine({
+      price: Number(price),
+      color,
+      lineWidth: 2,
+      lineStyle: 2,
+      axisLabelVisible: true,
+      title,
+    });
+  }
+
+  async function loadChart(sig) {
+    if (!sig?.symbol) return;
+    ensureChart();
+    const wrap = document.getElementById("psig-detail-wrap");
+    const title = document.getElementById("psig-chart-title");
+    if (wrap) wrap.hidden = false;
+    if (title) title.textContent = `${sig.symbol} · 15m (пик зафиксирован)`;
+    const seq = ++chartLoadSeq;
+    const q = new URLSearchParams({ interval: "15", days: "5", refresh: "1" });
+    const resp = await fetch(`/api/klines/${encodeURIComponent(sig.symbol)}?${q}`);
+    if (seq !== chartLoadSeq || !chartSeries) return;
+    const payload = await resp.json();
+    const bars = parseCandles(payload.candles || payload.klines || [], "15");
+    if (!bars.length) return;
+    chartSeries.setData(bars);
+    clearPriceLines();
+    peakLine = addPriceLine(sig.peak_price_m15, "пик M15", "#f0b429");
+    valleyLine = addPriceLine(sig.valley_price, "дно", "#58a6ff");
+    chartApi.timeScale().fitContent();
+  }
+
+  function renderDetail(sig) {
+    const box = document.getElementById("psig-detail-metrics");
+    const head = document.getElementById("psig-detail-title");
+    if (!box || !sig) return;
+    if (head) head.textContent = sig.symbol || "Памп";
+    box.replaceChildren();
+    const grid = document.createElement("div");
+    grid.className = "psig-metrics psig-detail-grid";
+    const dd = sig.drawdown_from_peak_pct;
+    grid.appendChild(metric("Пик M15 (зафикс.)", sig.peak_msk || "—"));
+    grid.appendChild(metric("Цена пика", fmtNum(sig.peak_price_m15, 6)));
+    grid.appendChild(metric("Дно / старт", sig.growth_start_msk || "—"));
+    grid.appendChild(metric("Рост к пику", fmtPct(sig.growth_pct)));
+    grid.appendChild(metric("С пика, мин", fmtNum(sig.since_peak_min, 0)));
+    grid.appendChild(metric("Откат от пика", fmtPct(dd)));
+    grid.appendChild(metric("Триггер", sig.trigger || "—"));
+    grid.appendChild(metric("Объём", fmtVolRatio(sig.volume_ratio)));
+    grid.appendChild(
+      metric(
+        "Покупки / продажи",
+        `${fmtNum(sig.taker_buy_pct, 0)}% / ${fmtNum(sig.taker_sell_pct, 0)}%`
+      )
+    );
+    grid.appendChild(
+      metric("OI 1ч / 4ч", `${fmtPct(sig.oi_1h_pct)} / ${fmtPct(sig.oi_4h_pct)}`)
+    );
+    grid.appendChild(
+      metric("Шлюз · ослабление", `${sig.passed_count ?? "—"} / 9 · ${sig.weaken_score ?? "—"}`)
+    );
+    grid.appendChild(metric("Оборот 24ч", fmtTurnover(sig.turnover_24h_usdt)));
+    grid.appendChild(metric("CVD див.", sig.cvd_divergence ? "да" : "нет"));
+    grid.appendChild(metric("Цена сейчас", fmtNum(sig.last_price, 6)));
+    box.appendChild(grid);
+  }
+
+  function selectCard(sig, cardEl) {
+    selected = sig;
+    document.querySelectorAll(".psig-card-selected").forEach((el) => {
+      el.classList.remove("psig-card-selected");
+    });
+    if (cardEl) cardEl.classList.add("psig-card-selected");
+    renderDetail(sig);
+    loadChart(sig);
+  }
+
   function renderCard(sig) {
     const col = sig.column || "red";
     const card = document.createElement("article");
     card.className = `psig-card ${CARD_CLASS[col] || ""}`;
     card.dataset.symbol = sig.symbol;
+    if (selected && selected.symbol === sig.symbol) {
+      card.classList.add("psig-card-selected");
+    }
 
     const head = document.createElement("header");
     head.className = "psig-card-head";
@@ -70,6 +239,7 @@
     const dd = sig.drawdown_from_peak_pct;
     const ddClass = dd != null && Number(dd) > 0 ? "psig-val-warn" : "";
     const growthClass = sig.growth_pct != null && Number(sig.growth_pct) >= 0 ? "psig-val-up" : "";
+    grid.appendChild(metric("Пик M15", sig.peak_msk || "—"));
     grid.appendChild(metric("Старт (МСК)", sig.growth_start_msk || "—"));
     grid.appendChild(metric("Прошло", sig.elapsed_label || "—"));
     grid.appendChild(metric("Рост от дна", fmtPct(sig.growth_pct), growthClass));
@@ -91,6 +261,16 @@
       )
     );
     card.appendChild(grid);
+
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.addEventListener("click", () => selectCard(sig, card));
+    card.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        selectCard(sig, card);
+      }
+    });
     return card;
   }
 
@@ -141,6 +321,25 @@
       panel.appendChild(list);
       wrap.appendChild(panel);
       root.appendChild(wrap);
+    }
+    if (selected) {
+      let found = null;
+      for (const col of columns) {
+        for (const sig of col.signals || []) {
+          if (sig.symbol === selected.symbol) {
+            found = sig;
+            break;
+          }
+        }
+        if (found) break;
+      }
+      if (found) {
+        selected = found;
+        renderDetail(found);
+        loadChart(found);
+        const el = root.querySelector(`[data-symbol="${CSS.escape(found.symbol)}"]`);
+        if (el) el.classList.add("psig-card-selected");
+      }
     }
   }
 

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Сигналы шорт</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20261023psig3">
+  <link rel="stylesheet" href="/static/styles.css?v=20261024m15fix">
 </head>
 <body>
   <header class="topbar">
@@ -95,9 +95,19 @@
       <strong class="psig-inline-green">Зелёная</strong> — готовность к шорту (откат ≤15%);
       <strong class="psig-inline-yellow">жёлтая</strong> — затухание;
       <strong class="psig-inline-red">красная</strong> — активный рост;
-      <strong class="psig-inline-purple">фиолетовая</strong> — памп прошёл, откат от пика 15–70% (≥70% с доски снимаем). Время — МСК.
+      <strong class="psig-inline-purple">фиолетовая</strong> — памп прошёл, откат от пика 15–70% (≥70% с доски снимаем). Пик пампа фиксируется на <strong>15m</strong> при постановке на доску и не сдвигается. Клик по карточке — график и детали. Время — МСК.
     </p>
     <div id="psig-board" class="psig-board"></div>
+    <section id="psig-detail-wrap" class="paper-panel psig-detail-wrap" hidden>
+      <h3 id="psig-detail-title">Памп</h3>
+      <div id="psig-detail-metrics" class="psig-detail-metrics"></div>
+      <div id="psig-chart-wrap" class="em6b-chart-wrap">
+        <div class="em6b-chart-head">
+          <h4 id="psig-chart-title">15m</h4>
+        </div>
+        <div id="psig-chart" class="em6b-chart"></div>
+      </div>
+    </section>
   </section>
 
   <section id="view-em6-bybit" class="paper-view">
@@ -154,7 +164,7 @@
   <script src="/static/vendor/echarts.min.js"></script>
   <script src="/static/paper_test.js?v=20261019pnlglyph"></script>
   <script src="/static/em6_bybit.js?v=20261024expnl"></script>
-  <script src="/static/pump_signals.js?v=20261023psig3"></script>
+  <script src="/static/pump_signals.js?v=20261024m15fix"></script>
   <script src="/static/board_chart.js?v=20261019ema333engine"></script>
   <script src="/static/app.js?v=20261023psig1"></script>
 </body>

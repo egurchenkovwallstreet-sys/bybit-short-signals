@@ -12,10 +12,13 @@ from signal_engine.pump_signals import (
     COLUMN_RED,
     COLUMN_YELLOW,
     is_purple_drawdown,
+    lock_m15_peak_at_entry,
     raw_column,
     should_remove_pump_signal,
 )
-from signal_engine.state import SymbolState
+from signal_engine.pump_unified import EpisodeDraft
+from signal_engine.state import Bar
+from signal_engine.state import Bar, SymbolState
 
 
 def _checks(**flags: bool) -> dict:
@@ -115,6 +118,30 @@ class PumpSignalsColumnTests(unittest.TestCase):
         st = SymbolState("X")
         st.last_price = 30.0
         self.assertTrue(should_remove_pump_signal(st, 100.0))
+
+    def test_lock_m15_peak_at_entry(self) -> None:
+        st = SymbolState("BTCUSDT")
+        t0 = 1_700_000_000_000
+        bars = [
+            Bar(t0, 1.0, 1.1, 0.9, 1.0, 100),
+            Bar(t0 + 900_000, 1.0, 1.5, 0.95, 1.4, 200),
+            Bar(t0 + 1_800_000, 1.4, 1.6, 1.3, 1.55, 150),
+        ]
+        st.bars_htf["15"] = bars
+        draft = EpisodeDraft(
+            symbol="BTCUSDT",
+            valley_price=0.9,
+            valley_ts=t0,
+            peak_price=1.5,
+            peak_ts=t0 + 900_000,
+            growth_pct=50.0,
+            pump_class="fast",
+            volume_ratio=5.0,
+            source="bars_15m",
+        )
+        p, ts = lock_m15_peak_at_entry(st, draft, t0 + 1_900_000)
+        self.assertAlmostEqual(p, 1.6)
+        self.assertEqual(ts, t0 + 1_800_000)
 
 
 if __name__ == "__main__":

@@ -89,23 +89,99 @@ def _passed_nine(checks: dict[str, dict]) -> int:
     return sum(1 for key in MANDATORY if (checks.get(key) or {}).get("ok"))
 
 
-def _minutes_no_new_high(state: SymbolState, peak_ts: int, now_ms: int) -> float | None:
-    """Минут с последнего максимума цены с момента peak_ts (1m, иначе 15m)."""
-    session_high = 0.0
+def lock_m15_peak_at_entry(
+    state: SymbolState,
+    draft: Any,
+    now_ms: int,
+) -> tuple[float, int]:
+    """Зафиксировать max(high) на 15m от впадины эпизода до момента постановки на доску."""
+    bars = merged_15m(state)
+    valley_ts = int(draft.valley_ts)
+    if not bars:
+        return float(draft.peak_price), int(draft.peak_ts)
+    window = [b for b in bars if valley_ts <= b.timestamp <= now_ms]
+    if not window:
+        window = [b for b in bars if b.timestamp <= now_ms][-48:]
+    if not window:
+        return float(draft.peak_price), int(draft.peak_ts)
+    peak_bar = max(window, key=lambda b: b.high)
+    return float(peak_bar.high), int(peak_bar.timestamp)
+
+
+def _watch_fixed_peak(watch: WatchRow) -> tuple[float, int] | None:
+    raw_p = watch.meta.get("m15_peak_price")
+    raw_t = watch.meta.get("m15_peak_ts")
+    if raw_p is None or raw_t is None:
+        return None
+    p = float(raw_p)
+    t = int(raw_t)
+    if p <= 0 or t <= 0:
+        return None
+    return p, t
+
+
+def _ensure_fixed_peak(
+    watch: WatchRow,
+    state: SymbolState,
+    now_ms: int,
+) -> tuple[float, int]:
+    fixed = _watch_fixed_peak(watch)
+    if fixed is not None:
+        return fixed
+    bars = merged_15m(state)
+    valley_ts = int(watch.meta.get("valley_ts") or 0)
+    fallback_p = float(watch.meta.get("peak_price") or 0)
+    if bars and valley_ts > 0:
+        window = [b for b in bars if valley_ts <= b.timestamp <= now_ms]
+        if window:
+            pb = max(window, key=lambda b: b.high)
+            watch.meta["m15_peak_price"] = float(pb.high)
+            watch.meta["m15_peak_ts"] = int(pb.timestamp)
+            return float(pb.high), int(pb.timestamp)
+    if fallback_p > 0:
+        ts = int(watch.meta.get("m15_peak_ts") or watch.entered_at or now_ms)
+        watch.meta["m15_peak_price"] = fallback_p
+        watch.meta["m15_peak_ts"] = ts
+        return fallback_p, ts
+    return 0.0, 0
+
+
+def _minutes_no_new_high(
+    state: SymbolState,
+    peak_ts: int,
+    now_ms: int,
+    *,
+    peak_price: float | None = None,
+) -> float | None:
+    """Минут с последнего обновления хая (не выше зафиксированного M15-пика)."""
+    cap = float(peak_price) if peak_price and peak_price > 0 else None
+    session_high = cap or 0.0
     hi_ts = peak_ts
     for bar in state.bars_1m:
-        if bar.timestamp >= peak_ts and bar.high > session_high:
+        if bar.timestamp < peak_ts:
+            continue
+        if bar.high > session_high + 1e-12:
+            if cap is not None and bar.high > cap + 1e-12:
+                continue
             session_high = bar.high
             hi_ts = bar.timestamp
-    if session_high <= 0:
+    if session_high <= 0 or (cap and session_high + 1e-12 < cap * 0.999):
         for bar in merged_15m(state):
-            if bar.timestamp >= peak_ts and bar.high > session_high:
+            if bar.timestamp < peak_ts:
+                continue
+            if bar.high > session_high + 1e-12:
+                if cap is not None and bar.high > cap + 1e-12:
+                    continue
                 session_high = bar.high
                 hi_ts = bar.timestamp
     if session_high <= 0:
         return None
     last = float(state.last_price or 0)
-    if last >= session_high * 0.999:
+    if cap and last > cap + 1e-12:
+        last = cap
+    if cap and last >= cap * 0.999:
+        hi_ts = max(hi_ts, now_ms - 60_000)
+    elif last >= session_high * 0.999:
         hi_ts = max(hi_ts, now_ms - 60_000)
     return max(0.0, (now_ms - hi_ts) / MIN_MS)
 
@@ -225,12 +301,20 @@ class PumpSignalCard:
     cvd_divergence: bool
     updated_at: int
     turnover_24h_usdt: float | None = None
+    peak_price_m15: float | None = None
+    peak_ts_m15: int | None = None
+    peak_msk: str = ""
+    valley_price: float | None = None
 
     def to_data(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "column": self.column,
             "last_price": self.last_price,
+            "peak_price_m15": self.peak_price_m15,
+            "peak_ts_m15": self.peak_ts_m15,
+            "peak_msk": self.peak_msk,
+            "valley_price": self.valley_price,
             "growth_start_ts": self.growth_start_ts,
             "growth_start_msk": self.growth_start_msk,
             "elapsed_min": round(self.elapsed_min, 1),
@@ -292,6 +376,7 @@ def build_pump_signals_board(
         draft = detect_unified_episode(state, now_ms)
         if draft is None:
             continue
+        m15_p, m15_t = lock_m15_peak_at_entry(state, draft, now_ms)
         row = WatchRow(
             board=BOARD_ID,
             symbol=symbol,
@@ -301,8 +386,13 @@ def build_pump_signals_board(
             pending_stage=None,
             pending_since=None,
             meta={
-                "peak_price": draft.peak_price,
+                "m15_peak_price": m15_p,
+                "m15_peak_ts": m15_t,
+                "peak_price": m15_p,
                 "valley_ts": draft.valley_ts,
+                "valley_price": draft.valley_price,
+                "growth_pct_lock": draft.growth_pct,
+                "pump_class": draft.pump_class,
                 "column": COLUMN_RED,
             },
         )
@@ -314,10 +404,10 @@ def build_pump_signals_board(
         state = states.get(symbol)
         if state is None or state.last_price is None or state.last_price <= 0:
             continue
-        peak = float(watch.meta.get("peak_price") or 0)
-        if state.last_price > peak:
-            peak = float(state.last_price)
-            watch.meta["peak_price"] = peak
+        fixed_p, fixed_ts = _ensure_fixed_peak(watch, state, now_ms)
+        if fixed_p <= 0:
+            continue
+        peak = fixed_p
         if should_remove_pump_signal(state, peak):
             watches.remove(BOARD_ID, symbol)
             continue
@@ -329,6 +419,8 @@ def build_pump_signals_board(
         pump = find_pump(state, tape, now_ms)
         if pump is None:
             continue
+        pump.peak_price = fixed_p
+        pump.peak_ts = fixed_ts
 
         klines = _klines_for(paper, symbol)
         if not klines.get("15"):
@@ -340,23 +432,17 @@ def build_pump_signals_board(
         reading = evaluate_reading(state, now_ms)
         weaken = _weakening_score(reading, now_ms, state)
         metrics = dict(ev.metrics)
-        since_peak = (now_ms - pump.peak_ts) / MIN_MS
+        since_peak = (now_ms - fixed_ts) / MIN_MS
         metrics["since_peak_min"] = round(since_peak, 1)
-        last = float(state.last_price or pump.peak_price)
-        effective_peak = max(
-            float(pump.peak_price),
-            float(watch.meta.get("peak_price") or 0),
-            last,
-        )
-        for bar in state.bars_1m:
-            if bar.timestamp >= pump.peak_ts:
-                effective_peak = max(effective_peak, bar.high)
-        if effective_peak > 0:
-            drawdown = max(0.0, (1.0 - last / effective_peak) * 100.0)
+        last = float(state.last_price or fixed_p)
+        if fixed_p > 0:
+            drawdown = max(0.0, (1.0 - min(last, fixed_p) / fixed_p) * 100.0)
             metrics["drawdown_from_peak_pct"] = round(drawdown, 2)
         else:
             drawdown = metrics.get("drawdown_from_peak_pct")
-        minutes_no_high = _minutes_no_new_high(state, pump.peak_ts, now_ms)
+        minutes_no_high = _minutes_no_new_high(
+            state, fixed_ts, now_ms, peak_price=fixed_p
+        )
         dd_f = float(drawdown) if drawdown is not None else None
         candidate = raw_column(
             checks=ev.checks,
@@ -387,11 +473,18 @@ def build_pump_signals_board(
         watch.pending_stage = pending
         watch.pending_since = pending_since
         watch.meta["column"] = confirmed_col
-        watch.meta["valley_ts"] = pump.valley_ts
         watches.upsert(watch)
 
         buy_pct, sell_pct = _taker_pcts(reading.taker_ratio)
-        elapsed = max(0.0, (now_ms - pump.valley_ts) / MIN_MS)
+        valley_ts = int(watch.meta.get("valley_ts") or pump.valley_ts)
+        elapsed = max(0.0, (now_ms - valley_ts) / MIN_MS)
+        growth_lock = watch.meta.get("growth_pct_lock")
+        growth_show = (
+            float(growth_lock)
+            if growth_lock is not None
+            else float(pump.growth_pct)
+        )
+        valley_price = watch.meta.get("valley_price")
         tr = reading.taker_ratio
         turnover = state.turnover_24h_usdt
         vol_ratio = pump.volume_ratio
@@ -405,11 +498,15 @@ def build_pump_signals_board(
             PumpSignalCard(
                 symbol=symbol,
                 column=confirmed_col,
-                last_price=float(state.last_price or pump.peak_price),
-                growth_start_ts=pump.valley_ts,
-                growth_start_msk=fmt_msk(pump.valley_ts),
+                last_price=float(state.last_price or fixed_p),
+                growth_start_ts=valley_ts,
+                growth_start_msk=fmt_msk(valley_ts),
                 elapsed_min=elapsed,
-                growth_pct=float(pump.growth_pct),
+                growth_pct=growth_show,
+                peak_price_m15=fixed_p,
+                peak_ts_m15=fixed_ts,
+                peak_msk=fmt_msk(fixed_ts),
+                valley_price=float(valley_price) if valley_price is not None else None,
                 volume_ratio=vol_ratio,
                 taker_buy_pct=buy_pct,
                 taker_sell_pct=sell_pct,

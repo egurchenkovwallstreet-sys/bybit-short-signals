@@ -2723,6 +2723,25 @@ th { cursor: pointer; color: var(--muted); }
   background: var(--panel-2);
   border: 1px solid var(--line);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.psig-card:hover {
+  border-color: var(--accent, #58a6ff);
+}
+
+.psig-card-selected {
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.45);
+}
+
+.psig-detail-wrap {
+  margin-top: 16px;
+}
+
+.psig-detail-grid {
+  margin-bottom: 12px;
 }
 
 .psig-card-green {
