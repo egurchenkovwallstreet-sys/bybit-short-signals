@@ -74,6 +74,7 @@ class Em6BybitStrategy:
     _last_candidate_ms: int = -1
     _last_open_ms: int = -1
     _last_peak_ms: int = -1
+    _last_journal_sync_ms: int = -1
     _wallet_avail: float = 0.0
 
     def open(self) -> None:
@@ -486,7 +487,7 @@ class Em6BybitStrategy:
         opened_at = int(live.opened_at if live else row.get("opened_at") or 0)
         entry_p = float(live.entry_price if live else row.get("entry_price") or 0)
         exit_p = entry_p
-        pnl = 0.0
+        pnl: float | None = None
         if self.broker.configured() and opened_at and entry_p > 0:
             ex = self.broker.match_closed_pnl(
                 symbol,
@@ -499,21 +500,19 @@ class Em6BybitStrategy:
                 pnl = float(ex.get("pnl_usd") or 0)
                 if ex.get("closed_at_ms"):
                     now = int(ex["closed_at_ms"])
-        if live and pnl == 0.0 and exit_p == float(row.get("entry_price") or 0):
-            exit_p = float(live.stop_price or live.entry_price)
-            if live.side == "long":
-                pnl = (exit_p - live.entry_price) * live.qty
-            else:
-                pnl = (live.entry_price - exit_p) * live.qty
+        margin = float(live.margin if live else row.get("margin") or 0)
+        roe_val: float | None = None
+        if pnl is not None and margin > 0:
+            roe_val = pnl / margin * 100.0
         self.store.close_trade(
             self._conn,
             int(row["id"]),
             {
                 "closed_at": now,
                 "exit_price": exit_p,
-                "exit_reason": reason,
-                "pnl_usd": pnl,
-                "roe_pct": (pnl / live.margin * 100.0) if live and live.margin > 0 else 0,
+                "exit_reason": reason if pnl is not None else f"{reason}_await_exchange",
+                "pnl_usd": pnl if pnl is not None else None,
+                "roe_pct": roe_val,
                 "max_roe": self._max_roe(live) if live else row.get("max_roe"),
                 "min_roe": self._min_roe(live) if live else row.get("min_roe"),
                 "stop_price": live.stop_price if live else row.get("stop_price"),
@@ -536,6 +535,65 @@ class Em6BybitStrategy:
                     "symbol": sym,
                 }
                 self._finalize_closed(sym, row, reason="trailing_stop")
+
+    def _sync_closed_journal_from_exchange(self) -> None:
+        """Подтянуть PnL закрытых строк журнала с get_closed_pnl (не пересчёт по стопу)."""
+        if not self.broker.configured() or self._conn is None:
+            return
+        from collections import defaultdict
+
+        from signal_engine.live.em6_bybit.history import invalidate_closed_cache
+
+        rows = self.store.list_trades(self._conn, "closed", 500)
+        used: dict[str, set[str]] = defaultdict(set)
+        updated = 0
+        for row in rows:
+            sym = str(row.get("symbol") or "")
+            opened_at = int(row.get("opened_at") or 0)
+            entry_p = float(row.get("entry_price") or 0)
+            if not sym or not opened_at or entry_p <= 0:
+                continue
+            reason_db = str(row.get("exit_reason") or "")
+            pnl_db = row.get("pnl_usd")
+            if pnl_db is not None and not reason_db.endswith("_await_exchange"):
+                continue
+            ex = self.broker.match_closed_pnl(
+                sym,
+                opened_at,
+                entry_p,
+                closed_at_ms=int(row.get("closed_at") or 0) or None,
+                used_keys=used[sym],
+            )
+            if not ex or not ex.get("exit_price"):
+                continue
+            pnl = float(ex.get("pnl_usd") or 0)
+            margin = float(row.get("margin") or 0)
+            roe = (pnl / margin * 100.0) if margin > 0 else None
+            closed_at = int(ex.get("closed_at_ms") or row.get("closed_at") or 0)
+            reason = str(row.get("exit_reason") or "trailing_stop").replace(
+                "_await_exchange", ""
+            )
+            self.store.close_trade(
+                self._conn,
+                int(row["id"]),
+                {
+                    "closed_at": closed_at,
+                    "exit_price": float(ex["exit_price"]),
+                    "exit_reason": reason or "exchange",
+                    "pnl_usd": pnl,
+                    "roe_pct": roe,
+                    "max_roe": row.get("max_roe"),
+                    "min_roe": row.get("min_roe"),
+                    "stop_price": row.get("stop_price"),
+                    "best_price": row.get("best_price"),
+                    "worst_price": row.get("worst_price"),
+                    "exit_json": {"sync": "exchange_pnl"},
+                },
+            )
+            updated += 1
+        if updated:
+            invalidate_closed_cache()
+            log.info("em6 bybit: PnL с биржи для %s закрытых в журнале", updated)
 
     def _stretch_row(
         self, symbol: str, state: SymbolState, now_ms: int
@@ -877,6 +935,13 @@ class Em6BybitStrategy:
             self._last_candidate_ms = now_ms
             self._tick_candidates(states, now_ms, on_exchange)
 
+        if (
+            self._last_journal_sync_ms < 0
+            or now_ms - self._last_journal_sync_ms >= 60_000
+        ):
+            self._last_journal_sync_ms = now_ms
+            self._sync_closed_journal_from_exchange()
+
         if now_ms - self._last_status_log_ms >= 120_000:
             self._last_status_log_ms = now_ms
             log.info(
@@ -938,6 +1003,9 @@ class Em6BybitStrategy:
         unrealized_total = sum(float(r.get("unrealised_pnl") or 0) for r in open_rows)
         closed_stats = summary_from_closed(closed)
         n_closed = int(closed_stats["closed_trades"])
+        closed_from_exchange = bool(
+            closed and str(closed[0].get("source") or "") == "bybit"
+        )
         cand_rows = []
         by_column: dict[str, list[dict]] = {}
         for w in sorted(self._watch.values(), key=lambda x: x.last_stretch, reverse=True):
@@ -967,7 +1035,12 @@ class Em6BybitStrategy:
                 "total_unrealised_pnl": round(unrealized_total, 2),
                 "watch_count": len(cand_rows),
                 "stretch_floor_pct": config.EM6_BYBIT_STRETCH_FLOOR_PCT,
-                "data_source": "bybit" if self.broker.configured() else "local",
+                "data_source": "bybit"
+                if self.broker.configured() and closed_from_exchange
+                else ("bybit_wallet" if self.broker.configured() else "local"),
+                "closed_stats_source": "bybit"
+                if closed_from_exchange
+                else "local",
             },
             "candidates": cand_rows,
             "candidate_columns": columns,

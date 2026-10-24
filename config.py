@@ -116,6 +116,8 @@ EM6_BYBIT_AWAY_BANDS_PCT = _env_float("EM6_BYBIT_AWAY_BANDS_PCT", 3.0)
 EM6_BYBIT_UNIVERSE_SCAN_MS = _env_int("EM6_BYBIT_UNIVERSE_SCAN_MS", 150_000)
 # Претенденты и FSM: отдельный цикл signal_engine ~1 Гц (не ждать MARKET_SCAN 3 с).
 EM6_BYBIT_SCAN_INTERVAL_MS = _env_int("EM6_BYBIT_SCAN_INTERVAL_MS", 1_000)
+# Кэш closed PnL с Demo API для вкладки (не дёргать get_closed_pnl каждый тик).
+EM6_BYBIT_CLOSED_CACHE_SEC = _env_int("EM6_BYBIT_CLOSED_CACHE_SEC", 30)
 EM6_BYBIT_CANDIDATE_TICK_MS = _env_int("EM6_BYBIT_CANDIDATE_TICK_MS", 1_000)
 EM6_BYBIT_OPEN_TICK_MS = _env_int("EM6_BYBIT_OPEN_TICK_MS", 1_000)
 EM6_BYBIT_PEAK_TICK_MS = _env_int("EM6_BYBIT_PEAK_TICK_MS", 1_000)

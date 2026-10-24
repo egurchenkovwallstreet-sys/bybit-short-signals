@@ -248,28 +248,44 @@ class Em6BybitBroker:
             "source": "bybit",
         }
 
-    def _fetch_closed_pnl_page(
+    def _fetch_closed_pnl_pages(
         self,
         *,
         start_ms: int | None,
-        limit: int,
+        max_rows: int,
         symbol: str | None = None,
     ) -> list[dict[str, Any]]:
-        kwargs: dict[str, Any] = {
-            "category": "linear",
-            "limit": min(max(1, limit), 100),
-            "endTime": int(time.time() * 1000),
-        }
-        if start_ms is not None:
-            kwargs["startTime"] = max(0, start_ms)
-        if symbol:
-            kwargs["symbol"] = symbol
-        resp = self._client().get_closed_pnl(**kwargs)
-        code = resp.get("retCode") if isinstance(resp, dict) else None
-        if code not in (0, "0", None):
-            log.warning("get_closed_pnl %s: %s", symbol or "all", resp)
-            return []
-        return (resp.get("result") or {}).get("list") or []
+        """Несколько страниц get_closed_pnl (Bybit cursor), до max_rows записей."""
+        want = min(max(1, max_rows), 500)
+        collected: list[dict[str, Any]] = []
+        cursor = ""
+        end_time = int(time.time() * 1000)
+        while len(collected) < want:
+            kwargs: dict[str, Any] = {
+                "category": "linear",
+                "limit": min(100, want - len(collected)),
+                "endTime": end_time,
+            }
+            if start_ms is not None:
+                kwargs["startTime"] = max(0, start_ms)
+            if symbol:
+                kwargs["symbol"] = symbol
+            if cursor:
+                kwargs["cursor"] = cursor
+            resp = self._client().get_closed_pnl(**kwargs)
+            code = resp.get("retCode") if isinstance(resp, dict) else None
+            if code not in (0, "0", None):
+                log.warning("get_closed_pnl %s: %s", symbol or "all", resp)
+                break
+            result = resp.get("result") or {}
+            page = result.get("list") or []
+            if not page:
+                break
+            collected.extend(page)
+            cursor = str(result.get("nextPageCursor") or "")
+            if not cursor:
+                break
+        return collected
 
     def list_recent_closed_pnl(
         self,
@@ -286,8 +302,8 @@ class Em6BybitBroker:
             for sym in symbols[:40]:
                 try:
                     merged.extend(
-                        self._fetch_closed_pnl_page(
-                            start_ms=start_ms, limit=50, symbol=sym
+                        self._fetch_closed_pnl_pages(
+                            start_ms=start_ms, max_rows=50, symbol=sym
                         )
                     )
                 except Exception:
@@ -295,13 +311,13 @@ class Em6BybitBroker:
             rows = merged
         else:
             try:
-                rows = self._fetch_closed_pnl_page(start_ms=start_ms, limit=lim)
+                rows = self._fetch_closed_pnl_pages(start_ms=start_ms, max_rows=lim)
             except Exception:
                 log.exception("get_closed_pnl all")
                 rows = []
-            if not rows:
+            if not rows and start_ms is not None:
                 try:
-                    rows = self._fetch_closed_pnl_page(start_ms=None, limit=lim)
+                    rows = self._fetch_closed_pnl_pages(start_ms=None, max_rows=lim)
                 except Exception:
                     log.exception("get_closed_pnl all (no start)")
                     rows = []

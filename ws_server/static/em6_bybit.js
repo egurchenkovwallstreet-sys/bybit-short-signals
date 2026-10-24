@@ -32,7 +32,12 @@
     if (!el) return;
     const pnlClosed = Number(s.total_pnl_closed || 0);
     const pnlOpen = Number(s.total_unrealised_pnl || 0);
-    const src = s.data_source === "bybit" ? "Bybit Demo" : "локальный журнал";
+    const statsSrc =
+      s.closed_stats_source === "bybit" ? "закрытые: Bybit PnL" : "закрытые: нет данных API";
+    const src =
+      s.data_source === "bybit" || s.data_source === "bybit_wallet"
+        ? `Bybit Demo · ${statsSrc}`
+        : "локальный журнал";
     const marginAvail = Number(s.wallet_available ?? s.wallet_equity ?? 0);
     const balText = marginAvail > 0 ? `$${num(marginAvail)}` : "—";
     el.innerHTML = `
