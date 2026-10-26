@@ -126,15 +126,14 @@ class PumpSignalsColumnTests(unittest.TestCase):
         st.last_price = 51.0
         self.assertFalse(should_remove_pump_signal(st, 100.0))
 
-    def test_lock_m15_peak_at_entry(self) -> None:
+    def test_lock_keeps_window_peak_not_15m(self) -> None:
         st = SymbolState("BTCUSDT")
         t0 = 1_700_000_000_000
-        bars = [
+        st.bars_htf["15"] = [
             Bar(t0, 1.0, 1.1, 0.9, 1.0, 100),
             Bar(t0 + 900_000, 1.0, 1.5, 0.95, 1.4, 200),
             Bar(t0 + 1_800_000, 1.4, 1.6, 1.3, 1.55, 150),
         ]
-        st.bars_htf["15"] = bars
         draft = EpisodeDraft(
             symbol="BTCUSDT",
             valley_price=0.9,
@@ -144,11 +143,11 @@ class PumpSignalsColumnTests(unittest.TestCase):
             growth_pct=50.0,
             pump_class="fast",
             volume_ratio=5.0,
-            source="bars_15m",
+            source="htf_60",
         )
         p, ts = lock_m15_peak_at_entry(st, draft, t0 + 1_900_000)
-        self.assertAlmostEqual(p, 1.6)
-        self.assertEqual(ts, t0 + 1_800_000)
+        self.assertAlmostEqual(p, 1.5)
+        self.assertEqual(ts, t0 + 900_000)
 
     def test_lock_prefers_episode_peak_over_local_15m(self) -> None:
         st = SymbolState("IRYSUSDT")
@@ -174,7 +173,7 @@ class PumpSignalsColumnTests(unittest.TestCase):
         p, _ = lock_m15_peak_at_entry(st, draft, t0)
         self.assertGreaterEqual(p, 0.53)
 
-    def test_ratchet_peak_on_new_15m_high(self) -> None:
+    def test_ratchet_ignores_15m_bounce(self) -> None:
         t0 = 1_700_000_000_000
         st = SymbolState("ANIMEUSDT")
         st.bars_htf["15"] = [
@@ -193,8 +192,31 @@ class PumpSignalsColumnTests(unittest.TestCase):
         )
         now = t0 + 1_800_000
         p, ts = _ratchet_fixed_peak(watch, st, now, 0.0036, t0)
+        self.assertAlmostEqual(p, 0.0036)
+        self.assertEqual(ts, t0)
+
+    def test_ratchet_on_new_1h_high(self) -> None:
+        t0 = 1_700_000_000_000
+        hour = 3_600_000
+        st = SymbolState("ANIMEUSDT")
+        st.bars_htf["60"] = [
+            Bar(t0, 0.003, 0.0036, 0.0029, 0.0035, 100),
+            Bar(t0 + hour, 0.0035, 0.0042, 0.0034, 0.0040, 200),
+        ]
+        watch = WatchRow(
+            board="pump_signals",
+            symbol="ANIMEUSDT",
+            entered_at=t0,
+            dismissed=False,
+            confirmed_stage=1,
+            pending_stage=None,
+            pending_since=None,
+            meta={"valley_ts": t0 - hour, "m15_peak_price": 0.0036, "m15_peak_ts": t0},
+        )
+        now = t0 + 2 * hour
+        p, ts = _ratchet_fixed_peak(watch, st, now, 0.0036, t0)
         self.assertAlmostEqual(p, 0.0042)
-        self.assertEqual(ts, t0 + 900_000)
+        self.assertEqual(ts, t0 + hour)
 
     def test_reversal_short_ok(self) -> None:
         rev = evaluate_reversal_short(

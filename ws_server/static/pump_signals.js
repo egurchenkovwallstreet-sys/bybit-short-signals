@@ -27,6 +27,10 @@
   let peakLine = null;
   let valleyLine = null;
   let entryLine = null;
+  let h4HighLine = null;
+  let h4LowLine = null;
+  let d1HighLine = null;
+  let d1LowLine = null;
   let chartLoadSeq = 0;
   let chartSymbol = "";
   const CHART_HEIGHT = 520;
@@ -192,18 +196,17 @@
 
   function clearPriceLines() {
     if (!chartSeries) return;
-    if (peakLine) {
-      chartSeries.removePriceLine(peakLine);
-      peakLine = null;
-    }
-    if (valleyLine) {
-      chartSeries.removePriceLine(valleyLine);
-      valleyLine = null;
-    }
-    if (entryLine) {
-      chartSeries.removePriceLine(entryLine);
-      entryLine = null;
-    }
+    const drop = (line) => {
+      if (line) chartSeries.removePriceLine(line);
+      return null;
+    };
+    peakLine = drop(peakLine);
+    valleyLine = drop(valleyLine);
+    entryLine = drop(entryLine);
+    h4HighLine = drop(h4HighLine);
+    h4LowLine = drop(h4LowLine);
+    d1HighLine = drop(d1HighLine);
+    d1LowLine = drop(d1LowLine);
   }
 
   function addPriceLine(price, title, color) {
@@ -225,7 +228,7 @@
     const title = document.getElementById("psig-chart-title");
     if (wrap) wrap.hidden = false;
     if (title) {
-      title.textContent = `${sig.symbol} · 15m · EMA50/100/200 · пик M15 зафиксирован`;
+      title.textContent = `${sig.symbol} · 15m · EMA50/100/200 · пик окна`;
     }
     const sameSymbol = chartSymbol === sig.symbol;
     const seq = ++chartLoadSeq;
@@ -240,8 +243,12 @@
     if (ema100Series) ema100Series.setData(emaLineData(bars, 100));
     if (ema200Series) ema200Series.setData(emaLineData(bars, 200));
     clearPriceLines();
-    peakLine = addPriceLine(sig.peak_price_m15, "пик M15", "#f0b429");
-    valleyLine = addPriceLine(sig.valley_price, "дно", "#3dd68c");
+    peakLine = addPriceLine(sig.peak_price_m15, "пик окна", "#f0b429");
+    valleyLine = addPriceLine(sig.valley_price, "дно окна", "#3dd68c");
+    h4HighLine = addPriceLine(sig.h4_high, "H4 30д хай", "#ff8a4c");
+    h4LowLine = addPriceLine(sig.h4_low, "H4 30д лой", "#6b8c7a");
+    d1HighLine = addPriceLine(sig.d1_high, "D1 30д хай", "#c084fc");
+    d1LowLine = addPriceLine(sig.d1_low, "D1 30д лой", "#64748b");
     if (sig.entry_price) entryLine = addPriceLine(sig.entry_price, "вход шорт", "#ff7b2c");
     chartSymbol = sig.symbol;
     if (!sameSymbol) {
@@ -260,8 +267,10 @@
     const dd = sig.drawdown_from_peak_pct;
     grid.appendChild(metric("Вход шорт", fmtNum(sig.entry_price || sig.last_price, 6), "psig-val-entry"));
     grid.appendChild(metric("Стоп-снятие (пик)", fmtNum(sig.invalidation_price || sig.peak_price_m15, 6)));
-    grid.appendChild(metric("Пик M15 (зафикс.)", sig.peak_msk || "—"));
+    grid.appendChild(metric("Пик окна", sig.peak_msk || "—"));
     grid.appendChild(metric("Цена пика", fmtNum(sig.peak_price_m15, 6)));
+    grid.appendChild(metric("H4 30д хай / лой", `${fmtNum(sig.h4_high, 6)} / ${fmtNum(sig.h4_low, 6)}`));
+    grid.appendChild(metric("D1 30д хай / лой", `${fmtNum(sig.d1_high, 6)} / ${fmtNum(sig.d1_low, 6)}`));
     grid.appendChild(metric("Дно / старт", sig.growth_start_msk || "—"));
     grid.appendChild(metric("Рост к пику", fmtPct(sig.growth_pct)));
     grid.appendChild(metric("С пика, мин", fmtNum(sig.since_peak_min, 0)));
@@ -338,7 +347,7 @@
       grid.appendChild(metric("OI 1ч", fmtPct(sig.oi_1h_pct)));
       grid.appendChild(metric("С пика", `${fmtNum(sig.since_peak_min, 0)} мин`));
     } else {
-      grid.appendChild(metric("Пик M15", sig.peak_msk || "—"));
+      grid.appendChild(metric("Пик окна", sig.peak_msk || "—"));
       grid.appendChild(metric("Старт (МСК)", sig.growth_start_msk || "—"));
       grid.appendChild(metric("Прошло", sig.elapsed_label || "—"));
       grid.appendChild(metric("Рост от дна", fmtPct(sig.growth_pct), growthClass));

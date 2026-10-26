@@ -22,7 +22,11 @@ from signal_engine.paper.detect import (
 from signal_engine.paper.tape import SymbolTape
 from signal_engine.pump_scan import _weakening_score
 from signal_engine.pump_phases import drawdown_from_peak_pct
-from signal_engine.pump_unified import detect_unified_episode, symbol_has_unified_pump
+from signal_engine.pump_unified import (
+    detect_unified_episode,
+    htf_30d_levels,
+    symbol_has_unified_pump,
+)
 from signal_engine.swing_highs import closed_bars
 from signal_engine.watch_store import WatchRow, WatchStore
 
@@ -53,7 +57,7 @@ _RANK_COLUMN = {
     4: COLUMN_PURPLE,
     5: COLUMN_SHORT,
 }
-SHORT_TRIGGERS = frozenset({"1h", "2h", "24h", "4h", "fast", "medium"})
+SHORT_TRIGGERS = frozenset({"1h", "2h", "24h", "4h", "fast", "medium", "long"})
 
 
 def should_remove_pump_signal(
@@ -245,22 +249,26 @@ def evaluate_reversal_short(
     }
 
 
-def _episode_high_7d(state: SymbolState, now_ms: int) -> tuple[float, int] | None:
-    """Max high за 7 сут (1h + 15m) — пик long-пампа, не локальный M15 от сегодня."""
-    lookback = int(config.PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS) * 24 * 3_600_000
+def _htf_high_since(
+    state: SymbolState,
+    valley_ts: int,
+    now_ms: int,
+) -> tuple[float, int] | None:
+    """Max high на 1h/4h после дна — продолжение того же окна, не локальный 15m."""
     best_p = 0.0
     best_t = 0
-    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
-    recent = [b for b in bars_1h if now_ms - lookback <= b.timestamp <= now_ms]
-    if recent:
-        peak_bar = max(recent, key=lambda b: b.high)
-        best_p, best_t = float(peak_bar.high), int(peak_bar.timestamp)
-    bars_15 = merged_15m(state)
-    recent15 = [b for b in bars_15 if now_ms - lookback <= b.timestamp <= now_ms]
-    if recent15:
-        peak15 = max(recent15, key=lambda b: b.high)
-        if float(peak15.high) > best_p:
-            best_p, best_t = float(peak15.high), int(peak15.timestamp)
+    for interval in ("60", "240"):
+        bars = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
+        window = [
+            b
+            for b in bars
+            if (valley_ts <= 0 or b.timestamp >= valley_ts) and b.timestamp <= now_ms
+        ]
+        if not window:
+            continue
+        peak_bar = max(window, key=lambda b: b.high)
+        if float(peak_bar.high) > best_p:
+            best_p, best_t = float(peak_bar.high), int(peak_bar.timestamp)
     if best_p <= 0:
         return None
     return best_p, best_t
@@ -271,26 +279,13 @@ def lock_m15_peak_at_entry(
     draft: Any,
     now_ms: int,
 ) -> tuple[float, int]:
-    """Пик эпизода: max(7d/1h, unified draft, 15m от впадины) — не локальный отскок после обвала."""
+    """Пик = хай окна детекта. Поднять только если 1h/4h после дна сделали новый хай."""
     ep_p = float(draft.peak_price or 0)
     ep_t = int(draft.peak_ts or 0)
-    hi_7d = _episode_high_7d(state, now_ms)
-    if hi_7d and hi_7d[0] > ep_p:
-        ep_p, ep_t = hi_7d
-
-    bars = merged_15m(state)
-    valley_ts = int(draft.valley_ts)
-    m15_p, m15_t = ep_p, ep_t
-    if bars:
-        window = [b for b in bars if valley_ts <= b.timestamp <= now_ms]
-        if not window:
-            window = [b for b in bars if b.timestamp <= now_ms][-48:]
-        if window:
-            peak_bar = max(window, key=lambda b: b.high)
-            m15_p, m15_t = float(peak_bar.high), int(peak_bar.timestamp)
-    if ep_p >= m15_p:
-        return ep_p, ep_t
-    return m15_p, m15_t
+    hi = _htf_high_since(state, int(draft.valley_ts or 0), now_ms)
+    if hi and hi[0] > ep_p:
+        return hi
+    return ep_p, ep_t
 
 
 def _reconcile_peak_with_episode(
@@ -300,14 +295,16 @@ def _reconcile_peak_with_episode(
     fixed_p: float,
     fixed_ts: int,
 ) -> tuple[float, int]:
-    """Поднять зафиксированный пик, если 7d-high выше (legacy watch после обвала)."""
-    hi = _episode_high_7d(state, now_ms)
+    """Поднять пик, если 1h/4h после дна выше зафиксированного (тот же эпизод)."""
+    valley_ts = int(watch.meta.get("valley_ts") or 0)
+    hi = _htf_high_since(state, valley_ts, now_ms)
     if hi is None:
         return fixed_p, fixed_ts
     h_p, h_t = hi
     if h_p > fixed_p * 1.02:
         watch.meta["m15_peak_price"] = h_p
         watch.meta["m15_peak_ts"] = h_t
+        watch.meta["peak_price"] = h_p
         return h_p, h_t
     return fixed_p, fixed_ts
 
@@ -319,32 +316,14 @@ def _ratchet_fixed_peak(
     fixed_p: float,
     fixed_ts: int,
 ) -> tuple[float, int]:
-    """Поднять пик watch, если в том же эпизоде появился более высокий 15m/1m хай."""
+    """Поднять пик watch, если 1h/4h после дна сделали новый хай. 15m не поднимает."""
     valley_ts = int(watch.meta.get("valley_ts") or 0)
-    best_p, best_t = fixed_p, fixed_ts
-    for bar in merged_15m(state):
-        if valley_ts > 0 and bar.timestamp < valley_ts:
-            continue
-        if bar.timestamp > now_ms:
-            continue
-        if float(bar.high) > best_p + 1e-12:
-            best_p, best_t = float(bar.high), int(bar.timestamp)
-    last_closed_15 = 0
-    for bar in merged_15m(state):
-        if bar.timestamp <= now_ms:
-            last_closed_15 = max(last_closed_15, int(bar.timestamp))
-    for bar in state.bars_1m:
-        if bar.timestamp <= last_closed_15:
-            continue
-        if valley_ts > 0 and bar.timestamp < valley_ts:
-            continue
-        if float(bar.high) > best_p + 1e-12:
-            best_p, best_t = float(bar.high), int(bar.timestamp)
-    if best_p > fixed_p + 1e-12:
-        watch.meta["m15_peak_price"] = best_p
-        watch.meta["m15_peak_ts"] = best_t
-        watch.meta["peak_price"] = best_p
-        return best_p, best_t
+    hi = _htf_high_since(state, valley_ts, now_ms)
+    if hi and hi[0] > fixed_p + 1e-12:
+        watch.meta["m15_peak_price"] = hi[0]
+        watch.meta["m15_peak_ts"] = hi[1]
+        watch.meta["peak_price"] = hi[0]
+        return hi
     return fixed_p, fixed_ts
 
 
@@ -392,16 +371,13 @@ def _ensure_fixed_peak(
     fixed = _watch_fixed_peak(watch)
     if fixed is not None:
         return fixed
-    bars = merged_15m(state)
-    valley_ts = int(watch.meta.get("valley_ts") or 0)
     fallback_p = float(watch.meta.get("peak_price") or 0)
-    if bars and valley_ts > 0:
-        window = [b for b in bars if valley_ts <= b.timestamp <= now_ms]
-        if window:
-            pb = max(window, key=lambda b: b.high)
-            watch.meta["m15_peak_price"] = float(pb.high)
-            watch.meta["m15_peak_ts"] = int(pb.timestamp)
-            return float(pb.high), int(pb.timestamp)
+    valley_ts = int(watch.meta.get("valley_ts") or 0)
+    hi = _htf_high_since(state, valley_ts, now_ms)
+    if hi:
+        watch.meta["m15_peak_price"] = hi[0]
+        watch.meta["m15_peak_ts"] = hi[1]
+        return hi
     if fallback_p > 0:
         ts = int(watch.meta.get("m15_peak_ts") or watch.entered_at or now_ms)
         watch.meta["m15_peak_price"] = fallback_p
@@ -586,6 +562,10 @@ class PumpSignalCard:
     short_liq_faded: bool = False
     book_imbalance: float | None = None
     reversal_ok: bool = False
+    h4_high: float | None = None
+    h4_low: float | None = None
+    d1_high: float | None = None
+    d1_low: float | None = None
 
     def to_data(self) -> dict[str, Any]:
         return {
@@ -626,6 +606,10 @@ class PumpSignalCard:
             "reversal_ok": self.reversal_ok,
             "updated_at": self.updated_at,
             "turnover_24h_usdt": self.turnover_24h_usdt,
+            "h4_high": self.h4_high,
+            "h4_low": self.h4_low,
+            "d1_high": self.d1_high,
+            "d1_low": self.d1_low,
         }
 
 
@@ -686,6 +670,7 @@ def build_pump_signals_board(
             >= config.PUMP_SIGNALS_REMOVE_DRAWDOWN_PCT
         ):
             continue
+        levels = htf_30d_levels(state, now_ms)
         row = WatchRow(
             board=BOARD_ID,
             symbol=symbol,
@@ -704,6 +689,7 @@ def build_pump_signals_board(
                 "pump_class": draft.pump_class,
                 "trigger": draft.pump_class,
                 "column": COLUMN_RED,
+                **levels,
             },
         )
         watches.upsert(row)
@@ -815,6 +801,7 @@ def build_pump_signals_board(
             raw_vr = metrics.get("volume_ratio_20m")
             if raw_vr is not None:
                 vol_ratio = float(raw_vr)
+        levels = htf_30d_levels(state, now_ms)
         cards.append(
             PumpSignalCard(
                 symbol=symbol,
@@ -853,6 +840,10 @@ def build_pump_signals_board(
                 short_liq_faded=bool(reading.liquidations_faded),
                 book_imbalance=book_imbalance_1pct(state),
                 reversal_ok=bool(rev.get("ok")),
+                h4_high=levels.get("h4_high"),
+                h4_low=levels.get("h4_low"),
+                d1_high=levels.get("d1_high"),
+                d1_low=levels.get("d1_low"),
             )
         )
 

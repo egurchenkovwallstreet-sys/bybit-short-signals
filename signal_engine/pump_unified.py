@@ -1,18 +1,19 @@
-"""Единый детект пампа для лаборатории и всех досок (скан, 2×, поиск).
+"""Детект пампа: 1ч / 4ч / сутки на часовых и 4-часовых свечах.
 
-Все пороги — PUMP_UNIFIED_* в config.py. Лаборатория и watch-доски вызывают
-detect_unified_episodes() для paper/кандидатов (UI «Анализ пампа» снят).
+Короткий: +20% за 1ч и объём ≥×3 к среднему.
+Средний: +40% за 4ч и объём ≥×5.
+Длинный: +60% за сутки и объём ≥×8.
+На H4 и D1 — экстремумы за 30 дней (уровни, не пик пампа).
+
+Пороги — PUMP_UNIFIED_* в config.py. Paper find_pump не читает этот модуль.
 """
-
 from __future__ import annotations
 
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import config
-from signal_engine.pump_history import history_pump_metrics
-from signal_engine.paper.detect import merged_15m
-from signal_engine.pump_phases import drawdown_from_peak_pct, pump_class_from_duration
+from signal_engine.pump_phases import drawdown_from_peak_pct
 from signal_engine.state import Bar, SymbolState
 from signal_engine.swing_highs import closed_bars
 
@@ -25,8 +26,10 @@ def price_24h_pct(raw: float | None) -> float | None:
         return raw * 100.0
     return raw
 
+
 HOUR_MS = 3_600_000
 DAY_MS = 24 * HOUR_MS
+_TF_MS = {"60": HOUR_MS, "240": 4 * HOUR_MS, "D": DAY_MS}
 
 
 @dataclass
@@ -40,6 +43,15 @@ class EpisodeDraft:
     pump_class: str
     volume_ratio: float | None
     source: str
+    h4_high: float | None = None
+    h4_high_ts: int | None = None
+    h4_low: float | None = None
+    h4_low_ts: int | None = None
+    d1_high: float | None = None
+    d1_high_ts: int | None = None
+    d1_low: float | None = None
+    d1_low_ts: int | None = None
+    extra: dict = field(default_factory=dict)
 
 
 def meets_unified_turnover(state: SymbolState) -> bool:
@@ -51,10 +63,10 @@ def meets_unified_turnover(state: SymbolState) -> bool:
 
 def window_ms(pump_class: str) -> int:
     if pump_class == "medium":
-        return config.PUMP_UNIFIED_WINDOW_DAYS_MEDIUM * DAY_MS
+        return int(config.PUMP_UNIFIED_WINDOW_HOURS_MEDIUM) * HOUR_MS
     if pump_class == "long":
-        return config.PUMP_UNIFIED_MAX_AGE_DAYS * DAY_MS
-    return config.PUMP_UNIFIED_WINDOW_HOURS_FAST * HOUR_MS
+        return int(config.PUMP_UNIFIED_WINDOW_HOURS_LONG) * HOUR_MS
+    return int(config.PUMP_UNIFIED_WINDOW_HOURS_FAST) * HOUR_MS
 
 
 def min_growth_pct(pump_class: str) -> float:
@@ -78,34 +90,12 @@ def max_drawdown_pct() -> float:
 
 
 def should_remove_after_peak_drawdown(state: SymbolState | None, peak_price: float) -> bool:
-    """Убрать карточку: текущая цена отстаёт от пика пампа не меньше чем на порог %."""
     if state is None or peak_price <= 0:
         return False
     price = state.last_price
     if price is None or price <= 0:
         return False
     return drawdown_from_peak_pct(price, peak_price) >= max_drawdown_pct()
-
-
-def volume_ratio_min_to_peak(
-    bars: list[Bar],
-    valley_ts: int,
-    peak_ts: int,
-    window_start_ms: int,
-) -> float | None:
-    duration = peak_ts - valley_ts
-    if duration <= 0:
-        return None
-    base_start = valley_ts - duration
-    if base_start < window_start_ms:
-        return None
-    leg_vol = sum(b.volume for b in bars if valley_ts <= b.timestamp <= peak_ts and b.volume > 0)
-    if leg_vol <= 0:
-        return None
-    base_vol = sum(b.volume for b in bars if base_start <= b.timestamp < valley_ts and b.volume > 0)
-    if base_vol <= 0:
-        return None
-    return leg_vol / base_vol
 
 
 def _median_volume(bars: list[Bar]) -> float | None:
@@ -116,312 +106,229 @@ def _median_volume(bars: list[Bar]) -> float | None:
 
 
 def volume_ratio_median_24h_48h(state: SymbolState, now_ms: int) -> float | None:
-    """Медиана объёма 24h / медиана 48h до этого (1h бары, иначе 15m)."""
-    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
-    if len(bars_1h) >= 72:
-        last_24 = bars_1h[-24:]
-        prev_48 = bars_1h[-72:-24]
-        med_leg = _median_volume(last_24)
-        med_pre = _median_volume(prev_48)
-        if med_leg and med_pre and med_pre > 0:
-            return med_leg / med_pre
-    bars_15 = merged_15m(state)
-    closed = [b for b in bars_15 if b.timestamp <= now_ms]
-    if len(closed) < 96 + 48:
+    """Совместимость: медиана объёма 24h / медиана 48h до этого (1h)."""
+    bars_1h = _tf_bars(state, "60", now_ms)
+    if len(bars_1h) < 72:
         return None
-    last_96 = closed[-96:]
-    prev_192 = closed[-96 - 192 : -96]
-    med_leg = _median_volume(last_96)
-    med_pre = _median_volume(prev_192)
+    med_leg = _median_volume(bars_1h[-24:])
+    med_pre = _median_volume(bars_1h[-72:-24])
     if med_leg and med_pre and med_pre > 0:
         return med_leg / med_pre
     return None
 
 
-def _price_trend_ok(state: SymbolState, bars_15: list[Bar], now_ms: int) -> bool:
-    """Не боковик: close выше, чем 72h назад, или ≥3 из 6 последних 15m бычьи."""
-    closed = [b for b in bars_15 if b.timestamp <= now_ms]
-    if len(closed) < 8:
-        return True
-    last = closed[-1]
-    idx_72h = len(closed) - 1 - 288
-    if idx_72h >= 0 and last.close >= closed[idx_72h].close:
-        return True
-    last6 = closed[-6:]
-    green = sum(1 for b in last6 if b.close > b.open)
-    return green >= 3
-
-
-def _draft_valley_lookback(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
-    """Основной путь: дно за 7 сут → пик, рост и объём по правилам recall ~90%."""
-    lookback = int(config.PUMP_UNIFIED_VALLEY_LOOKBACK_DAYS) * DAY_MS
-    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
-    bars_15 = merged_15m(state)
-    if len(bars_1h) >= 48:
-        recent = [b for b in bars_1h if now_ms - lookback <= b.timestamp <= now_ms]
-        source = "valley_7d_1h"
-    elif len(bars_15) >= 96:
-        recent = [b for b in bars_15 if now_ms - lookback <= b.timestamp <= now_ms]
-        source = "valley_7d_15m"
-    else:
-        return None
-    if len(recent) < 4:
-        return None
-    valley_bar = min(recent, key=lambda b: b.low)
-    after = [b for b in recent if b.timestamp >= valley_bar.timestamp]
-    if len(after) < 2:
-        return None
-    peak_bar = max(after, key=lambda b: b.high)
-    pump_class = _class_from_duration(valley_bar.timestamp, peak_bar.timestamp)
-    growth = (peak_bar.high / valley_bar.low - 1.0) * 100.0
-    if growth < min_growth_pct(pump_class):
-        return None
-    vol_ratio = volume_ratio_median_24h_48h(state, now_ms)
-    if vol_ratio is None:
-        vol_ratio = volume_ratio_min_to_peak(
-            bars_15,
-            valley_bar.timestamp,
-            peak_bar.timestamp,
-            now_ms - lookback,
+def _aggregate(src: list[Bar], out_ms: int) -> list[Bar]:
+    buckets: dict[int, Bar] = {}
+    for bar in src:
+        t = (int(bar.timestamp) // out_ms) * out_ms
+        prev = buckets.get(t)
+        if prev is None:
+            buckets[t] = Bar(t, bar.open, bar.high, bar.low, bar.close, bar.volume)
+            continue
+        buckets[t] = Bar(
+            t,
+            prev.open,
+            max(prev.high, bar.high),
+            min(prev.low, bar.low),
+            bar.close,
+            prev.volume + bar.volume,
         )
-    if not _volume_ok(
-        pump_class,
-        vol_ratio,
-        relaxed=True,
-        allow_missing_volume=False,
-    ):
-        return None
-    if not _price_trend_ok(state, bars_15, now_ms):
-        return None
-    price = state.last_price or peak_bar.high
-    if drawdown_from_peak_pct(price or 0, peak_bar.high) >= max_drawdown_pct():
-        return None
-    return EpisodeDraft(
-        symbol=state.symbol,
-        valley_price=valley_bar.low,
-        valley_ts=valley_bar.timestamp,
-        peak_price=peak_bar.high,
-        peak_ts=peak_bar.timestamp,
-        growth_pct=growth,
-        pump_class=pump_class,
-        volume_ratio=vol_ratio,
-        source=source,
-    )
+    return [buckets[k] for k in sorted(buckets)]
 
 
-def _class_from_duration(valley_ts: int, peak_ts: int) -> str:
-    return pump_class_from_duration(max(0, peak_ts - valley_ts))
+def _tf_bars(state: SymbolState, interval: str, now_ms: int) -> list[Bar]:
+    native = closed_bars(state.bars_htf.get(interval) or [], interval, now_ms)
+    if interval == "60":
+        return native
+    if len(native) >= 2:
+        return native
+    bars_1h = closed_bars(state.bars_htf.get("60") or [], "60", now_ms)
+    if interval == "240":
+        if len(bars_1h) >= 8:
+            return _aggregate(bars_1h, 4 * HOUR_MS)
+        return native
+    if len(native) >= 1:
+        return native
+    bars_4h = _tf_bars(state, "240", now_ms)
+    if len(bars_4h) >= 8:
+        return _aggregate(bars_4h, DAY_MS)
+    if len(bars_1h) >= 24:
+        return _aggregate(bars_1h, DAY_MS)
+    return native
 
 
-def _volume_ok(
-    pump_class: str,
-    vol_ratio: float | None,
-    *,
-    relaxed: bool,
-    allow_missing_volume: bool = False,
-) -> bool:
-    need = min_volume_ratio(pump_class)
-    if vol_ratio is not None and vol_ratio >= need:
-        return True
-    if relaxed and vol_ratio is not None and vol_ratio >= config.PUMP_UNIFIED_VOLUME_RELAXED:
-        return True
-    if allow_missing_volume and vol_ratio is None:
-        return True
-    if config.PUMP_UNIFIED_ALLOW_WITHOUT_VOLUME:
-        return True
-    return False
-
-
-def _draft_from_min_max(
-    state: SymbolState,
+def htf_extremes(
+    bars: list[Bar],
     now_ms: int,
-    pump_class: str,
-    valley_bar: Bar,
-    peak_bar: Bar,
+    days: int,
+) -> tuple[float, int, float, int] | None:
+    lo_ts = now_ms - days * DAY_MS
+    window = [b for b in bars if lo_ts <= b.timestamp <= now_ms]
+    if not window:
+        return None
+    hi = max(window, key=lambda b: b.high)
+    lo = min(window, key=lambda b: b.low)
+    if hi.high <= 0 or lo.low <= 0:
+        return None
+    return float(hi.high), int(hi.timestamp), float(lo.low), int(lo.timestamp)
+
+
+def attach_30d_levels(state: SymbolState, now_ms: int, draft: EpisodeDraft) -> EpisodeDraft:
+    days = int(config.PUMP_UNIFIED_LEVEL_LOOKBACK_DAYS)
+    h4 = htf_extremes(_tf_bars(state, "240", now_ms), now_ms, days)
+    if h4:
+        draft.h4_high, draft.h4_high_ts, draft.h4_low, draft.h4_low_ts = h4
+    d1 = htf_extremes(_tf_bars(state, "D", now_ms), now_ms, days)
+    if d1:
+        draft.d1_high, draft.d1_high_ts, draft.d1_low, draft.d1_low_ts = d1
+    return draft
+
+
+def _scan_windows(
+    bars: list[Bar],
     *,
+    window_bars: int,
+    min_growth: float,
+    min_vol: float,
+    avg_bars: int,
+    now_ms: int,
+    max_age_ms: int,
+    pump_class: str,
     source: str,
-    relaxed_volume: bool,
-    allow_missing_volume: bool = False,
-) -> EpisodeDraft | None:
-    peak = peak_bar.high
-    valley = valley_bar.low
-    if peak <= 0 or valley <= 0 or peak_bar.timestamp <= valley_bar.timestamp:
-        return None
-    growth = (peak / valley - 1.0) * 100.0
-    if growth < min_growth_pct(pump_class):
-        return None
-    bars = merged_15m(state)
-    window_start = now_ms - window_ms(pump_class)
-    vol_ratio = volume_ratio_min_to_peak(bars, valley_bar.timestamp, peak_bar.timestamp, window_start)
-    if not _volume_ok(
-        pump_class,
-        vol_ratio,
-        relaxed=relaxed_volume,
-        allow_missing_volume=allow_missing_volume,
-    ):
-        return None
-    price = state.last_price or (bars[-1].close if bars else peak)
-    if drawdown_from_peak_pct(price or 0, peak) >= max_drawdown_pct():
-        return None
-    return EpisodeDraft(
-        symbol=state.symbol,
-        valley_price=valley,
-        valley_ts=valley_bar.timestamp,
-        peak_price=peak,
-        peak_ts=peak_bar.timestamp,
-        growth_pct=growth,
-        pump_class=pump_class,
-        volume_ratio=vol_ratio,
-        source=source,
-    )
-
-
-def _drafts_15m_windows(state: SymbolState, now_ms: int) -> list[EpisodeDraft]:
-    bars = merged_15m(state)
-    if len(bars) < 8:
+    symbol: str,
+    last_price: float | None,
+) -> list[EpisodeDraft]:
+    if window_bars < 1 or len(bars) < avg_bars + window_bars:
         return []
     out: list[EpisodeDraft] = []
-    for pump_class in ("fast", "medium", "long"):
-        win = window_ms(pump_class)
-        recent = [b for b in bars if b.timestamp >= now_ms - win and b.timestamp <= now_ms]
-        if len(recent) < 4:
+    last_i = len(bars) - window_bars
+    for i in range(avg_bars, last_i + 1):
+        window = bars[i : i + window_bars]
+        peak_bar = max(window, key=lambda b: b.high)
+        valley_bar = min(window, key=lambda b: b.low)
+        if peak_bar.high <= 0 or valley_bar.low <= 0:
             continue
-        valley_bar = min(recent, key=lambda b: b.low)
-        after = [b for b in recent if b.timestamp >= valley_bar.timestamp]
-        if len(after) < 2:
+        if now_ms - int(peak_bar.timestamp) > max_age_ms:
             continue
-        peak_bar = max(after, key=lambda b: b.high)
-        draft = _draft_from_min_max(
-            state,
-            now_ms,
-            pump_class,
-            valley_bar,
-            peak_bar,
-            source="bars_15m",
-            relaxed_volume=False,
+        growth = (peak_bar.high / valley_bar.low - 1.0) * 100.0
+        if growth < min_growth:
+            continue
+        prior = bars[i - avg_bars : i]
+        med = _median_volume(prior)
+        win_vol = sum(float(b.volume) for b in window if b.volume and b.volume > 0)
+        if not med or med <= 0 or win_vol <= 0:
+            continue
+        vol_x = (win_vol / window_bars) / med
+        if vol_x < min_vol:
+            continue
+        price = last_price or peak_bar.high
+        if drawdown_from_peak_pct(price, peak_bar.high) >= max_drawdown_pct():
+            continue
+        out.append(
+            EpisodeDraft(
+                symbol=symbol,
+                valley_price=float(valley_bar.low),
+                valley_ts=int(valley_bar.timestamp),
+                peak_price=float(peak_bar.high),
+                peak_ts=int(peak_bar.timestamp),
+                growth_pct=growth,
+                pump_class=pump_class,
+                volume_ratio=round(vol_x, 3),
+                source=source,
+            )
         )
-        if draft is not None:
-            out.append(draft)
     return out
 
 
-def _draft_24h_ticker(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
-    pct = price_24h_pct(state.price_24h_change)
-    if pct is None or pct < config.PUMP_UNIFIED_MIN_24H_PCT:
-        return None
-    bars = merged_15m(state)
-    window = [b for b in bars if b.timestamp >= now_ms - DAY_MS]
-    if len(window) < 4:
-        return None
-    valley_bar = min(window, key=lambda b: b.low)
-    after = [b for b in window if b.timestamp >= valley_bar.timestamp]
-    if len(after) < 2:
-        return None
-    peak_bar = max(after, key=lambda b: b.high)
-    pump_class = _class_from_duration(valley_bar.timestamp, peak_bar.timestamp)
-    if pump_class == "fast" and pct >= config.PUMP_UNIFIED_GROWTH_MIN_MEDIUM:
-        pump_class = "medium"
-    growth_bars = (peak_bar.high / valley_bar.low - 1.0) * 100.0
-    if growth_bars < config.PUMP_UNIFIED_MIN_24H_PCT:
-        return None
-    pump_class = "medium"
-    bars = merged_15m(state)
-    vol_ratio = volume_ratio_min_to_peak(bars, valley_bar.timestamp, peak_bar.timestamp, now_ms - DAY_MS)
-    price = state.last_price or peak_bar.high
-    if drawdown_from_peak_pct(price or 0, peak_bar.high) >= max_drawdown_pct():
-        return None
-    return EpisodeDraft(
-        symbol=state.symbol,
-        valley_price=valley_bar.low,
-        valley_ts=valley_bar.timestamp,
-        peak_price=peak_bar.high,
-        peak_ts=peak_bar.timestamp,
-        growth_pct=growth_bars,
-        pump_class=pump_class,
-        volume_ratio=vol_ratio,
-        source="ticker_24h",
-    )
+def _class_specs() -> list[tuple[str, str, int, int, int]]:
+    """(class, interval, window_bars, avg_bars, max_age_hours)."""
+    return [
+        (
+            "fast",
+            "60",
+            1,
+            int(config.PUMP_UNIFIED_VOL_AVG_BARS_1H),
+            48,
+        ),
+        (
+            "medium",
+            "240",
+            1,
+            int(config.PUMP_UNIFIED_VOL_AVG_BARS_4H),
+            120,
+        ),
+        (
+            "long",
+            "D",
+            1,
+            int(config.PUMP_UNIFIED_VOL_AVG_BARS_D),
+            168,
+        ),
+    ]
 
 
-def _draft_from_strategy(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
-    from signal_engine.pump_strategy import detect_best_pump
+def detect_unified_episodes(state: SymbolState, now_ms: int) -> list[EpisodeDraft]:
+    if not meets_unified_turnover(state):
+        return []
+    collected: list[EpisodeDraft] = []
+    bars_1h = _tf_bars(state, "60", now_ms)
+    last = state.last_price
 
-    match = detect_best_pump(state, now_ms)
-    if match is None:
-        return None
-    pump_class = "fast" if match.kind == "short" else "long"
-    duration = match.peak_ts - match.valley_ts
-    if match.kind == "short":
-        pump_class = _class_from_duration(match.valley_ts, match.peak_ts)
-    elif duration <= config.PUMP_UNIFIED_MEDIUM_MAX_MS:
-        pump_class = "medium"
-    bars = merged_15m(state)
-    window_start = now_ms - window_ms(pump_class)
-    vol_ratio = volume_ratio_min_to_peak(bars, match.valley_ts, match.peak_ts, window_start)
-    growth = match.growth_pct
-    min_g = min_growth_pct(pump_class)
-    if growth < min_g:
-        if match.kind == "long" and growth >= (config.PUMP_UNIFIED_MIN_MULTIPLIER - 1.0) * 100.0:
-            pump_class = "long"
-            min_g = (config.PUMP_UNIFIED_MIN_MULTIPLIER - 1.0) * 100.0
-        if growth < min_g:
-            return None
-    if not _volume_ok(pump_class, vol_ratio, relaxed=True):
-        return None
-    price = state.last_price or match.peak_price
-    if drawdown_from_peak_pct(price or 0, match.peak_price) >= max_drawdown_pct():
-        return None
-    return EpisodeDraft(
-        symbol=state.symbol,
-        valley_price=match.valley_price,
-        valley_ts=match.valley_ts,
-        peak_price=match.peak_price,
-        peak_ts=match.peak_ts,
-        growth_pct=growth,
-        pump_class=pump_class,
-        volume_ratio=vol_ratio,
-        source="pump_strategy",
-    )
+    for pump_class, interval, win_bars, avg_bars, max_age_h in _class_specs():
+        bars = _tf_bars(state, interval, now_ms)
+        collected.extend(
+            _scan_windows(
+                bars,
+                window_bars=win_bars,
+                min_growth=min_growth_pct(pump_class),
+                min_vol=min_volume_ratio(pump_class),
+                avg_bars=avg_bars,
+                now_ms=now_ms,
+                max_age_ms=max_age_h * HOUR_MS,
+                pump_class=pump_class,
+                source=f"htf_{interval}",
+                symbol=state.symbol,
+                last_price=last,
+            )
+        )
 
+    if bars_1h:
+        collected.extend(
+            _scan_windows(
+                bars_1h,
+                window_bars=4,
+                min_growth=min_growth_pct("medium"),
+                min_vol=min_volume_ratio("medium"),
+                avg_bars=int(config.PUMP_UNIFIED_VOL_AVG_BARS_1H),
+                now_ms=now_ms,
+                max_age_ms=120 * HOUR_MS,
+                pump_class="medium",
+                source="htf_60x4",
+                symbol=state.symbol,
+                last_price=last,
+            )
+        )
+        collected.extend(
+            _scan_windows(
+                bars_1h,
+                window_bars=24,
+                min_growth=min_growth_pct("long"),
+                min_vol=min_volume_ratio("long"),
+                avg_bars=int(config.PUMP_UNIFIED_VOL_AVG_BARS_1H),
+                now_ms=now_ms,
+                max_age_ms=168 * HOUR_MS,
+                pump_class="long",
+                source="htf_60x24",
+                symbol=state.symbol,
+                last_price=last,
+            )
+        )
 
-def _draft_from_history(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
-    hist = history_pump_metrics(state, now_ms)
-    if hist is None or hist.peak_mult < config.PUMP_UNIFIED_MIN_MULTIPLIER:
-        return None
-    growth = (hist.peak_mult - 1.0) * 100.0
-    pump_class = "long"
-    interval = hist.interval
-    bars = state.bars_htf.get(interval) or []
-    window = [b for b in bars if b.timestamp >= hist.valley_ts]
-    if len(window) < 2:
-        window = bars[-10:]
-    valley_bar = min(window, key=lambda b: b.low) if window else None
-    peak_bar = max(window, key=lambda b: b.high) if window else None
-    if valley_bar is None or peak_bar is None:
-        return None
-    bars_15 = merged_15m(state)
-    window_start = now_ms - window_ms("long")
-    vol_ratio = volume_ratio_min_to_peak(bars_15, valley_bar.timestamp, peak_bar.timestamp, window_start)
-    if growth < min_growth_pct("long") and hist.peak_mult >= config.PUMP_UNIFIED_MIN_MULTIPLIER:
-        pass
-    elif growth < min_growth_pct("long"):
-        return None
-    if not _volume_ok("long", vol_ratio, relaxed=True):
-        return None
-    price = state.last_price or hist.peak_high
-    if drawdown_from_peak_pct(price or 0, hist.peak_high) >= max_drawdown_pct():
-        return None
-    return EpisodeDraft(
-        symbol=state.symbol,
-        valley_price=hist.min_low,
-        valley_ts=hist.valley_ts,
-        peak_price=hist.peak_high,
-        peak_ts=peak_bar.timestamp,
-        growth_pct=max(growth, (hist.peak_high / hist.min_low - 1.0) * 100.0),
-        pump_class=pump_class,
-        volume_ratio=vol_ratio,
-        source="history_htf",
-    )
+    best = _dedupe(collected)
+    for draft in best:
+        _stamp_peak_on_1h(bars_1h, draft, now_ms)
+        attach_30d_levels(state, now_ms, draft)
+    return best
 
 
 def _dedupe(drafts: list[EpisodeDraft]) -> list[EpisodeDraft]:
@@ -434,32 +341,56 @@ def _dedupe(drafts: list[EpisodeDraft]) -> list[EpisodeDraft]:
     return list(best.values())
 
 
-def detect_unified_episodes(state: SymbolState, now_ms: int) -> list[EpisodeDraft]:
-    """Все эпизоды пампа по единым правилам (объединение путей детекта)."""
-    if not meets_unified_turnover(state):
-        return []
-    collected: list[EpisodeDraft] = []
-    d7 = _draft_valley_lookback(state, now_ms)
-    if d7 is not None:
-        collected.append(d7)
-    collected.extend(_drafts_15m_windows(state, now_ms))
-    d24 = _draft_24h_ticker(state, now_ms)
-    if d24 is not None:
-        collected.append(d24)
-    ds = _draft_from_strategy(state, now_ms)
-    if ds is not None:
-        collected.append(ds)
-    dh = _draft_from_history(state, now_ms)
-    if dh is not None:
-        collected.append(dh)
-    return _dedupe(collected)
+def _stamp_peak_on_1h(bars_1h: list[Bar], draft: EpisodeDraft, now_ms: int) -> None:
+    """Время пика — часовая свеча, которая сделала хай, не open дневной/4h."""
+    if not bars_1h or draft.peak_price <= 0:
+        return
+    lo = int(draft.valley_ts or 0)
+    hits = [
+        b
+        for b in bars_1h
+        if (lo <= 0 or b.timestamp >= lo)
+        and b.timestamp <= now_ms
+        and float(b.high) + 1e-12 >= float(draft.peak_price) * 0.999
+    ]
+    if not hits:
+        return
+    best = max(hits, key=lambda b: int(b.timestamp))
+    draft.peak_ts = int(best.timestamp)
+    if float(best.high) > draft.peak_price:
+        draft.peak_price = float(best.high)
+
+
+def htf_30d_levels(state: SymbolState, now_ms: int) -> dict:
+    draft = EpisodeDraft(
+        symbol=state.symbol,
+        valley_price=0.0,
+        valley_ts=0,
+        peak_price=0.0,
+        peak_ts=0,
+        growth_pct=0.0,
+        pump_class="fast",
+        volume_ratio=None,
+        source="levels",
+    )
+    attach_30d_levels(state, now_ms, draft)
+    return {
+        "h4_high": draft.h4_high,
+        "h4_high_ts": draft.h4_high_ts,
+        "h4_low": draft.h4_low,
+        "h4_low_ts": draft.h4_low_ts,
+        "d1_high": draft.d1_high,
+        "d1_high_ts": draft.d1_high_ts,
+        "d1_low": draft.d1_low,
+        "d1_low_ts": draft.d1_low_ts,
+    }
 
 
 def detect_unified_episode(state: SymbolState, now_ms: int) -> EpisodeDraft | None:
     drafts = detect_unified_episodes(state, now_ms)
     if not drafts:
         return None
-    return max(drafts, key=lambda d: d.growth_pct)
+    return max(drafts, key=lambda d: (int(d.peak_ts), d.growth_pct))
 
 
 def symbol_has_unified_pump(state: SymbolState, now_ms: int) -> bool:
